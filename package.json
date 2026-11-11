@@ -1,0 +1,12 @@
+{
+  "name": "pp-api-mobile",
+  "private": true,
+  "scripts": {
+    "preview": "node preview.mjs",
+    "test": "node tests/ui-smoke.mjs && node tests/chat-flows.mjs && node tests/accounts.mjs && node tests/updates.mjs",
+    "test:live": "node tests/live-readonly.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
