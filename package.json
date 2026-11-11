@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "preview": "node preview.mjs",
-    "test": "node tests/ui-smoke.mjs && node tests/chat-flows.mjs && node tests/accounts.mjs && node tests/updates.mjs && node tests/payment-usage.mjs && node tests/daycard-balance.mjs && node tests/navigation-cache.mjs && node tests/selectors-keys-status.mjs && node tests/redeem-chat-rich.mjs && node tests/themes-scroll.mjs",
+    "test": "node tests/ui-smoke.mjs && node tests/chat-flows.mjs && node tests/accounts.mjs && node tests/updates.mjs && node tests/payment-usage.mjs && node tests/daycard-balance.mjs && node tests/navigation-cache.mjs && node tests/selectors-keys-status.mjs && node tests/redeem-chat-rich.mjs && node tests/themes-scroll.mjs && node tests/live-refresh.mjs",
     "test:live": "node tests/live-readonly.mjs"
   },
   "devDependencies": {
