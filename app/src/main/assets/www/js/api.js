@@ -10,6 +10,7 @@
   function browserUrl(url) {
     if (global.location.hostname !== '127.0.0.1') return url;
     if (url === ORIGIN + '/api/public/channel-status') return '/__proxy/site/api/public/channel-status';
+    if (url === ORIGIN + '/api/daycard/info' || url === ORIGIN + '/api/daycard/buy') return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(API + '/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(V1 + '/') === 0) return '/__proxy/model' + url.slice('https://api.ipkey.vip'.length);
     return url;
@@ -356,7 +357,7 @@
     var context = authContext();
     var tracked = opts.trackAuth !== false && opts.auth !== false;
     var method = opts.method || 'GET';
-    var url = API + path;
+    var url = (opts.daycard ? ORIGIN : API) + path;
     if (opts.query) {
       var qs = [];
       Object.keys(opts.query).forEach(function (k) {
@@ -399,7 +400,7 @@
               if (!contextMatches(context)) throw switchedError();
               if (r2.status === 401) return AUTH.expire(context.id).then(function () { throw expiredError(); });
               if (r2.status === 0) throw mkErr(0, 'NETWORK', '网络连接失败');
-              return handle(r2, parse(r2));
+              return opts.daycard ? handleDaycard(r2, parse(r2)) : handle(r2, parse(r2));
             });
           }, function (error) {
             if (!contextMatches(context)) throw switchedError();
@@ -407,7 +408,7 @@
             return AUTH.expire(context.id).then(function () { throw error; });
           });
         }
-        return handle(res, j);
+        return opts.daycard ? handleDaycard(res, j) : handle(res, j);
       });
     }
     return attempt(false);
@@ -421,6 +422,17 @@
     if (j.code === 0 || j.code === 'SUCCESS' || j.code === 200) return j.data;
     var msg = j.message || j.error || j.msg || (typeof j.code === 'string' ? j.code : '请求失败');
     throw mkErr(res.status >= 400 ? res.status : 400, j.code, localize(msg));
+  }
+
+  function handleDaycard(res, value) {
+    if (res.status < 200 || res.status >= 300) {
+      var message = value && (value.error || value.message);
+      throw mkErr(res.status, 'DAYCARD_HTTP_' + res.status, localize(message) || '日卡服务暂不可用 (' + res.status + ')');
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.error) {
+      throw mkErr(res.status, 'DAYCARD_RESPONSE', localize(value && value.error) || '日卡服务返回不完整');
+    }
+    return value;
   }
 
   // ---------- public ----------
@@ -540,6 +552,8 @@
     paymentOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id)); },
     cancelOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id) + '/cancel', { method: 'POST' }); },
     verifyOrder: function (outTradeNo) { return api('/payment/orders/verify', { method: 'POST', body: { out_trade_no: outTradeNo } }); },
+    daycardInfo: function () { return api('/api/daycard/info', { daycard: true }); },
+    daycardBuy: function () { return api('/api/daycard/buy', { method: 'POST', body: {}, daycard: true }); },
 
     subscriptions: function () { return api('/subscriptions/active'); },
     // ---- raw OpenAI-compatible calls (used by chat fallbacks & images) ----

@@ -2,7 +2,7 @@
 (function (global) {
   'use strict';
   var U = global.U, C = global.PagesCore, h = C.h, section = C.section, pick = C.pick;
-  var labels = { alipay: '支付宝', wxpay: '微信支付' };
+  var labels = { alipay: '支付宝', wxpay: '微信支付', daycard_balance: '余额支付' };
   var statuses = { PENDING: '待支付', PAID: '已支付，处理中', RECHARGING: '到账处理中', COMPLETED: '已完成',
     FAILED: '支付失败', EXPIRED: '已过期', CANCELLED: '已取消', REFUNDED: '已退款' };
   var accountOrders = Object.create(null);
@@ -21,37 +21,93 @@
     var balance = h('strong', null, '$' + U.credits(C.balanceOf(global.S.user || Api.AUTH.user() || {})));
     var formHost = h('div'), orderHost = h('div'), subscriptionHost = h('div');
     var info, config, selectedPlan = null, method = '', checking = false, ordersReady = false;
+    var daycard = null, daycardState = 'loading', daycardError = '', daycardRevision = 0;
     var amount = h('input', { class: 'input payment-amount', type: 'number', inputmode: 'decimal', min: '0.01', step: '0.01', placeholder: '输入充值金额', 'aria-label': '充值金额（元）' });
     var payMethods = h('div', { class: 'payment-methods' });
     var totalHint = h('div', { class: 'payment-total' });
     var submit = h('button', { class: 'btn btn-primary btn-block', type: 'button', disabled: true, onclick: confirmOrder }, '正在检查订单…');
     var account = Api.AUTH.context();
-    var shared = accountOrders[account.id] || (accountOrders[account.id] = { submitting: false, uncertain: false, order: null });
+    var daycardStorageKey = 'payment_daycard_uncertain:' + encodeURIComponent(account.id);
+    var shared = accountOrders[account.id] || (accountOrders[account.id] = { submitting: false, uncertain: false, order: null,
+      daycardUncertain: !!U.store.get(daycardStorageKey, false) });
     var activeOrder = shared.order;
 
     page.appendChild(h('div', { class: 'payment-balance' }, h('span', null, '账户余额'), balance));
     page.appendChild(formHost); page.appendChild(orderHost); page.appendChild(subscriptionHost);
 
     function current() { return Api.AUTH.matches(account); }
+    function setDaycardUncertain(value) {
+      shared.daycardUncertain = value;
+      if (value) U.store.set(daycardStorageKey, true); else U.store.del(daycardStorageKey);
+    }
+    function daycardOrderBlocked() {
+      return !!shared.daycardUncertain && !!selectedPlan && (daycardState !== 'ready' || isDaycardPlan());
+    }
     function updateSubmit() {
-      submit.disabled = !ordersReady || shared.submitting || !!activeOrder || shared.uncertain;
-      submit.textContent = shared.submitting ? '正在创建订单…' : !ordersReady ? '正在检查订单…' : activeOrder ? '请先处理当前订单' : shared.uncertain ? '请先检查订单记录' : '确认订单';
+      var balancePayment = method === 'daycard_balance';
+      submit.disabled = !ordersReady || shared.submitting || !!activeOrder || shared.uncertain ||
+        daycardOrderBlocked() ||
+        (balancePayment && (daycardState !== 'ready' || !daycard || !!daycard.subscription || Number(daycard.user.balance) < Number(daycard.plan.price)));
+      submit.textContent = shared.submitting ? (balancePayment ? '正在处理日卡…' : '正在创建订单…') : !ordersReady ? '正在检查订单…' :
+        activeOrder ? '请先处理当前订单' : shared.uncertain ? '请先检查订单记录' :
+        daycardOrderBlocked() ? '请先核对日卡状态' :
+        balancePayment && daycard && daycard.subscription ? '已持有日卡' :
+        balancePayment && daycard && Number(daycard.user.balance) < Number(daycard.plan.price) ? '账户余额不足' :
+        balancePayment ? '确认余额支付' : '确认订单';
     }
     function notifyOrder() { global.dispatchEvent(new CustomEvent('pp:payment-changed', { detail: account.id })); }
     function methods() {
       return Object.keys(info.methods || {}).filter(function (key) {
         var item = info.methods[key];
-        return !!labels[key] && item && item.available !== false &&
+        return (key === 'alipay' || key === 'wxpay') && item && item.available !== false &&
           (!item.currency || item.currency === 'CNY') &&
           (!Array.isArray(config.enabled_payment_types) || config.enabled_payment_types.indexOf(key) >= 0);
       });
     }
     function orderAmount() { return selectedPlan ? Number(selectedPlan.price) : Number(amount.value); }
+    function isDaycardPlan() { return !!selectedPlan && !!daycard && String(selectedPlan.id) === String(daycard.plan.id); }
+    function readDaycard() {
+      return Api.daycardInfo().then(function (data) {
+        var plan = data && data.plan, user = data && data.user;
+        var knownUser = Api.AUTH.user();
+        if (!plan || !Number.isSafeInteger(Number(plan.id)) || Number(plan.id) <= 0 || !plan.name ||
+            !isFinite(Number(plan.price)) || Number(plan.price) <= 0 || Math.abs(Number(plan.price) * 100 - Math.round(Number(plan.price) * 100)) > 0.000001 ||
+            plan.currency !== 'CNY' || !user || user.balance === null || user.balance === '' || !isFinite(Number(user.balance)) || Number(user.balance) < 0 ||
+            !Object.prototype.hasOwnProperty.call(data, 'subscription') ||
+            (data.subscription !== null && (typeof data.subscription !== 'object' || Array.isArray(data.subscription))) ||
+            (knownUser && knownUser.id != null && (user.id == null || String(user.id) !== String(knownUser.id)))) {
+          throw new Error('日卡信息不完整，请刷新后重试');
+        }
+        return data;
+      });
+    }
+    function applyDaycard(data) {
+      daycard = data; daycardState = 'ready'; daycardError = '';
+      if (data.subscription && shared.daycardUncertain) setDaycardUncertain(false);
+      if (info && config) paintForm();
+    }
+    function loadDaycard() {
+      var revision = ++daycardRevision;
+      daycardState = 'loading'; daycardError = '';
+      if (info && config) paintForm();
+      return readDaycard().then(function (data) {
+        if (revision === daycardRevision && current() && page.isConnected) applyDaycard(data);
+      }).catch(function (error) {
+        if (revision !== daycardRevision || !current() || !page.isConnected) return;
+        daycard = null; daycardState = 'error'; daycardError = error.message || '日卡信息加载失败';
+        if (method === 'daycard_balance') method = methods()[0] || '';
+        if (info && config) paintForm();
+      });
+    }
     function paymentFee(value) {
       var rate = Number(info.recharge_fee_rate || config.recharge_fee_rate || 0);
       return isFinite(rate) && rate > 0 ? Math.ceil(value * rate - 0.0000001) / 100 : 0;
     }
     function updateTotal() {
+      if (method === 'daycard_balance' && isDaycardPlan()) {
+        totalHint.textContent = '余额支付 ¥' + money(daycard.plan.price) + ' · 免支付通道费';
+        return;
+      }
       var value = orderAmount();
       totalHint.textContent = isFinite(value) && value > 0
         ? '订单金额 ¥' + money(value) + ((!selectedPlan && Array.isArray(info.recharge_bonus_tiers) && info.recharge_bonus_tiers.length) || Number((info.methods[method] || {}).fee_rate) > 0
@@ -60,10 +116,16 @@
     }
     function paintMethods() {
       payMethods.innerHTML = '';
+      if (isDaycardPlan()) {
+        payMethods.appendChild(h('label', { class: 'payment-choice' },
+          h('input', { type: 'radio', name: 'payment-method', value: 'daycard_balance', checked: method === 'daycard_balance',
+            onchange: function () { method = 'daycard_balance'; paintForm(); } }),
+          h('span', null, h('strong', null, '余额支付'), h('small', null, '免支付通道费'))));
+      }
       methods().forEach(function (key) {
         payMethods.appendChild(h('label', { class: 'payment-choice' },
           h('input', { type: 'radio', name: 'payment-method', value: key, checked: key === method,
-            onchange: function () { method = key; updateTotal(); } }), h('span', null, labels[key])));
+            onchange: function () { method = key; paintForm(); } }), h('span', null, labels[key])));
       });
     }
     function paintForm() {
@@ -72,6 +134,7 @@
       var plans = Array.isArray(info.plans) ? info.plans : [];
       if (!canBalance && !plans.length) { formHost.appendChild(h('div', { class: 'notice warn section' }, '当前没有可购买的商品')); return; }
       if (!selectedPlan && !canBalance && plans.length) selectedPlan = plans[0];
+      if (method === 'daycard_balance' && !isDaycardPlan()) method = methods()[0] || '';
       var choices = h('div', { class: 'payment-products' });
       if (canBalance) choices.appendChild(h('label', { class: 'payment-choice' },
         h('input', { type: 'radio', name: 'payment-product', checked: !selectedPlan, onchange: function () { selectedPlan = null; paintForm(); } }),
@@ -94,11 +157,22 @@
             (Number(config.daily_limit) > 0 ? ' · 每日上限 ¥' + money(config.daily_limit) : '')))));
       }
       formHost.appendChild(section('支付方式', null, null, payMethods));
-      if (selectedPlan) formHost.appendChild(h('div', { class: 'payment-balance-note' }, '余额支付暂不可用，平台尚未提供余额购买套餐的接口。'));
+      if (selectedPlan && daycardState === 'loading') formHost.appendChild(h('div', { class: 'payment-balance-note' }, '正在查询日卡余额支付信息…'));
+      if (selectedPlan && daycardState === 'error') formHost.appendChild(h('div', { class: 'notice warn payment-balance-note' },
+        '日卡余额支付信息加载失败：' + daycardError + (shared.daycardUncertain ? ' 上次日卡支付结果未确认，请先重试并核对状态。' : '') +
+        ' ', h('button', { type: 'button', onclick: loadDaycard }, '重试')));
+      if (isDaycardPlan()) {
+        formHost.appendChild(h('div', { class: 'payment-balance-note' }, '日卡余额 ¥' + money(daycard.user.balance) + ' · 日卡价格 ¥' + money(daycard.plan.price) +
+          (daycard.subscription ? ' · 已生效' + (daycard.subscription.expires_at ? '，有效至 ' + U.datetime(daycard.subscription.expires_at) : '') : '')));
+        if (shared.daycardUncertain) formHost.appendChild(h('div', { class: 'notice warn payment-balance-note' },
+          '上次余额支付结果未确认，请先刷新并核对日卡状态及余额，避免重复扣款。 ',
+          h('button', { type: 'button', onclick: loadDaycard }, '刷新状态'), ' ',
+          h('button', { type: 'button', disabled: daycardState !== 'ready', onclick: clearDaycardUncertain }, '已核对，允许重试')));
+      }
       formHost.appendChild(totalHint);
       formHost.appendChild(submit);
       if (info.help_text || config.help_text) formHost.appendChild(h('div', { class: 'payment-help' }, info.help_text || config.help_text));
-      paintMethods(); updateTotal();
+      paintMethods(); updateTotal(); updateSubmit();
     }
     amount.addEventListener('input', updateTotal);
 
@@ -117,7 +191,8 @@
       return '';
     }
     function confirmOrder() {
-      if (!ordersReady || shared.submitting || activeOrder || shared.uncertain || !current()) return;
+      if (!ordersReady || shared.submitting || activeOrder || shared.uncertain || daycardOrderBlocked() || !current()) return;
+      if (method === 'daycard_balance') { confirmDaycard(); return; }
       var error = validation();
       if (error) { U.toast(error, 'err'); return; }
       var value = orderAmount(), chosenMethod = method, plan = selectedPlan;
@@ -126,7 +201,7 @@
         ((!plan && Array.isArray(info.recharge_bonus_tiers) && info.recharge_bonus_tiers.length) || Number((info.methods[chosenMethod] || {}).fee_rate) > 0 ? '\n优惠与手续费以收银台为准。' :
           '\n预计通道费：¥' + money(paymentFee(value)) + '\n预计支付：¥' + money(value + paymentFee(value)) + '\n实际支付金额以收银台为准。');
       U.confirm('确认创建订单', description, '创建订单').then(function (ok) {
-        if (!ok || shared.submitting || shared.order || shared.uncertain || !current()) return;
+        if (!ok || shared.submitting || shared.order || shared.uncertain || daycardOrderBlocked() || !current()) return;
         if (validation() || orderAmount() !== value || method !== chosenMethod || selectedPlan !== plan) {
           U.toast('订单内容已变化，请重新确认', 'err'); return;
         }
@@ -148,6 +223,79 @@
             loadOrders();
           }
         }).finally(function () { shared.submitting = false; updateSubmit(); notifyOrder(); });
+      });
+    }
+
+    function clearDaycardUncertain() {
+      if (!current() || shared.submitting || daycardState !== 'ready' || !isDaycardPlan()) return;
+      U.confirm('确认已核对', '请确认已刷新并核对日卡状态、账户余额及平台记录。若上次扣款仍在处理中，再次支付可能重复扣款。', '允许重试').then(function (ok) {
+        if (!ok || !current() || shared.submitting || daycardState !== 'ready' || !isDaycardPlan()) return;
+        setDaycardUncertain(false); paintForm(); notifyOrder();
+      });
+    }
+
+    function confirmDaycard() {
+      if (daycardState !== 'ready' || !isDaycardPlan() || shared.daycardUncertain || daycard.subscription || Number(daycard.user.balance) < Number(daycard.plan.price)) return;
+      var chosenPlan = selectedPlan, displayedPrice = Number(daycard.plan.price), revision = ++daycardRevision;
+      shared.submitting = true; updateSubmit(); notifyOrder();
+      readDaycard().then(function (fresh) {
+        if (!current() || !page.isConnected || revision !== daycardRevision) return;
+        applyDaycard(fresh);
+        if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() || Number(fresh.plan.price) !== displayedPrice) {
+          U.toast('日卡信息已变化，请重新确认', 'err'); return;
+        }
+        if (fresh.subscription) { U.toast('日卡已生效，无需重复购买'); return; }
+        if (Number(fresh.user.balance) < Number(fresh.plan.price)) { U.toast('账户余额不足，请先充值', 'err'); return; }
+        shared.submitting = false; updateSubmit(); notifyOrder();
+        U.confirm('确认余额支付', '日卡：' + fresh.plan.name + '\n支付金额：¥' + money(fresh.plan.price) +
+          '\n日卡余额：¥' + money(fresh.user.balance) + '\n免支付通道费，确认后将立即扣款并开通。', '确认支付').then(function (ok) {
+          if (!ok || !current() || !page.isConnected || shared.submitting || shared.daycardUncertain || shared.uncertain || shared.order ||
+              method !== 'daycard_balance' || selectedPlan !== chosenPlan || daycard !== fresh) return;
+          shared.submitting = true;
+          var confirmedRevision = ++daycardRevision;
+          updateSubmit(); notifyOrder();
+          readDaycard().then(function (latest) {
+            if (!current() || !page.isConnected || confirmedRevision !== daycardRevision) return null;
+            applyDaycard(latest);
+            if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() ||
+                latest.plan.name !== fresh.plan.name || Number(latest.plan.price) !== displayedPrice || latest.subscription || Number(latest.user.balance) < displayedPrice) {
+              U.toast('日卡价格、余额或状态已变化，请重新确认', 'err'); return null;
+            }
+            setDaycardUncertain(true);
+            return Api.daycardBuy();
+          }).then(function (result) {
+            if (result === null) return;
+            if (result.paid === null || result.paid === '' || !isFinite(Number(result.paid)) || Number(result.paid) < 0) {
+              throw new Error('支付结果不完整');
+            }
+            setDaycardUncertain(false);
+            if (current()) U.toast('日卡开通成功，已扣 ¥' + money(result.paid), 'ok');
+            if (current()) {
+              loadDaycard(); loadSubscriptions(); loadOrders();
+              Api.me().then(function (user) {
+                if (!current()) return;
+                global.S.user = user;
+                balance.textContent = '$' + U.credits(C.balanceOf(user || {}));
+              }).catch(function () {});
+            }
+          }).catch(function (error) {
+            if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) setDaycardUncertain(false);
+            if (current()) {
+              U.toast((error.message || '日卡支付失败') + (shared.daycardUncertain ? '。请先核对日卡状态和余额。' : ''), 'err');
+              loadDaycard(); loadSubscriptions();
+            }
+          }).finally(function () {
+            shared.submitting = false;
+            if (current() && info && config) paintForm();
+            notifyOrder();
+          });
+        });
+      }).catch(function (error) {
+        if (current()) { U.toast(error.message || '日卡信息加载失败', 'err'); loadDaycard(); }
+      }).finally(function () {
+        shared.submitting = false;
+        if (current() && info && config) paintForm();
+        notifyOrder();
       });
     }
 
@@ -286,12 +434,13 @@
       if (!page.isConnected || !current()) { global.removeEventListener('pp:payment-changed', onOrderChange); return; }
       if (event.detail !== account.id) return;
       activeOrder = shared.order; updateSubmit(); paintActiveOrder();
+      if (info && config) paintForm();
       if (!shared.submitting) loadOrders();
     }
     document.addEventListener('visibilitychange', onVisible);
     global.addEventListener('pp:payment-changed', onOrderChange);
     if (activeOrder) setTimeout(function () { if (page.isConnected && current()) paintActiveOrder(); }, 0);
-    loadConfig(); loadOrders(); loadSubscriptions();
+    loadConfig(); loadOrders(); loadSubscriptions(); loadDaycard();
     return page;
   }
   global.PagesPayment = { renderPurchase: renderPurchase };

@@ -11,6 +11,7 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
+const raw = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
 const fail = message => ({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 500, message }) });
 const makeRecord = (id, time, model, tokens, cost) => ({ id, created_at: time, model, input_tokens: tokens, output_tokens: 1,
   cache_creation_tokens: 2, cache_read_tokens: 3, actual_cost: cost, total_cost: cost * 2 });
@@ -49,6 +50,7 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, min_amount: 1, max_amount: 500, daily_limit: 2000, enabled_payment_types: ['alipay', 'wxpay'], recharge_fee_rate: 1 }));
   if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true }, wxpay: { available: true } }, recharge_fee_rate: 1,
     plans: [{ id: 8, name: '测试日卡', price: 3.66, validity_days: 1, description: '套餐说明', features: ['测试额度'] }], help_text: '支付说明' }));
+  if (path === '/api/daycard/info') return route.fulfill(raw({ plan: { id: 8, name: '测试日卡', price: 3.66, currency: 'CNY' }, user: { id: 1, balance: 10 }, subscription: null }));
   if (path === '/api/v1/subscriptions/active') return route.fulfill(ok([]));
   if (path === '/api/v1/payment/orders/my') {
     if (ordersFail) return route.fulfill(fail('暂不可用'));
@@ -142,7 +144,7 @@ try {
   await page.locator('.payment-active').getByText('已完成', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByText('测试日卡', { exact: true }).click();
-  await page.getByText('余额支付暂不可用，平台尚未提供余额购买套餐的接口。').waitFor();
+  await page.getByText('余额支付', { exact: true }).waitFor();
   await page.getByText('微信支付', { exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();
   await page.getByRole('button', { name: '创建订单' }).click();

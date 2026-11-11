@@ -75,10 +75,17 @@ try {
   await page.getByText('选择商品').waitFor({ timeout: 30000 });
   await page.getByText('最近订单').waitFor({ timeout: 30000 });
   assert.equal(await page.getByText('订单加载失败').count(), 0);
+  const daycard = await page.evaluate(() => Api.daycardInfo());
+  assert.ok(daycard.plan && daycard.user && Number.isFinite(Number(daycard.user.balance)));
+  const product = page.locator('label.payment-choice').filter({ has: page.locator('input[name="payment-product"]') })
+    .filter({ hasText: daycard.plan.name }).first();
+  await product.click();
+  await page.getByText('余额支付', { exact: true }).waitFor({ timeout: 30000 });
+  assert.match(await page.locator('.payment-balance-note').innerText(), /日卡余额/);
   await page.goto(base + '/#/announcements');
   await page.locator('#view .list-item').first().waitFor({ timeout: 30000 });
   assert.deepEqual(errors, []);
-  console.log('Live account: dashboard, precise usage, checkout configuration, orders and announcements passed (read-only)');
+  console.log('Live account: dashboard, precise usage, checkout configuration, daycard balance, orders and announcements passed (read-only)');
 } finally {
   await context.close();
   await browser.close();
