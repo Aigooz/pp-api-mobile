@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'app', 'src', 'main', 'assets', 'www');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const upstreams = { site: 'https://ipkey.vip', model: 'https://api.ipkey.vip' };
 const forwardHeaders = ['accept', 'accept-language', 'authorization', 'content-type', 'x-user-ui-request'];
 

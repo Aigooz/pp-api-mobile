@@ -19,16 +19,61 @@
     '给新产品起 10 个中文名字'
   ];
 
-  function md(text) {
-    var s = U.esc(text || '');
-    s = s.replace(/```([\s\S]*?)```/g, function (m, code) {
-      return '<pre>' + code.replace(/^\n+|\n+$/g, '') + '</pre>';
+  var markdown = null;
+  if (global.markdownit && global.texmath && global.katex) {
+    markdown = global.markdownit({ html: false, linkify: false, breaks: true })
+      .use(global.texmath, { engine: global.katex, delimiters: ['dollars', 'brackets'],
+        katexOptions: { trust: false, maxExpand: 100, maxSize: 20, throwOnError: false } });
+    markdown.validateLink = function (url) { return /^(https?:\/\/|mailto:)/i.test(url); };
+    markdown.renderer.rules.image = function (tokens, idx) {
+      return U.esc(tokens[idx].content || '图片');
+    };
+    markdown.renderer.rules.fence = function (tokens, idx) {
+      var token = tokens[idx], lang = String(token.info || '').trim().split(/\s+/)[0] || '代码';
+      return '<div class="chat-code"><div class="chat-code-head"><span>' + U.esc(lang) +
+        '</span><button type="button" class="chat-code-copy" aria-label="复制代码" title="复制代码">' + U.ic('copy', 15) +
+        '</button></div><pre><code>' + U.esc(token.content) + '</code></pre></div>';
+    };
+    markdown.inline.ruler.before('escape', 'chat_math_brackets', function (state, silent) {
+      var opening = state.src.slice(state.pos, state.pos + 2);
+      if (opening !== '\\[' && opening !== '\\(') return false;
+      var closing = opening === '\\[' ? '\\]' : '\\)';
+      var end = state.src.indexOf(closing, state.pos + 2);
+      var nextOpen = state.src.indexOf(opening, state.pos + 2);
+      var newline = state.src.indexOf('\n', state.pos + 2);
+      if (end >= 0 && ((nextOpen >= 0 && nextOpen < end) ||
+          (opening === '\\(' && newline >= 0 && newline < end))) end = -1;
+      if (end >= 0 && opening === '\\[') {
+        if (!silent) {
+          var token = state.push('chat_math_display', '', 0);
+          token.content = state.src.slice(state.pos + 2, end);
+        }
+        state.pos = end + 2;
+        return true;
+      }
+      if (end >= 0) return false;
+      if (!silent) state.pending += opening;
+      state.pos += 2;
+      return true;
     });
-    s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
-    s = s.replace(/^###\s+(.+)$/gm, '<b>$1</b>');
-    s = s.replace(/^##\s+(.+)$/gm, '<b>$1</b>');
-    return s;
+    markdown.renderer.rules.chat_math_display = function (tokens, idx) {
+      return '<span class="chat-math-display">' + global.texmath.render(tokens[idx].content, true,
+        { trust: false, maxExpand: 100, maxSize: 20, throwOnError: false }) + '</span>';
+    };
+  }
+  function md(text) {
+    try { return markdown ? markdown.render(String(text || '')) : U.esc(text || ''); }
+    catch (e) { return U.esc(text || ''); }
+  }
+
+  // A model-independent heuristic, not a tokenizer or a billing value.
+  function estimateText(text) {
+    var ascii = 0, other = 0;
+    Array.from(String(text || '')).forEach(function (c) {
+      if (c.charCodeAt(0) < 128) ascii++;
+      else other++;
+    });
+    return Math.ceil(ascii / 4 + other * 1.3);
   }
 
   function newId() {
@@ -103,15 +148,20 @@
     var controller = null;
     var keys = global.S.keys || [];
     var modelList = [];
+    var modelLimits = {};
+    var plazaLimitSource = null, plazaLimits = {};
+    var modelsRun = 0;
     var stopped = false;
     var disposed = false;
     var imageRun = 0;
+    var completionRun = 0;
 
     function isCurrent() { return !disposed && Api.AUTH.matches(authContext); }
     activeChat = function () {
       if (disposed) return;
       stopped = true;
       imageRun++;
+      completionRun++;
       if (controller) { try { controller.abort(); } catch (e) {} }
       if (streaming) {
         var last = session.messages[session.messages.length - 1];
@@ -136,6 +186,7 @@
     var page = h('div', { class: 'page chat-wrap' });
     var msgsHost = h('div', { id: 'msgs' });
     var info = h('div', { class: 'composer-meta' });
+    var tokenButton = h('button', { class: 'token-estimate-btn', type: 'button', 'aria-label': '查看 Token 使用量估算' });
 
     var modelChip = h('button', { class: 'chip' }, h('span', null, session.model || '选择模型'));
     var keyChip = h('button', { class: 'chip' }, h('span', null, '令牌'));
@@ -148,10 +199,10 @@
     ));
     page.appendChild(msgsHost);
 
-    var input = h('textarea', { rows: '1', placeholder: '输入消息，Shift+Enter 换行' });
-    var send = h('button', { class: 'send-btn', html: U.ic('send', 18) });
+    var input = h('textarea', { rows: '1', placeholder: '输入消息', 'aria-label': '输入消息' });
+    var send = h('button', { class: 'send-btn', html: U.ic('send', 18), 'aria-label': '发送消息', title: '发送消息' });
     page.appendChild(h('div', { class: 'composer' },
-      h('div', { class: 'composer-box' }, input, send), info));
+      h('div', { class: 'composer-box' }, input, send), h('div', { class: 'composer-footer' }, info, tokenButton)));
 
     // ---------- helpers ----------
     function activeKey() {
@@ -169,8 +220,61 @@
         info.appendChild(h('span', { class: 'badge teal', style: { flex: '0 0 auto' } }, '生图'));
       }
       if (session.settings.systemPrompt) {
-        info.appendChild(h('span', { class: 'badge teal', style: { marginLeft: 'auto' } }, '已设系统提示词'));
+        info.appendChild(h('span', { class: 'badge teal' }, '系统提示词'));
       }
+      paintEstimate();
+    }
+
+    function contextMessages(upto) {
+      var messages = session.messages.slice(0, upto)
+        .filter(function (m) { return m.content && m.content.length > 0; })
+        .map(function (m) { return { role: m.role, content: m.content }; });
+      if (session.settings.systemPrompt) messages.unshift({ role: 'system', content: session.settings.systemPrompt });
+      return messages;
+    }
+
+    function estimate() {
+      var image = isImageModel(session.model);
+      var context = image ? [] : contextMessages(session.messages.length);
+      var contextTokens = context.reduce(function (total, m) { return total + estimateText(m.content) + 4; }, 0);
+      var draft = input.value.trim();
+      var inputTokens = draft ? estimateText(draft) + 4 : 0;
+      return { input: inputTokens, context: contextTokens, count: context.length,
+        total: inputTokens + contextTokens, limit: image ? 0 : modelLimit(), image: image };
+    }
+    function modelLimit() {
+      if (modelLimits[session.model]) return modelLimits[session.model];
+      if (plazaLimitSource !== global.S.plaza) {
+        plazaLimitSource = global.S.plaza;
+        plazaLimits = {};
+        C.plazaModels(plazaLimitSource).forEach(function (m) {
+          var value = Number(m.context);
+          if (!(value > 0 && isFinite(value))) return;
+          if (!plazaLimits[m.name]) plazaLimits[m.name] = [];
+          if (plazaLimits[m.name].indexOf(value) < 0) plazaLimits[m.name].push(value);
+        });
+      }
+      var values = plazaLimits[session.model] || [];
+      return values.length === 1 ? values[0] : 0;
+    }
+    function paintEstimate() {
+      var value = estimate();
+      tokenButton.textContent = 'Token 估算 · ' + U.num(value.total);
+    }
+    function openEstimate() {
+      var value = estimate();
+      function row(label, number) {
+        return h('div', { class: 'token-row' }, h('span', null, label), h('strong', null, number));
+      }
+      var body = h('div', { class: 'token-details' },
+        row('当前输入', '约 ' + U.num(value.input)),
+        row('上下文', '约 ' + U.num(value.context)),
+        row('上下文消息数', U.num(value.count)),
+        row('总计', '约 ' + U.num(value.total)),
+        row('模型限制', value.image ? '不适用' : value.limit ? U.num(value.limit) : '未知'),
+        h('p', { class: 'token-note' }, value.image ? '生图请求仅发送当前输入；图片用量无法在此估算。' :
+          '按当前输入、已发送消息和系统提示词粗略估算，实际用量以模型服务返回为准。'));
+      U.sheet({ title: 'Token 使用量估算', body: body, actions: [{ label: '关闭' }] });
     }
 
     function scrollBottom(force) {
@@ -232,7 +336,8 @@
         return;
       }
       if (msg.content) {
-        body.appendChild(h('div', { class: 'bubble-text', html: md(msg.content) }));
+        body.appendChild(msg.role === 'user' ? h('div', { class: 'bubble-text user-text' }, msg.content) :
+          h('div', { class: 'bubble-text markdown-body', html: md(msg.content) }));
       }
       if (msg.image) {
         var img = h('img', { class: 'gen', alt: '生成图片', src: msg.image });
@@ -257,10 +362,7 @@
       var row = h('div', { class: 'bubble-row ' + (isUser ? 'me' : 'ai') });
       var body = h('div', { class: 'bubble' });
       fillBubble(body, msg);
-      body.addEventListener('click', function (e) {
-        if (e.target && e.target.tagName === 'IMG') return;
-        if (msg.content) U.copy(msg.content);
-      });
+      if (!isUser) row.appendChild(h('div', { class: 'chat-avatar', 'aria-hidden': 'true', html: U.ic('sparkle', 16) }));
       row.appendChild(body);
       return row;
     }
@@ -268,8 +370,9 @@
     function paint() {
       msgsHost.innerHTML = '';
       if (!session.messages.length) {
-        msgsHost.appendChild(h('div', { style: { paddingTop: '28px' } },
-          emptyState('开始新的对话', '选好模型与令牌，直接提问。消息走官方 /v1 接口，按实际 token 计费。', 'chat')));
+        msgsHost.appendChild(h('div', { class: 'chat-welcome' },
+          h('div', { class: 'chat-welcome-icon', html: U.ic('chat', 25) }),
+          h('h2', null, '开始新的对话'), h('p', null, session.model || '选择模型后开始')));
         if (!keys.length) {
           msgsHost.appendChild(h('div', { style: { textAlign: 'center', marginTop: '-12px' } },
             h('button', { class: 'btn btn-primary btn-sm', onclick: function () { App.go('#/keys'); } }, '创建我的第一个令牌')));
@@ -277,27 +380,29 @@
           msgsHost.appendChild(h('div', { class: 'suggests' }, SUGGESTS.map(function (t) {
             return h('button', {
               class: 'suggest',
-              onclick: function () { input.value = t; autoGrow(); input.focus(); }
+              onclick: function () { input.value = t; autoGrow(); paintEstimate(); input.focus(); }
             }, t);
           })));
         }
+        paintEstimate();
         return;
       }
       session.messages.forEach(function (m, i) {
         msgsHost.appendChild(bubble(m));
         var last = i === session.messages.length - 1;
-        if (m.role !== 'user' && last && !streaming && !m.pending) {
+        if (!m.pending && (m.content || (m.role !== 'user' && last && !streaming))) {
           var actions = [];
-          if (m.content) actions.push(h('button', { onclick: function () { U.copy(m.content); } }, '复制'));
-          if (m.error) {
+          if (m.content) actions.push(h('button', { 'aria-label': '复制消息', title: '复制消息', html: U.ic('copy', 15), onclick: function () { U.copy(m.content); } }));
+          if (m.role !== 'user' && last && !streaming && m.error) {
             actions.push(h('button', { onclick: regenerate }, '重试'));
             actions.push(h('button', { onclick: regenerateStreaming }, '非流式重试'));
-          } else {
+          } else if (m.role !== 'user' && last && !streaming) {
             actions.push(h('button', { onclick: regenerate }, m.image ? '再生成一张' : '重新生成'));
           }
-          if (actions.length) msgsHost.appendChild(h('div', { class: 'msg-actions' }, actions));
+          if (actions.length) msgsHost.appendChild(h('div', { class: 'msg-actions ' + (m.role === 'user' ? 'me' : 'ai') }, actions));
         }
       });
+      paintEstimate();
       scrollBottom(true);
     }
 
@@ -309,13 +414,7 @@
 
     // ---------- request payload ----------
     function buildPayload(upto) {
-      var msgs = session.messages.slice(0, upto)
-        .filter(function (m) { return m.content && m.content.length > 0; })
-        .map(function (m) { return { role: m.role, content: m.content }; });
-      if (session.settings.systemPrompt) {
-        msgs.unshift({ role: 'system', content: session.settings.systemPrompt });
-      }
-      var p = { model: session.model, messages: msgs, stream: true };
+      var p = { model: session.model, messages: contextMessages(upto), stream: true };
       var t = session.settings.temperature;
       if (t !== null && t !== '' && isFinite(Number(t))) p.temperature = Number(t);
       var m = session.settings.maxTokens;
@@ -326,6 +425,8 @@
     function setBusy(on) {
       streaming = on;
       send.innerHTML = on ? U.ic('close', 18) : U.ic('send', 18);
+      send.setAttribute('aria-label', on ? '停止生成' : '发送消息');
+      send.title = on ? '停止生成' : '发送消息';
       send.style.background = on ? 'var(--danger)' : '';
     }
 
@@ -335,6 +436,8 @@
       if (!session.model) { U.toast('请先选择模型', 'err'); selectModel(); return; }
       if (!key) { U.toast('请先创建并选择令牌', 'err'); return; }
       controller = null;
+      var run = ++completionRun;
+      function currentRun() { return isCurrent() && run === completionRun; }
 
       var aiMsg = { role: 'assistant', content: '' };
       session.messages.push(aiMsg);
@@ -349,6 +452,15 @@
 
       var payload = buildPayload(session.messages.length - 1);
       var done = false;
+      var frame = 0;
+
+      function paintStream() {
+        frame = 0;
+        if (!currentRun() || done) return;
+        target.innerHTML = '<div class="bubble-text markdown-body">' + md(aiMsg.content) + '</div>';
+        paintEstimate();
+        scrollBottom();
+      }
 
       function fail(err, status, detail) {
         aiMsg.error = prettyErr(err);
@@ -369,7 +481,8 @@
         if (done) return;
         done = true;
         Api.chatOnce(key.key, payload).then(function (d) {
-          if (stopped || !isCurrent()) return;
+          if (stopped || !currentRun()) return;
+          setBusy(false);
           var text = extractText(d);
           if (!text) {
             var img = extractImage(d);
@@ -378,15 +491,16 @@
           }
           ok(text);
         }).catch(function (e) {
-          if (stopped || !isCurrent()) return;
+          if (stopped || !currentRun()) return;
+          setBusy(false);
           fail(e.message || '请求失败', e.status || 0, '流式失败：' + reason + '\n非流式回退失败：' + (e.message || ''));
         }).then(function () {
-          if (isCurrent()) setBusy(false);
+          if (currentRun()) setBusy(false);
         });
       }
 
       function finish(err, status, detail) {
-        if (done || !isCurrent()) return;
+        if (done || !currentRun()) return;
         if (!err) {
           done = true;
           setBusy(false);
@@ -425,7 +539,7 @@
 
       controller = Api.chatStream(payload, key.key, {
         onEvent: function (j) {
-          if (!isCurrent()) return;
+          if (!currentRun() || stopped || done) return;
           var choice = j && j.choices && j.choices[0];
           if (!choice) {
             if (j && j.error) finish((j.error && j.error.message) || '上游返回错误', 0, '');
@@ -435,8 +549,7 @@
           var chunk = d.content || d.reasoning_content || '';
           if (chunk) {
             aiMsg.content += chunk;
-            target.innerHTML = md(aiMsg.content);
-            scrollBottom();
+            if (!frame) frame = global.setTimeout(paintStream, 80);
           }
         },
         onDone: function () { finish(null); },
@@ -444,7 +557,7 @@
       });
 
       setTimeout(function () {
-        if (isCurrent() && streaming && !done) {
+        if (currentRun() && streaming && !done) {
           try { controller.abort(); } catch (e) {}
           finish('请求超时', 0);
         }
@@ -551,21 +664,20 @@
       if (streaming) {
         stopped = true;
         imageRun++;
+        completionRun++;
         if (controller) { try { controller.abort(); } catch (e) {} }
-        else {
-          var last = session.messages[session.messages.length - 1];
-          if (last && last.role === 'assistant') {
-            last.pending = false;
-            if (!last.content) last.content = '（已停止）';
-          }
-          setBusy(false);
-          persistAndPaint();
+        var last = session.messages[session.messages.length - 1];
+        if (last && last.role === 'assistant') {
+          last.pending = false;
+          if (!last.content) last.content = '（已停止）';
         }
+        setBusy(false);
+        persistAndPaint();
         return;
       }
       sendMessage();
     });
-    input.addEventListener('input', autoGrow);
+    input.addEventListener('input', function () { autoGrow(); paintEstimate(); });
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
@@ -577,7 +689,13 @@
 
     // ---------- model & key pickers ----------
     function selectModel() {
-      if (!modelList.length) { loadModels(function () { selectModel(); }); return; }
+      if (!modelList.length) {
+        loadModels(function () {
+          if (modelList.length) selectModel();
+          else U.toast('暂无可用模型', 'err');
+        });
+        return;
+      }
       var q = h('input', { class: 'input', placeholder: '搜索模型…', style: { marginBottom: '10px' } });
       var host = h('div', { style: { maxHeight: '50vh', overflowY: 'auto' } });
       function paintList() {
@@ -649,19 +767,33 @@
 
     function loadModels(cb) {
       var key = activeKey();
+      var run = ++modelsRun;
+      modelLimits = {};
+      paintEstimate();
+      function setLimits(list) {
+        modelLimits = {};
+        (list || []).forEach(function (m) {
+          if (!m || typeof m !== 'object') return;
+          var value = Number(pick(m, 'context_length', 'max_context_tokens', 'context_window'));
+          if (value > 0 && isFinite(value)) modelLimits[m.id || m.name] = value;
+        });
+        paintEstimate();
+      }
       var fallback = function () {
-        if (!isCurrent()) return;
+        if (!isCurrent() || run !== modelsRun) return;
         var names = [];
         C.plazaModels(global.S.plaza).forEach(function (m) { if (names.indexOf(m.name) < 0) names.push(m.name); });
+        setLimits([]);
         applyModelList(names);
         if (cb) cb();
       };
       if (!key) { fallback(); return; }
       Api.modelsWithKey(key.key).then(function (d) {
-        if (!isCurrent()) return;
+        if (!isCurrent() || run !== modelsRun) return;
         var arr = Array.isArray(d) ? d : (d && (d.data || d.models)) || [];
         var list = arr.map(function (m) { return typeof m === 'string' ? m : (m.id || m.name); }).filter(Boolean);
         if (!list.length) { fallback(); return; }
+        setLimits(arr);
         applyModelList(list);
         if (cb) cb();
       }).catch(fallback);
@@ -797,6 +929,25 @@
 
     modelChip.addEventListener('click', selectModel);
     keyChip.addEventListener('click', selectKey);
+    tokenButton.addEventListener('click', openEstimate);
+    msgsHost.addEventListener('click', function (event) {
+      var copyButton = event.target.closest('.chat-code-copy');
+      if (copyButton) {
+        var code = copyButton.closest('.chat-code').querySelector('pre code');
+        if (code) U.copy(code.textContent);
+        return;
+      }
+      var link = event.target.closest('.markdown-body a');
+      if (!link) return;
+      event.preventDefault();
+      var url = link.getAttribute('href') || '';
+      if (!/^(https?:\/\/|mailto:)/i.test(url)) return;
+      U.confirm('打开外部链接', url, '打开').then(function (ok) {
+        if (!ok || !isCurrent()) return;
+        if (global.Native && global.Native.open) global.Native.open(url);
+        else global.open(url, '_blank', 'noopener,noreferrer');
+      });
+    });
     settingBtn.addEventListener('click', openSettings);
     historyBtn.addEventListener('click', openHistory);
 
@@ -817,6 +968,7 @@
       } else {
         keyChip.firstChild.textContent = '无可用令牌';
       }
+      paintInfo();
       if (session.model && modelList.length) global.S.chatModel = session.model;
       if (!session.messages.length) paint();
       loadModels(function () {

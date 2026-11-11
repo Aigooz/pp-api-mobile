@@ -687,49 +687,113 @@
   // ---------------- redeem ----------------
   function renderRedeem() {
     if (!Api.AUTH.isLogged()) return needLogin();
+    var authContext = Api.AUTH.context();
+    var disposed = false, submitting = false, historyRun = 0;
     var page = h('div', { class: 'page' });
     var input = h('input', { class: 'input mono', placeholder: '输入兑换码，例如 ABCD-EFGH-1234', style: { textTransform: 'uppercase' } });
     var histHost = h('div', { class: 'section' });
+    var resultHost = h('div', { class: 'redeem-result', hidden: true, 'aria-live': 'polite' });
+
+    function current() { return !disposed && Api.AUTH.matches(authContext); }
+    function details(record) {
+      var r = record && typeof record === 'object' ? record : {};
+      var group = r.group && typeof r.group === 'object' ? r.group : {};
+      var type = String(pick(r, 'type', 'redeem_type') || '').toLowerCase();
+      var groupType = String(group.subscription_type || '').toLowerCase();
+      if (type === 'subscription' || (!type && groupType === 'subscription')) {
+        var days = Number(pick(r, 'validity_days', 'duration_days'));
+        return { kind: 'subscription', label: String(pick(group, 'name') || pick(r, 'subscription_name', 'plan_name') || '订阅'),
+          extra: days > 0 && isFinite(days) ? '有效期 ' + days + ' 天' : '', description: String(group.description || '') };
+      }
+      if (['balance', 'credit', 'credits', 'quota'].indexOf(type) >= 0) {
+        var value = pick(r, 'credits', 'amount', 'value', 'quota');
+        var amount = value !== undefined && isFinite(Number(value)) ? '+$' + U.credits(Number(value)) : '';
+        return { kind: 'balance', label: '余额', extra: amount, description: '' };
+      }
+      return { kind: 'unknown', label: '兑换成功', extra: '', description: '' };
+    }
+    function paintResult(record) {
+      var item = details(record);
+      resultHost.hidden = false;
+      resultHost.innerHTML = '';
+      resultHost.appendChild(h('strong', null, item.kind === 'unknown' ? '兑换成功' : '兑换成功 · ' + item.label));
+      if (item.extra) resultHost.appendChild(h('span', null, item.extra));
+      if (item.description) resultHost.appendChild(h('small', null, item.description));
+    }
+
+    var redeemBtn = h('button', {
+      class: 'btn btn-primary btn-block', style: { marginTop: '12px' },
+      onclick: function () {
+        var code = input.value.trim();
+        if (submitting) return;
+        if (!code) { U.toast('请输入兑换码', 'err'); return; }
+        submitting = true;
+        redeemBtn.disabled = true;
+        redeemBtn.textContent = '兑换中…';
+        Api.redeem(code).then(function (d) {
+          if (!current()) return;
+          var record = d && (d.redeem || d.record) || d;
+          paintResult(record);
+          U.toast('兑换成功', 'ok');
+          input.value = '';
+          loadHistory(code, true);
+          App.refreshUser();
+        }).catch(function (e) {
+          if (current()) U.toast(e.message || '兑换失败，请重试', 'err');
+        }).then(function () {
+          if (!current()) return;
+          submitting = false;
+          redeemBtn.disabled = false;
+          redeemBtn.textContent = '立即兑换';
+        });
+      }
+    }, '立即兑换');
 
     page.appendChild(h('div', { class: 'card pad' },
-      h('div', { style: { fontSize: '16px', fontWeight: '700', marginBottom: '4px' } }, '兑换余额'),
-      h('div', { class: 'small muted', style: { marginBottom: '14px' } }, '输入有效的兑换码，额度将立即到账。'),
-      input,
-      h('button', {
-        class: 'btn btn-primary btn-block', style: { marginTop: '12px' },
-        onclick: function () {
-          var code = input.value.trim();
-          if (!code) { U.toast('请输入兑换码', 'err'); return; }
-          Api.redeem(code).then(function (d) {
-            var got = pick(d || {}, 'credits', 'amount', 'value', 'quota');
-            U.toast(got ? '兑换成功 +$' + got : '兑换成功', 'ok');
-            input.value = '';
-            loadHistory();
-            App.refreshUser();
-          }).catch(function (e) { U.toast(e.message, 'err'); });
-        }
-      }, '立即兑换')
+      h('div', { style: { fontSize: '16px', fontWeight: '700', marginBottom: '4px' } }, '兑换码'),
+      h('div', { class: 'small muted', style: { marginBottom: '14px' } }, '可兑换余额或订阅，具体内容以兑换码为准。'),
+      input, redeemBtn, resultHost
     ));
 
     page.appendChild(histHost);
 
-    function loadHistory() {
+    function loadHistory(redeemedCode, updateResult) {
+      var run = ++historyRun;
       histHost.innerHTML = '';
+      histHost.appendChild(h('div', { class: 'small muted' }, '正在加载兑换记录…'));
       Api.redeemHistory().then(function (d) {
+        if (!current() || run !== historyRun) return;
         var list = arrOf(d);
-        if (!list.length) return;
+        histHost.innerHTML = '';
+        if (redeemedCode && updateResult) {
+          var found = list.filter(function (r) { return String(pick(r, 'code', 'redeem_code') || '').toLowerCase() === redeemedCode.toLowerCase(); })[0];
+          if (found && details(found).kind !== 'unknown') paintResult(found);
+        }
+        if (!list.length) {
+          histHost.appendChild(section('兑换记录', null, null, h('div', { class: 'small muted' }, '暂无兑换记录')));
+          return;
+        }
         histHost.appendChild(section('兑换记录', null, null, card(list.slice(0, 20).map(function (r) {
-          return h('div', { class: 'list-item' },
+          var item = details(r);
+          return h('div', { class: 'list-item redeem-history-item' },
             h('span', { class: 'li-icon', html: U.ic('gift', 16) }),
             h('div', { class: 'li-body' },
-              h('div', { class: 'li-title', style: { fontSize: '13px' } }, pick(r, 'code', 'redeem_code') || '兑换码'),
+              h('div', { class: 'redeem-history-heading' }, h('strong', null, item.label), item.extra ? h('span', null, item.extra) : null),
+              item.description ? h('div', { class: 'li-sub redeem-description' }, item.description) : null,
+              h('div', { class: 'li-sub redeem-code' }, String(pick(r, 'code', 'redeem_code') || '兑换码')),
               h('div', { class: 'li-sub' }, U.datetime(pick(r, 'created_at', 'used_at', 'time')))
-            ),
-            h('div', { class: 'li-tail' }, '+$' + U.credits(Number(pick(r, 'credits', 'amount', 'value', 'quota') || 0)))
+            )
           );
         }))));
-      }).catch(function () {});
+      }).catch(function () {
+        if (!current() || run !== historyRun) return;
+        histHost.innerHTML = '';
+        histHost.appendChild(section('兑换记录', null, null, h('div', { class: 'row' },
+          h('span', { class: 'small muted' }, '加载失败'),
+          h('button', { class: 'btn btn-sm', onclick: function () { loadHistory(); } }, '重试'))));
+      });
     }
+    page.addEventListener('pp:page-dispose', function () { disposed = true; historyRun++; });
     loadHistory();
     return page;
   }

@@ -39,6 +39,9 @@ jobs:
           test -f "$app/www/js/pages-dashboard.js"
           test -f "$app/www/js/pages-channel.js"
           test -f "$app/www/js/updates.js"
+          test -f "$app/www/vendor/markdown-it.min.js"
+          test -f "$app/www/vendor/katex/katex.min.js"
+          test -f "$app/www/vendor/katex/fonts/KaTeX_Main-Regular.woff2"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
           test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
           file "$app/PpApiMobile" | grep -q arm64

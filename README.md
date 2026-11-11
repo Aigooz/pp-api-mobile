@@ -2,6 +2,8 @@
 
 Pp API 的第三方移动客户端，提供仪表盘、模型广场、令牌管理、多账号与对话。Android 和 iOS 共用 `app/src/main/assets/www` 中的界面。
 
+对话支持 Markdown、代码块和 LaTeX 公式，渲染库与字体随应用离线打包。输入框中的 Token 数字是根据当前输入、会话上下文和系统提示词计算的粗略估算，不代表实际计费；模型限制仅在服务提供时显示。
+
 ## Android 安装与更新
 
 从 [GitHub Releases](https://github.com/Aigooz/pp-api-mobile-updates/releases/latest) 下载 `Pp-API-android.apk` 并安装。首次安装带更新功能的版本需要手动安装，之后可在「我的 → 软件更新」检查、下载和安装更新。开启更新通知后，应用会定期检查新版本；检查时间会受 Android 系统调度和网络状态影响。
