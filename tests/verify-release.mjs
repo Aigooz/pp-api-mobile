@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 const repo = 'Aigooz/pp-api-mobile-updates';
 const tag = process.argv[2] || 'v1.1.0';
 const apk = process.argv[3] || 'app/build/outputs/apk/release/app-release.apk';
-const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest?verify=${Date.now()}`, {
   headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'PpAPI-release-verification', 'X-GitHub-Api-Version': '2022-11-28' }
 });
 assert.equal(response.status, 200, 'GitHub latest release is unavailable');
