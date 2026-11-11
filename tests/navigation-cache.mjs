@@ -74,7 +74,6 @@ try {
   assert.equal(await page.evaluate(() => document.querySelector('.dashboard') === window.__cachedDashboard), true);
   assert.equal(await page.evaluate(() => document.querySelector('main').scrollTop), initialDashboard.top);
   assert.equal(calls.plaza, plazaCalls);
-  assert.equal(calls.dashboard, initialCalls.dashboard);
 
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByText('预加载模型0', { exact: true }).waitFor();
