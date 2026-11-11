@@ -454,6 +454,38 @@
     var groupsRow = h('div', { class: 'chips' });
     var rateRow = h('div', { class: 'chips' });
     var listHost = h('div', { class: 'plaza-groups' });
+    var statusByModel = Object.create(null);
+
+    function statusKey(model, group) { return JSON.stringify([String(model), String(group)]); }
+    function modelStatus(model, group) {
+      var item = statusByModel[statusKey(model, group)];
+      return item ? global.PagesChannel.statusInfo(item.status, item.availability) : { kind: 'unknown', label: '未知' };
+    }
+    function updateStatusDots() {
+      Array.prototype.forEach.call(listHost.querySelectorAll('.plaza-status'), function (dot) {
+        var state = modelStatus(dot.getAttribute('data-model'), dot.getAttribute('data-group'));
+        dot.className = 'plaza-status ' + state.kind;
+        dot.setAttribute('title', '渠道状态：' + state.label);
+        dot.setAttribute('aria-label', '渠道状态：' + state.label);
+      });
+    }
+    function loadStatus() {
+      Api.channelStatus().then(function (data) {
+        if (!host.isConnected) return;
+        statusByModel = Object.create(null);
+        data.items.forEach(function (item) {
+          if (!item || !item.model || !item.group) return;
+          var key = statusKey(item.model, item.group);
+          statusByModel[key] = Object.prototype.hasOwnProperty.call(statusByModel, key) ? false : item;
+        });
+        updateStatusDots();
+      }).catch(function () {
+        if (!host.isConnected) return;
+        statusByModel = Object.create(null);
+        updateStatusDots();
+      }).then(function () { if (host.isConnected) setTimeout(function () { if (host.isConnected) loadStatus(); }, 60000); });
+    }
+    loadStatus();
 
     function groupRate(group) {
       var value = pick(group, 'user_rate_multiplier', 'rate_multiplier', 'standard_rate_multiplier');
@@ -528,13 +560,17 @@
           item.models.map(function (m) {
             return h('div', { class: 'plaza-model' },
               h('button', { class: 'plaza-model-heading', onclick: function () { showModelDetail(m); } },
-                h('span', { class: 'plaza-model-title' }, m.name),
+                h('span', { class: 'plaza-model-name' },
+                  h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
+                    title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
+                  h('span', { class: 'plaza-model-title' }, m.name)),
                 h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
               m.mode === 'token' ? modelPricing(m) : perCallPricing(m)
             );
           })
         ));
       });
+      updateStatusDots();
     }
 
     if (plaza && plaza.description) host.appendChild(h('div', { class: 'plaza-description' }, plaza.description));

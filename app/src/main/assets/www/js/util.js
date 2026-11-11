@@ -94,7 +94,7 @@
     return k.slice(0, 6) + '…' + k.slice(-4);
   }
   function ymd(d) {
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    return String(d.getFullYear()).padStart(4, '0') + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
 
   // ---------- storage ----------
@@ -138,6 +138,7 @@
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     send: '<path d="M21 3 10.5 13.5M21 3l-6.5 18-4-8-8-4L21 3Z"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/>',
     check: '<path d="m4 12.5 5 5L20 6.5"/>',
     alert: '<path d="M12 3 2 21h20L12 3Z"/><path d="M12 10v5m0 3v.5"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
@@ -180,9 +181,136 @@
   }
 
   // ---------- overlays ----------
+  var activePicker = null;
   function closeOverlay() {
+    if (activePicker) activePicker();
     var s = $('.scrim'); if (s) s.parentNode.removeChild(s);
     var sh = $('.sheet'); if (sh) sh.parentNode.removeChild(sh);
+  }
+  function picker(opts) {
+    if (activePicker) activePicker();
+    var previous = document.activeElement;
+    var shade = el('div', { class: 'picker-scrim' });
+    var box = el('div', { class: 'picker-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.title, tabindex: '-1' });
+    box.appendChild(el('div', { class: 'picker-heading' }, el('h3', { text: opts.title }),
+      el('button', { class: 'icon-btn', type: 'button', 'aria-label': '关闭选择', html: ic('close', 18), onclick: close })));
+    box.appendChild(opts.body);
+    if (opts.actions) {
+      var actions = el('div', { class: 'picker-actions' });
+      opts.actions.forEach(function (a) {
+        actions.appendChild(el('button', { type: 'button', class: 'btn ' + (a.kind === 'primary' ? 'btn-primary' : ''), text: a.label,
+          onclick: function () { if (a.onClick && a.onClick() === false) return; close(); } }));
+      });
+      box.appendChild(actions);
+    }
+    function keydown(event) {
+      if (event.key === 'Escape') { event.preventDefault(); close(); }
+    }
+    function close() {
+      document.removeEventListener('keydown', keydown);
+      if (shade.parentNode) shade.remove();
+      if (box.parentNode) box.remove();
+      if (activePicker === close) activePicker = null;
+      if (previous && previous.isConnected && typeof previous.focus === 'function') previous.focus();
+    }
+    activePicker = close;
+    shade.addEventListener('click', close);
+    document.addEventListener('keydown', keydown);
+    document.body.appendChild(shade);
+    document.body.appendChild(box);
+    box.focus();
+    return { close: close, box: box };
+  }
+
+  function dateTimeField(opts) {
+    var kind = opts.kind;
+    var input = el('input', { type: 'text', class: 'picker-input', value: opts.value || '',
+      placeholder: kind === 'date' ? 'YYYY-MM-DD' : 'HH:MM', 'aria-label': opts.label,
+      inputmode: 'text', autocomplete: 'off', spellcheck: 'false' });
+    var field = el('span', { class: 'input picker-field' + (opts.compact ? ' dashboard-date' : '') }, input,
+      el('button', { type: 'button', class: 'picker-trigger', 'aria-label': '选择' + opts.label,
+        html: ic(kind === 'date' ? 'calendar' : 'clock', 17), onclick: function (event) {
+          event.preventDefault();
+          if (kind === 'date') openDate(); else openTime();
+        } }));
+    Object.defineProperty(field, 'value', { get: function () { return input.value; }, set: function (v) { input.value = v; } });
+
+    function openDate() {
+      var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.value);
+      var selected = match ? input.value : '';
+      if (match && Number(match[1]) < 1) match = null;
+      var current = new Date();
+      if (match) {
+        var parsed = new Date(0);
+        parsed.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+        if (ymd(parsed) === selected) current = parsed;
+        else selected = '';
+      }
+      var year = current.getFullYear(), month = current.getMonth();
+      var body = el('div', { class: 'calendar-picker' });
+      var dialog;
+      function paint() {
+        body.innerHTML = '';
+        body.appendChild(el('div', { class: 'calendar-head' },
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': '上个月', html: ic('back', 18), onclick: function () {
+            if (year === 1 && month === 0) return;
+            if (--month < 0) { month = 11; year--; } paint();
+          } }),
+          el('strong', null, year + ' 年 ' + (month + 1) + ' 月'),
+          el('button', { class: 'icon-btn', type: 'button', 'aria-label': '下个月', html: ic('chevron', 18), onclick: function () {
+            if (year === 9999 && month === 11) return;
+            if (++month > 11) { month = 0; year++; } paint();
+          } })));
+        body.appendChild(el('div', { class: 'calendar-week' }, ['日', '一', '二', '三', '四', '五', '六'].map(function (name) { return el('span', null, name); })));
+        var first = new Date(0); first.setFullYear(year, month, 1); first.setHours(0, 0, 0, 0);
+        var last = new Date(0); last.setFullYear(year, month + 1, 0);
+        var grid = el('div', { class: 'calendar-grid' });
+        for (var i = 0; i < first.getDay(); i++) grid.appendChild(el('span'));
+        for (var day = 1; day <= last.getDate(); day++) (function (number) {
+          var value = String(year).padStart(4, '0') + '-' + pad(month + 1) + '-' + pad(number);
+          grid.appendChild(el('button', { type: 'button', class: 'calendar-day' + (value === selected ? ' active' : ''),
+            'aria-label': value, 'aria-pressed': value === selected ? 'true' : 'false', onclick: function () {
+              input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); dialog.close();
+            } }, String(number)));
+        })(day);
+        body.appendChild(grid);
+      }
+      paint();
+      var actions = [{ label: '今天', onClick: function () { input.value = ymd(new Date()); input.dispatchEvent(new Event('change', { bubbles: true })); } }];
+      if (opts.optional) actions.push({ label: '清除', onClick: function () { input.value = ''; input.dispatchEvent(new Event('change', { bubbles: true })); } });
+      actions.push({ label: '取消' });
+      dialog = picker({ title: opts.label, body: body, actions: actions });
+    }
+
+    function openTime() {
+      var match = /^(\d{2}):(\d{2})$/.exec(input.value);
+      var hour = match && Number(match[1]) < 24 ? Number(match[1]) : 0;
+      var minute = match && Number(match[2]) < 60 ? Number(match[2]) : 0;
+      var hours = el('div', { class: 'time-column', role: 'listbox', 'aria-label': '小时' });
+      var minutes = el('div', { class: 'time-column', role: 'listbox', 'aria-label': '分钟' });
+      function paintColumn(host, count, selected, change) {
+        host.innerHTML = '';
+        for (var i = 0; i < count; i++) (function (n) {
+          host.appendChild(el('button', { type: 'button', role: 'option', 'aria-selected': n === selected ? 'true' : 'false',
+            class: 'time-option' + (n === selected ? ' active' : ''), onclick: function () { change(n); paint(); } }, pad(n)));
+        })(i);
+      }
+      function paint() {
+        var hscroll = hours.scrollTop, mscroll = minutes.scrollTop;
+        paintColumn(hours, 24, hour, function (n) { hour = n; });
+        paintColumn(minutes, 60, minute, function (n) { minute = n; });
+        hours.scrollTop = hscroll; minutes.scrollTop = mscroll;
+      }
+      paint();
+      picker({ title: opts.label, body: el('div', { class: 'time-picker' },
+        el('div', null, el('div', { class: 'time-label' }, '小时'), hours),
+        el('div', null, el('div', { class: 'time-label' }, '分钟'), minutes)),
+        actions: [{ label: '取消' }, { label: '确定', kind: 'primary', onClick: function () {
+          input.value = pad(hour) + ':' + pad(minute); input.dispatchEvent(new Event('change', { bubbles: true }));
+        } }] });
+      hours.scrollTop = Math.max(0, hour * 40 - 80); minutes.scrollTop = Math.max(0, minute * 40 - 80);
+    }
+    return field;
   }
   function sheet(opts) {
     closeOverlay();
@@ -252,7 +380,7 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   global.U = {
-    el: el, $: $, esc: esc, ic: ic, toast: toast, sheet: sheet, confirm: confirm,
+    el: el, $: $, esc: esc, ic: ic, toast: toast, sheet: sheet, confirm: confirm, picker: picker, dateTimeField: dateTimeField,
     closeOverlay: closeOverlay, copy: copy, haptic: haptic, sleep: sleep,
     num: num, credits: credits, tokens: tokens, price: price, date: date, datetime: datetime,
     ago: ago, maskKey: maskKey, ymd: ymd, pad: pad, store: store

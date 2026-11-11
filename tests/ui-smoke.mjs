@@ -97,12 +97,12 @@ try {
   await plaza.getByRole('button', { name: /demo-model/ }).click();
   assert.match(await page.locator('.sheet').innerText(), /官方价/);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await plaza.getByRole('button', { name: '渠道状态' }).click();
+  await plaza.getByRole('button', { name: '渠道状态', exact: true }).click();
   await page.getByText('渠道状态加载失败').waitFor();
   failStatus = false;
   await page.getByRole('button', { name: '重试' }).click();
   await page.locator('.channel-item').first().waitFor();
-  assert.equal(statusRequests, 2);
+  assert.equal(statusRequests, 3);
   assert.equal(await page.locator('.tab.active').getAttribute('data-tab'), 'plaza');
   assert.equal(await page.locator('.channel-item').count(), 3);
   assert.match(await page.locator('.channel-summary').innerText(), /1 个故障/);
@@ -124,7 +124,7 @@ try {
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-channel-390.png', animations: 'disabled' });
   await page.getByRole('button', { name: '刷新渠道状态' }).click();
   await page.waitForFunction(() => !document.querySelector('[aria-label="刷新渠道状态"]').disabled);
-  assert.equal(statusRequests, 3);
+  assert.equal(statusRequests, 4);
   await page.getByRole('button', { name: '模型广场' }).click();
   await page.locator('.plaza-group').first().waitFor();
   await page.getByRole('button', { name: '我的', exact: true }).click();
@@ -160,8 +160,8 @@ try {
   await page.getByRole('button', { name: '按小时' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dashboard-trend-point').length === 3);
   assert.equal(trendQueries.at(-1).get('granularity'), 'hour');
-  await page.getByLabel('开始日期').fill('2026-01-01');
-  await page.getByLabel('结束日期').fill('2026-01-03');
+  await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
+  await page.getByLabel('结束日期', { exact: true }).fill('2026-01-03');
   await page.getByRole('button', { name: '应用日期' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dashboard-trend-point').length === 3);
   assert.equal(modelQueries.at(-1).get('start_date'), '2026-01-01');
@@ -229,8 +229,10 @@ try {
   await page.getByRole('button', { name: '令牌', exact: true }).click();
   await page.getByText('还没有令牌').waitFor();
   await page.getByRole('button', { name: '新建' }).click();
-  await page.locator('.sheet select').selectOption('1');
-  assert.equal(await page.locator('.sheet select').inputValue(), '1');
+  await page.getByRole('button', { name: '选择分组' }).getByText('请选择分组').waitFor();
+  await page.getByRole('button', { name: '选择分组' }).click();
+  await page.getByRole('option', { name: '测试分组' }).click();
+  assert.match(await page.getByRole('button', { name: '选择分组' }).innerText(), /测试分组/);
   assert.deepEqual(errors, []);
   console.log('UI smoke: plaza pricing and filters, dashboard, login, usage and key form passed');
 } finally {

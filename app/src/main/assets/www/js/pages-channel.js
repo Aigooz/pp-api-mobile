@@ -224,5 +224,5 @@
     return host;
   }
 
-  global.PagesChannel = { render: render };
+  global.PagesChannel = { render: render, statusInfo: statusInfo };
 })(window);

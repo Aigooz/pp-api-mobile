@@ -29,15 +29,22 @@
     return h('span', { class: 'badge ' + m[1] }, m[0]);
   }
 
-  function keyCard(k, reload) {
+  function keyCard(k, reload, account, versionIsCurrent) {
     var quota = Number(pick(k, 'quota', 'total_quota', 'quota_limit') || 0);
-    var used = Number(pick(k, 'used_quota', 'quota_used', 'used') || 0);
+    var usedValue = pick(k, 'used_quota', 'quota_used', 'used');
+    var used = usedValue === undefined || !isFinite(Number(usedValue)) ? null : Number(usedValue);
     var pct = quota > 0 ? Math.min(100, Math.round(used / quota * 100)) : 0;
     var group = pick(k, 'group_name') || (k.group && k.group.name) ||
       (global.S && global.S.groupNames && global.S.groupNames[k.group_id]) ||
       (k.group_id ? '分组 #' + k.group_id : '默认分组');
     var exp = pick(k, 'expires_at', 'expired_at');
 
+    var concurrency = h('strong');
+    function setConcurrency(value) {
+      concurrency.textContent = value !== undefined && value !== null && value !== '' && isFinite(Number(value)) && Number(value) >= 0 ? U.num(Number(value)) : '—';
+    }
+    setConcurrency(pick(k, 'current_concurrency'));
+    var stats = h('div', { class: 'key-usage', 'aria-live': 'polite' }, h('span', { class: 'tiny muted' }, '今日用量加载中…'));
     var children = [
       h('div', { class: 'keycard-top' },
         h('div', { style: { flex: '1', minWidth: '0' } },
@@ -56,10 +63,12 @@
       quota > 0
         ? h('div', null,
             h('div', { class: 'row between', style: { marginBottom: '5px' } },
-              h('span', { class: 'tiny muted' }, '已用 $' + U.credits(used) + ' / $' + U.credits(quota)),
-              h('span', { class: 'tiny muted' }, pct + '%')),
-            h('div', { class: 'progress' + (pct > 90 ? ' danger' : pct > 70 ? ' warn' : '') }, h('i', { style: { width: pct + '%' } })))
-        : h('div', { class: 'tiny muted' }, '额度不限'),
+              h('span', { class: 'tiny muted' }, '额度已用 ' + (used === null ? '—' : '$' + U.credits(used)) + ' / $' + U.credits(quota)),
+              h('span', { class: 'tiny muted' }, used === null ? '—' : pct + '%')),
+            used === null ? null : h('div', { class: 'progress' + (pct > 90 ? ' danger' : pct > 70 ? ' warn' : '') }, h('i', { style: { width: pct + '%' } })))
+        : h('div', { class: 'tiny muted' }, '额度不限 · 额度已用 ' + (used === null ? '—' : '$' + U.credits(used))),
+      h('div', { class: 'key-concurrency' }, h('span', null, '当前并发'), concurrency),
+      stats,
       h('div', { class: 'meta-grid' },
         h('div', null, '分组', h('b', { class: 'nowrap' }, group)),
         h('div', null, '创建', h('b', null, U.date(pick(k, 'created_at', 'createdAt')))),
@@ -97,7 +106,33 @@
       )
     ];
     if (String(k.status) !== 'active') children[0].style.opacity = '0.72';
-    return h('div', { class: 'card', style: { marginBottom: '10px' } }, h('div', { class: 'keycard' }, children));
+    var node = h('div', { class: 'card', style: { marginBottom: '10px' } }, h('div', { class: 'keycard' }, children));
+    function loadStats() {
+      var today = U.ymd(new Date());
+      var query = { api_key_id: k.id, start_date: today, end_date: today };
+      try { query.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+      stats.textContent = '今日用量加载中…';
+      var request = Number.isSafeInteger(Number(k.id)) && Number(k.id) > 0 ? Api.usageStats(query) : Promise.reject(new Error('令牌信息不完整'));
+      return request.then(function (data) {
+        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !node.isConnected) return;
+        var requests = pick(data, 'total_requests', 'requests', 'request_count');
+        var tokens = pick(data, 'total_tokens');
+        var cost = pick(data, 'total_actual_cost');
+        if (requests === undefined || tokens === undefined || cost === undefined ||
+            !isFinite(Number(requests)) || !isFinite(Number(tokens)) || !isFinite(Number(cost))) throw new Error('用量数据不完整');
+        stats.innerHTML = '';
+        stats.appendChild(h('div', { class: 'key-usage-grid' },
+          h('span', null, '今日请求', h('b', null, U.num(Number(requests)))),
+          h('span', null, '今日 Tokens', h('b', null, U.tokens(Number(tokens)))),
+          h('span', null, '今日花费', h('b', null, '$' + U.credits(Number(cost))))));
+      }).catch(function () {
+        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !node.isConnected) return;
+        stats.innerHTML = '';
+        stats.appendChild(h('span', null, '今日用量暂不可用 '));
+        stats.appendChild(h('button', { type: 'button', onclick: function () { loadStats(); } }, '重试'));
+      });
+    }
+    return { node: node, id: String(k.id), loadStats: loadStats, setConcurrency: setConcurrency };
   }
 
   function openKeyDetail(k) {
@@ -125,6 +160,7 @@
     if (!Api.AUTH.isLogged()) return needLogin();
     var page = h('div', { class: 'page' });
     var host = h('div', { style: { marginTop: '10px' } });
+    var account = Api.AUTH.context(), requestVersion = 0, concurrencyTimer = null;
     page.appendChild(h('div', { class: 'row between', style: { marginBottom: '4px' } },
       h('div', { class: 'tiny muted' }, '令牌用于调用 API，请勿泄露给他人'),
       h('button', { class: 'btn btn-primary btn-sm', onclick: function () { openKeyEditor(null, reload); } },
@@ -133,13 +169,18 @@
     page.appendChild(host);
 
     function reload() {
+      clearTimeout(concurrencyTimer);
+      var version = ++requestVersion;
+      function current() { return version === requestVersion && Api.AUTH.matches(account) && page.isConnected; }
       host.innerHTML = '';
       host.appendChild(h('div', { class: 'card pad' }, h('div', { class: 'skeleton', style: { height: '60px' } })));
       if (!global.S.groupNames) global.S.groupNames = {};
       Api.groups().then(function (gs) {
+        if (!current()) return;
         arrOf(gs).forEach(function (g) { global.S.groupNames[g.id] = g.name; });
       }).catch(function () {});
       Api.keys(1, 100).then(function (d) {
+        if (!current()) return;
         var items = arrOf(d);
         global.S.keys = items;
         host.innerHTML = '';
@@ -147,7 +188,26 @@
           host.appendChild(emptyState('还没有令牌', '创建一个令牌即可在客户端调用模型', 'key'));
           return;
         }
-        items.forEach(function (k) { host.appendChild(keyCard(k, reload)); });
+        var cards = items.map(function (k) { return keyCard(k, reload, account, current); });
+        cards.forEach(function (item) { host.appendChild(item.node); });
+        var next = 0;
+        function loadNext() {
+          if (!current() || next >= cards.length) return;
+          cards[next++].loadStats().then(loadNext);
+        }
+        for (var i = 0; i < Math.min(4, cards.length); i++) loadNext();
+        function refreshConcurrency() {
+          if (!current()) return;
+          Api.keys(1, 100).then(function (result) {
+            if (!current()) return;
+            var values = Object.create(null);
+            arrOf(result).forEach(function (item) { values[String(item.id)] = pick(item, 'current_concurrency'); });
+            cards.forEach(function (item) { item.setConcurrency(values[item.id]); });
+          }).catch(function () {
+            if (current()) cards.forEach(function (item) { item.setConcurrency(undefined); });
+          }).then(function () { if (current()) concurrencyTimer = setTimeout(refreshConcurrency, 30000); });
+        }
+        concurrencyTimer = setTimeout(refreshConcurrency, 30000);
         host.appendChild(h('div', { class: 'card', style: { marginTop: '6px' } },
           h('div', { class: 'list-item', onclick: function () { U.copy(Api.V1); } },
             h('span', { class: 'li-icon', html: U.ic('external', 16) }),
@@ -157,6 +217,7 @@
             h('div', { class: 'li-tail', html: U.ic('copy', 16) })
           )));
       }).catch(function (e) {
+        if (!current()) return;
         host.innerHTML = '';
         host.appendChild(emptyState('加载失败', e.message, 'alert'));
       });
@@ -167,25 +228,49 @@
 
   function openKeyEditor(k, reload) {
     var isEdit = !!k;
-    var groups = [];
+    var groups = [], groupsState = 'loading', selectedGroup = k && k.group_id ? String(k.group_id) : '';
     var name = h('input', { class: 'input', placeholder: '例如：我的电脑', value: (k && k.name) || '' });
-    var groupSel = h('select', { class: 'select' }, h('option', { value: '' }, '默认分组（加载中…）'));
+    var groupText = h('span', { class: 'group-picker-value' }, '正在加载分组…');
+    var groupSel = h('button', { type: 'button', class: 'input group-picker-trigger', 'aria-label': '选择分组',
+      onclick: openGroups }, groupText, h('span', { html: U.ic('down', 17) }));
     var quota = h('input', { class: 'input', type: 'number', inputmode: 'decimal', placeholder: '不限额度', value: k && k.quota ? String(k.quota) : '' });
-    var exp = h('input', { class: 'input', type: 'date', value: k && k.expires_at ? U.date(k.expires_at) : '' });
+    var exp = U.dateTimeField({ kind: 'date', label: '到期时间', optional: true, value: k && k.expires_at ? U.date(k.expires_at) : '' });
     var custom = isEdit ? null : h('input', { class: 'input', placeholder: '留空自动生成（可选）' });
 
-    Api.groups().then(function (d) {
-      groups = arrOf(d);
-      groupSel.innerHTML = '';
-      groupSel.appendChild(h('option', { value: '' }, '请选择分组'));
-      groups.forEach(function (g) {
-        groupSel.appendChild(h('option', { value: String(g.id) }, g.name || ('分组 ' + g.id)));
-      });
-      if (k && k.group_id) groupSel.value = String(k.group_id);
-    }).catch(function () {
-      groupSel.innerHTML = '';
-      groupSel.appendChild(h('option', { value: '' }, '分组加载失败'));
-    });
+    function groupLabel() {
+      var selected = groups.filter(function (g) { return String(g.id) === selectedGroup; })[0];
+      groupText.textContent = groupsState === 'loading' ? '正在加载分组…' : groupsState === 'error' ? '加载失败，点击重试' :
+        selected ? (selected.name || '分组 ' + selected.id) : selectedGroup ? '原分组不可用，请重新选择' : '请选择分组';
+    }
+    function loadGroups() {
+      groupsState = 'loading'; groupLabel();
+      Api.groups().then(function (d) { groups = arrOf(d); groupsState = 'ready'; groupLabel(); })
+        .catch(function () { groupsState = 'error'; groupLabel(); });
+    }
+    function openGroups() {
+      if (groupsState === 'loading') return;
+      if (groupsState === 'error') { loadGroups(); return; }
+      var search = h('input', { class: 'input group-search', type: 'search', placeholder: '搜索分组', 'aria-label': '搜索分组' });
+      var list = h('div', { class: 'group-options', role: 'listbox', 'aria-label': '可用分组' });
+      var dialog;
+      function paintGroups() {
+        var query = search.value.trim().toLowerCase();
+        var matches = groups.filter(function (g) { return String(g.name || ('分组 ' + g.id)).toLowerCase().indexOf(query) >= 0; });
+        list.innerHTML = '';
+        if (!matches.length) { list.appendChild(h('div', { class: 'picker-empty' }, groups.length ? '没有找到分组' : '暂无可用分组')); return; }
+        matches.forEach(function (g) {
+          var chosen = String(g.id) === selectedGroup;
+          list.appendChild(h('button', { type: 'button', role: 'option', 'aria-selected': chosen ? 'true' : 'false',
+            class: 'group-option' + (chosen ? ' active' : ''), onclick: function () {
+              selectedGroup = String(g.id); groupLabel(); dialog.close();
+            } }, h('span', null, g.name || ('分组 ' + g.id)), chosen ? h('span', { html: U.ic('check', 17) }) : null));
+        });
+      }
+      search.addEventListener('input', paintGroups);
+      paintGroups();
+      dialog = U.picker({ title: '选择分组', body: h('div', null, search, list), actions: [{ label: '取消' }] });
+    }
+    loadGroups();
 
     var body = h('div', null,
       h('div', { class: 'field' }, h('label', null, '名称'), name),
@@ -205,19 +290,21 @@
           kind: 'primary',
           onClick: function () {
             if (!name.value.trim()) { U.toast('请填写名称', 'err'); return false; }
-            if (!groupSel.value) { U.toast('请选择分组', 'err'); return false; }
+            if (groupsState !== 'ready' || !groups.some(function (g) { return String(g.id) === selectedGroup; })) { U.toast('请选择可用分组', 'err'); return false; }
             var payload = { name: name.value.trim() };
-            if (groupSel.value) payload.group_id = Number(groupSel.value);
+            payload.group_id = Number(selectedGroup);
             var qv = Number(quota.value);
             if (quota.value !== '' && isFinite(qv) && qv > 0) payload.quota = qv;
             if (exp.value) {
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(exp.value)) { U.toast('请输入有效的到期日期', 'err'); return false; }
               var when = new Date(exp.value + 'T23:59:59');
+              if (isNaN(when.getTime()) || U.ymd(when) !== exp.value) { U.toast('请输入有效的到期日期', 'err'); return false; }
               if (isEdit) {
                 payload.expires_at = when.toISOString();
               } else {
                 payload.expires_in_days = Math.max(1, Math.ceil((when.getTime() - Date.now()) / 86400000));
               }
-            }
+            } else if (isEdit && k.expires_at) payload.expires_at = '';
             if (custom && custom.value.trim()) payload.custom_key = custom.value.trim();
             var p = isEdit ? Api.keyUpdate(k.id, payload) : Api.keyCreate(payload);
             p.then(function (d) {
@@ -255,10 +342,10 @@
     var logsHost = h('div', { class: 'section' });
     var end = new Date(), start = new Date();
     start.setDate(end.getDate() - (range === '7d' ? 6 : range === '30d' ? 29 : 0));
-    var startInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(start), 'aria-label': '开始日期' });
-    var endInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(end), 'aria-label': '结束日期' });
-    var startTime = h('input', { type: 'time', class: 'input dashboard-date', value: '00:00', 'aria-label': '开始时间' });
-    var endTime = h('input', { type: 'time', class: 'input dashboard-date', value: '23:59', 'aria-label': '结束时间' });
+    var startInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(start), label: '开始日期' });
+    var endInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(end), label: '结束日期' });
+    var startTime = U.dateTimeField({ kind: 'time', compact: true, value: '00:00', label: '开始时间' });
+    var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
     var requestVersion = 0;
     var seg = h('div', { class: 'seg' }, [
       { k: 'today', t: '今日' }, { k: '7d', t: '近 7 天' }, { k: '30d', t: '近 30 天' }

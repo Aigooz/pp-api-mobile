@@ -94,6 +94,7 @@
             (Number(config.daily_limit) > 0 ? ' · 每日上限 ¥' + money(config.daily_limit) : '')))));
       }
       formHost.appendChild(section('支付方式', null, null, payMethods));
+      if (selectedPlan) formHost.appendChild(h('div', { class: 'payment-balance-note' }, '余额支付暂不可用，平台尚未提供余额购买套餐的接口。'));
       formHost.appendChild(totalHint);
       formHost.appendChild(submit);
       if (info.help_text || config.help_text) formHost.appendChild(h('div', { class: 'payment-help' }, info.help_text || config.help_text));

@@ -76,10 +76,10 @@ try {
   await page.locator('input[type=password]').fill('password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('用量分析').waitFor();
-  await page.getByLabel('开始日期').fill('2026-01-01');
-  await page.getByLabel('结束日期').fill('2026-01-01');
-  await page.getByLabel('开始时间').fill('10:15');
-  await page.getByLabel('结束时间').fill('10:15');
+  await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
+  await page.getByLabel('结束日期', { exact: true }).fill('2026-01-01');
+  await page.getByLabel('开始时间', { exact: true }).fill('10:15');
+  await page.getByLabel('结束时间', { exact: true }).fill('10:15');
   await page.getByRole('button', { name: '应用日期' }).click();
   await page.getByText('inside-a', { exact: true }).first().waitFor();
   assert.match(await page.locator('.dashboard-model-table').innerText(), /inside-b/);
@@ -95,8 +95,8 @@ try {
   await page.getByText(/调用记录不完整或重复/).first().waitFor();
   usageMode = 'delayed';
   await page.getByRole('button', { name: '应用日期' }).click();
-  await page.getByLabel('开始时间').fill('00:00');
-  await page.getByLabel('结束时间').fill('23:59');
+  await page.getByLabel('开始时间', { exact: true }).fill('00:00');
+  await page.getByLabel('结束时间', { exact: true }).fill('23:59');
   await page.getByRole('button', { name: '应用日期' }).click();
   await page.waitForTimeout(1100);
   assert.equal(await page.getByText('inside-a', { exact: true }).count(), 0, 'old response must not overwrite new range');
@@ -104,10 +104,10 @@ try {
   await page.getByText('输入 tokens').waitFor();
   assert.ok(lastTrend.get('start_date') && lastTrend.get('end_date'));
   assert.equal(lastTrend.has('period'), false);
-  await page.getByLabel('开始日期').fill('2026-01-01');
-  await page.getByLabel('结束日期').fill('2026-01-01');
-  await page.getByLabel('开始时间').fill('10:15');
-  await page.getByLabel('结束时间').fill('10:15');
+  await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
+  await page.getByLabel('结束日期', { exact: true }).fill('2026-01-01');
+  await page.getByLabel('开始时间', { exact: true }).fill('10:15');
+  await page.getByLabel('结束时间', { exact: true }).fill('10:15');
   usageMode = 'normal';
   await page.getByRole('button', { name: '应用时间' }).click();
   await page.getByText('inside-a', { exact: true }).first().waitFor();
@@ -142,6 +142,7 @@ try {
   await page.locator('.payment-active').getByText('已完成', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByText('测试日卡', { exact: true }).click();
+  await page.getByText('余额支付暂不可用，平台尚未提供余额购买套餐的接口。').waitFor();
   await page.getByText('微信支付', { exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();
   await page.getByRole('button', { name: '创建订单' }).click();

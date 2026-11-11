@@ -60,10 +60,10 @@
     var end = new Date();
     var start = new Date();
     start.setDate(end.getDate() - 6);
-    var startInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(start), 'aria-label': '开始日期' });
-    var endInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(end), 'aria-label': '结束日期' });
-    var startTime = h('input', { type: 'time', class: 'input dashboard-date', value: '00:00', 'aria-label': '开始时间' });
-    var endTime = h('input', { type: 'time', class: 'input dashboard-date', value: '23:59', 'aria-label': '结束时间' });
+    var startInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(start), label: '开始日期' });
+    var endInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(end), label: '结束日期' });
+    var startTime = U.dateTimeField({ kind: 'time', compact: true, value: '00:00', label: '开始时间' });
+    var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
     var granularity = 'day';
     var requestVersion = 0;
 

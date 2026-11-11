@@ -32,7 +32,7 @@ try {
   await page.locator('.plaza-group').first().waitFor({ timeout: 30000 });
   await page.getByText('官方价').first().waitFor();
   await page.getByText('缓存读取').first().waitFor();
-  await page.getByRole('button', { name: '渠道状态' }).click();
+  await page.getByRole('button', { name: '渠道状态', exact: true }).click();
   await page.locator('.channel-item').first().waitFor({ timeout: 30000 });
   await page.getByText('平均可用率').waitFor();
   await page.getByRole('button', { name: '刷新渠道状态' }).click();
@@ -45,6 +45,11 @@ try {
     return text.includes('还没有令牌') || text.includes('Base URL') || text.includes('加载失败');
   }, null, { timeout: 30000 });
   assert.equal(await page.getByText('加载失败', { exact: true }).count(), 0);
+  if (await page.locator('.keycard').count()) {
+    await page.locator('.key-concurrency').first().waitFor();
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('.key-usage')).every(el => !el.textContent.includes('加载中')), null, { timeout: 30000 });
+    assert.equal(await page.getByText('今日用量暂不可用').count(), 0);
+  }
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByText('用量明细').click();
   await page.getByText('输入 tokens').waitFor({ timeout: 30000 });
