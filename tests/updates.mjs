@@ -64,6 +64,24 @@ try {
   }
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-updates.png', animations: 'disabled' });
   assert.deepEqual(errors, []);
+  const iosContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    await iosContext.addInitScript(() => {
+      window.openedUpdateUrl = '';
+      window.Native = {
+        device: () => JSON.stringify({ app: '1.1.0', platform: 'ios' }),
+        open: url => { window.openedUpdateUrl = url; }
+      };
+    });
+    const iosPage = await iosContext.newPage();
+    await iosPage.goto(base + '/#/updates');
+    await iosPage.getByText('当前版本 1.1.0').waitFor();
+    await iosPage.getByText('iOS 安装包需要使用自己的 Apple ID 签名后安装；更新时也需要重新签名。').waitFor();
+    await iosPage.getByRole('button', { name: '打开 GitHub 下载页面' }).click();
+    assert.equal(await iosPage.evaluate(() => window.openedUpdateUrl), 'https://github.com/Aigooz/pp-api-mobile-updates/releases/latest');
+  } finally {
+    await iosContext.close();
+  }
   console.log('Updates: automatic check, prompt, download, install, failure and guest entry passed');
 } finally {
   await context.close();

@@ -55,8 +55,11 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
 
     private func configureUserScripts(_ controller: WKUserContentController) {
         controller.removeAllUserScripts()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let versionJSON = (try? JSONSerialization.data(withJSONObject: [version]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[\"\"]"
         controller.addUserScript(WKUserScript(
-            source: "window.__ppSecureInitial = \(NativeBridge.secureInitialJSON());",
+            source: "window.__ppSecureInitial = \(NativeBridge.secureInitialJSON()); window.__ppVersion = \(versionJSON)[0];",
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
@@ -144,7 +147,7 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         copy: text => send({ action: 'copy', text: String(text) }),
         open: url => send({ action: 'open', url: String(url) }),
         vibrate: milliseconds => send({ action: 'vibrate', milliseconds }),
-        device: () => JSON.stringify({ model: 'iPhone', brand: 'Apple', release: navigator.userAgent, app: '1.0.0', platform: 'ios' }),
+        device: () => JSON.stringify({ model: 'iPhone', brand: 'Apple', release: navigator.userAgent, app: window.__ppVersion, platform: 'ios' }),
         statusBar: (color, darkIcons) => send({ action: 'statusBar', color, darkIcons }),
         keepAwake: on => send({ action: 'keepAwake', on }),
         secureMode: () => 'async',

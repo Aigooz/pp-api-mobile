@@ -52,3 +52,38 @@ jobs:
           path: Pp-API-iOS-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+      - name: Build for iOS Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/PpApiMobile.xcodeproj \
+            -scheme PpApiMobile \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/pp-ios-simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            build
+      - name: Launch in iOS Simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available --json | jq -r '
+            [.devices | to_entries[] | select(.key | startswith("com.apple.CoreSimulator.SimRuntime.iOS-")) |
+            .value[] | select(.isAvailable and (.name | startswith("iPhone")))] | .[0].udid // empty')
+          test -n "$udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$RUNNER_TEMP/pp-ios-simulator/Build/Products/Release-iphonesimulator/PpApiMobile.app"
+          xcrun simctl launch "$udid" com.ppapi.mobile
+          sleep 10
+          xcrun simctl spawn "$udid" launchctl list | grep -F com.ppapi.mobile
+          xcrun simctl io "$udid" screenshot "$GITHUB_WORKSPACE/Pp-API-iOS-simulator.png"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pp-API-iOS-simulator
+          path: Pp-API-iOS-simulator.png
+          if-no-files-found: error
+          retention-days: 30

@@ -52,9 +52,15 @@
       h('img', { src: 'img/pp-logo.jpg', alt: '', width: '52', height: '52' }),
       h('div', null, h('strong', null, 'Pp API'), h('div', { class: 'small muted' }, '当前版本 ' + version))));
     if (!android) {
-      page.appendChild(h('div', { class: 'notice', style: { marginTop: '16px' } }, info.platform === 'ios'
-        ? 'iOS 更新需要通过 TestFlight 或 App Store 安装。目前尚未配置苹果分发渠道。'
+      var ios = info.platform === 'ios';
+      page.appendChild(h('div', { class: 'notice', style: { marginTop: '16px' } }, ios
+        ? 'iOS 安装包需要使用自己的 Apple ID 签名后安装；更新时也需要重新签名。'
         : '请在 Android 客户端中检查和安装更新。'));
+      if (ios) {
+        page.appendChild(h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' }, onclick: function () {
+          global.Native.open('https://github.com/Aigooz/pp-api-mobile-updates/releases/latest');
+        } }, '打开 GitHub 下载页面'));
+      }
       return page;
     }
     var content = h('div', { class: 'section updates-content' });
