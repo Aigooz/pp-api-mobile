@@ -86,6 +86,7 @@
             var next = String(k.status) === 'inactive' ? 'active' : 'inactive';
             Api.keyUpdate(k.id, { status: next }).then(function () {
               U.toast(next === 'active' ? '已启用' : '已停用', 'ok');
+              global.dispatchEvent(new CustomEvent('pp:keys-changed'));
               reload();
             }).catch(function (err) { U.toast(err.message, 'err'); });
           }
@@ -98,6 +99,7 @@
               if (!ok) return;
               Api.keyDelete(k.id).then(function () {
                 U.toast('已删除', 'ok');
+                global.dispatchEvent(new CustomEvent('pp:keys-changed'));
                 reload();
               }).catch(function (err) { U.toast(err.message, 'err'); });
             });
@@ -114,7 +116,7 @@
       stats.textContent = '今日用量加载中…';
       var request = Number.isSafeInteger(Number(k.id)) && Number(k.id) > 0 ? Api.usageStats(query) : Promise.reject(new Error('令牌信息不完整'));
       return request.then(function (data) {
-        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !node.isConnected) return;
+        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !App.isPageRetained(node)) return;
         var requests = pick(data, 'total_requests', 'requests', 'request_count');
         var tokens = pick(data, 'total_tokens');
         var cost = pick(data, 'total_actual_cost');
@@ -126,7 +128,7 @@
           h('span', null, '今日 Tokens', h('b', null, U.tokens(Number(tokens)))),
           h('span', null, '今日花费', h('b', null, '$' + U.credits(Number(cost))))));
       }).catch(function () {
-        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !node.isConnected) return;
+        if (!Api.AUTH.matches(account) || !versionIsCurrent() || !App.isPageRetained(node)) return;
         stats.innerHTML = '';
         stats.appendChild(h('span', null, '今日用量暂不可用 '));
         stats.appendChild(h('button', { type: 'button', onclick: function () { loadStats(); } }, '重试'));
@@ -160,7 +162,7 @@
     if (!Api.AUTH.isLogged()) return needLogin();
     var page = h('div', { class: 'page' });
     var host = h('div', { style: { marginTop: '10px' } });
-    var account = Api.AUTH.context(), requestVersion = 0, concurrencyTimer = null;
+    var account = Api.AUTH.context(), requestVersion = 0, concurrencyTimer = null, loadedAt = 0, cards = [];
     page.appendChild(h('div', { class: 'row between', style: { marginBottom: '4px' } },
       h('div', { class: 'tiny muted' }, '令牌用于调用 API，请勿泄露给他人'),
       h('button', { class: 'btn btn-primary btn-sm', onclick: function () { openKeyEditor(null, reload); } },
@@ -168,12 +170,15 @@
     ));
     page.appendChild(host);
 
-    function reload() {
+    function reload(silent) {
+      silent = silent === true;
       clearTimeout(concurrencyTimer);
       var version = ++requestVersion;
-      function current() { return version === requestVersion && Api.AUTH.matches(account) && page.isConnected; }
-      host.innerHTML = '';
-      host.appendChild(h('div', { class: 'card pad' }, h('div', { class: 'skeleton', style: { height: '60px' } })));
+      function current() { return version === requestVersion && Api.AUTH.matches(account) && App.isPageRetained(page); }
+      if (!silent || !loadedAt) {
+        host.innerHTML = '';
+        host.appendChild(h('div', { class: 'card pad' }, h('div', { class: 'skeleton', style: { height: '60px' } })));
+      }
       if (!global.S.groupNames) global.S.groupNames = {};
       Api.groups().then(function (gs) {
         if (!current()) return;
@@ -183,12 +188,14 @@
         if (!current()) return;
         var items = arrOf(d);
         global.S.keys = items;
+        loadedAt = Date.now();
+        global.dispatchEvent(new CustomEvent('pp:keys-updated', { detail: { account: account.id, items: items } }));
         host.innerHTML = '';
         if (!items.length) {
           host.appendChild(emptyState('还没有令牌', '创建一个令牌即可在客户端调用模型', 'key'));
           return;
         }
-        var cards = items.map(function (k) { return keyCard(k, reload, account, current); });
+        cards = items.map(function (k) { return keyCard(k, reload, account, current); });
         cards.forEach(function (item) { host.appendChild(item.node); });
         var next = 0;
         function loadNext() {
@@ -197,7 +204,7 @@
         }
         for (var i = 0; i < Math.min(4, cards.length); i++) loadNext();
         function refreshConcurrency() {
-          if (!current()) return;
+          if (!current() || !App.isPageActive(page)) return;
           Api.keys(1, 100).then(function (result) {
             if (!current()) return;
             var values = Object.create(null);
@@ -205,9 +212,9 @@
             cards.forEach(function (item) { item.setConcurrency(values[item.id]); });
           }).catch(function () {
             if (current()) cards.forEach(function (item) { item.setConcurrency(undefined); });
-          }).then(function () { if (current()) concurrencyTimer = setTimeout(refreshConcurrency, 30000); });
+          }).then(function () { if (current() && App.isPageActive(page)) concurrencyTimer = setTimeout(refreshConcurrency, 30000); });
         }
-        concurrencyTimer = setTimeout(refreshConcurrency, 30000);
+        if (App.isPageActive(page)) concurrencyTimer = setTimeout(refreshConcurrency, 30000);
         host.appendChild(h('div', { class: 'card', style: { marginTop: '6px' } },
           h('div', { class: 'list-item', onclick: function () { U.copy(Api.V1); } },
             h('span', { class: 'li-icon', html: U.ic('external', 16) }),
@@ -218,10 +225,15 @@
           )));
       }).catch(function (e) {
         if (!current()) return;
-        host.innerHTML = '';
-        host.appendChild(emptyState('加载失败', e.message, 'alert'));
+        if (!silent || !loadedAt) { host.innerHTML = ''; host.appendChild(emptyState('加载失败', e.message, 'alert')); }
       });
     }
+    page.addEventListener('pp:page-activate', function () {
+      if (loadedAt && Date.now() - loadedAt >= 30000) reload(true);
+      else if (loadedAt && cards.length) { clearTimeout(concurrencyTimer); concurrencyTimer = setTimeout(function () { reload(true); }, 30000); }
+    });
+    page.addEventListener('pp:page-deactivate', function () { clearTimeout(concurrencyTimer); });
+    page.addEventListener('pp:page-dispose', function () { clearTimeout(concurrencyTimer); requestVersion++; });
     reload();
     return page;
   }
@@ -308,6 +320,7 @@
             if (custom && custom.value.trim()) payload.custom_key = custom.value.trim();
             var p = isEdit ? Api.keyUpdate(k.id, payload) : Api.keyCreate(payload);
             p.then(function (d) {
+              global.dispatchEvent(new CustomEvent('pp:keys-changed'));
               if (!isEdit && d && d.key) {
                 U.sheet({
                   title: '令牌创建成功',
@@ -508,6 +521,7 @@
     var role = pick(u, 'role', 'user_role') || '';
     var roleText = /admin/.test(String(role)) ? '管理员' : (/observer/.test(String(role)) ? '观察者' : '用户');
 
+    var balanceBadge = h('span', { class: 'badge teal' }, '$' + U.credits(balanceOf(u)));
     page.appendChild(h('div', { class: 'card pad' },
       h('div', { class: 'row' },
         h('div', {
@@ -520,7 +534,7 @@
           h('div', { style: { fontWeight: '700' }, class: 'nowrap' }, email),
           h('div', { class: 'tiny muted' }, 'ID ' + (pick(u, 'id', 'user_id') || '—') + ' · ' + roleText)
         ),
-        h('span', { class: 'badge teal' }, '$' + U.credits(balanceOf(u)))
+        balanceBadge
       )
     ));
 
@@ -571,6 +585,11 @@
       }, '退出登录')));
 
     page.appendChild(h('div', { class: 'footer-note' }, 'Pp API ' + (global.Updates ? global.Updates.version() : '1.0.0')));
+    function updateUser() {
+      if (App.isPageRetained(page)) balanceBadge.textContent = '$' + U.credits(balanceOf(global.S.user || Api.AUTH.user() || {}));
+    }
+    global.addEventListener('pp:user-updated', updateUser);
+    page.addEventListener('pp:page-dispose', function () { global.removeEventListener('pp:user-updated', updateUser); });
     return page;
   }
 

@@ -174,6 +174,7 @@
     }
 
     function scrollBottom(force) {
+      if (!App.isPageActive(page)) return;
       var main = document.querySelector('main');
       if (!main) return;
       var near = main.scrollHeight - main.scrollTop - main.clientHeight < 200;
@@ -805,9 +806,9 @@
     paintInfo();
     paint();
 
-    Api.keys(1, 100).then(function (d) {
+    function updateKeys(items) {
       if (!isCurrent()) return;
-      keys = arrOf(d);
+      keys = items;
       global.S.keys = keys;
       var key = activeKey();
       if (key) {
@@ -826,6 +827,32 @@
           paintInfo();
         }
       });
+    }
+    function onKeysUpdated(event) {
+      if (event.detail && event.detail.account === authContext.id && Array.isArray(event.detail.items)) updateKeys(event.detail.items);
+    }
+    function onKeysChanged() {
+      if (!isCurrent()) return;
+      Api.keys(1, 100).then(function (data) { updateKeys(arrOf(data)); }).catch(function () {});
+    }
+    global.addEventListener('pp:keys-updated', onKeysUpdated);
+    global.addEventListener('pp:keys-changed', onKeysChanged);
+    page.addEventListener('pp:page-activate', function () {
+      if (global.S.useSelectedChatModel && global.S.chatModel) {
+        session.model = global.S.chatModel;
+        global.S.useSelectedChatModel = false;
+        modelChip.firstChild.textContent = session.model;
+        save(); paintInfo();
+      }
+    });
+    page.addEventListener('pp:page-dispose', function () {
+      global.removeEventListener('pp:keys-updated', onKeysUpdated);
+      global.removeEventListener('pp:keys-changed', onKeysChanged);
+      if (activeChat) activeChat();
+      activeChat = null;
+    });
+    Api.keys(1, 100).then(function (d) {
+      updateKeys(arrOf(d));
     }).catch(function () {
       if (!isCurrent()) return;
       keyChip.firstChild.textContent = '令牌加载失败';

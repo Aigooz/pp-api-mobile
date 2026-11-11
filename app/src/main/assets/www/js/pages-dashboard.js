@@ -65,7 +65,9 @@
     var startTime = U.dateTimeField({ kind: 'time', compact: true, value: '00:00', label: '开始时间' });
     var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
     var granularity = 'day';
-    var requestVersion = 0;
+    var requestVersion = 0, summaryVersion = 0, lastSummary = null, appliedQuery = null, refreshedAt = Date.now(), refreshTimer = null;
+    var account = Api.AUTH.context();
+    function current() { return Api.AUTH.matches(account) && App.isPageRetained(page); }
 
     var granularityControl = h('div', { class: 'seg dashboard-granularity', 'aria-label': '统计粒度' },
       ['day', 'hour'].map(function (value) {
@@ -175,16 +177,19 @@
       host.appendChild(h('div', { class: 'dashboard-error' }, title, ' ', h('button', { onclick: retry }, '重试')));
     }
 
-    function loadSummary() {
-      loading(summaryHost);
+    function loadSummary(silent) {
+      var version = ++summaryVersion;
+      if (silent !== true || !lastSummary) loading(summaryHost);
       Api.usageDashboard().then(function (stats) {
+        if (!current() || version !== summaryVersion) return;
         stats = stats || {};
+        lastSummary = stats;
         renderSummary(stats);
         renderPlatforms(stats, {});
-        return Api.platformQuotas().then(function (quotas) { renderPlatforms(stats, quotas || {}); }).catch(function () {
-          platformHost.appendChild(h('div', { class: 'dashboard-error' }, '平台额度暂不可用 ', h('button', { onclick: loadSummary }, '重试')));
+        return Api.platformQuotas().then(function (quotas) { if (current() && version === summaryVersion) renderPlatforms(stats, quotas || {}); }).catch(function () {
+          if (current() && version === summaryVersion) platformHost.appendChild(h('div', { class: 'dashboard-error' }, '平台额度暂不可用 ', h('button', { onclick: loadSummary }, '重试')));
         });
-      }).catch(function () { showError(summaryHost, '账户统计加载失败', loadSummary); });
+      }).catch(function () { if (current() && version === summaryVersion && (silent !== true || !lastSummary)) showError(summaryHost, '账户统计加载失败', loadSummary); });
     }
 
     function query() {
@@ -341,37 +346,58 @@
           })) : h('div', { class: 'dashboard-empty' }, '所选时段暂无调用记录')));
     }
 
-    function loadCharts() {
+    function loadCharts(silent) {
       var version = ++requestVersion;
-      var range;
-      try { range = global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
-      catch (error) { U.toast(error.message, 'err'); return; }
-      var q = query();
-      loading(trendHost); loading(modelHost); loading(recentHost);
+      if (silent !== true) {
+        try {
+          appliedQuery = { range: global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value),
+            query: query(), granularity: granularity };
+        } catch (error) { U.toast(error.message, 'err'); return; }
+      }
+      if (!appliedQuery) return;
+      var range = appliedQuery.range, q = appliedQuery.query, selectedGranularity = appliedQuery.granularity;
+      if (silent !== true) { loading(trendHost); loading(modelHost); loading(recentHost); }
       if (!range.wholeDays) {
         global.UsageAnalysis.fetchRecords(range).then(function (records) {
-          if (version !== requestVersion) return;
-          var result = global.UsageAnalysis.aggregate(records, granularity);
+          if (!current() || version !== requestVersion) return;
+          var result = global.UsageAnalysis.aggregate(records, selectedGranularity);
           renderTrend({ trend: result.trend });
           renderModels({ models: result.models });
           renderRecent(result.records);
         }).catch(function (error) {
-          if (version !== requestVersion) return;
+          if (!current() || version !== requestVersion || silent === true) return;
           [trendHost, modelHost, recentHost].forEach(function (host) { showError(host, error.message || '时段统计加载失败', loadCharts); });
         });
         return;
       }
-      Api.usageTrend(Object.assign({ granularity: granularity }, q)).then(function (data) {
-        if (version === requestVersion) renderTrend(data);
-      }).catch(function () { if (version === requestVersion) showError(trendHost, '趋势加载失败', loadCharts); });
+      Api.usageTrend(Object.assign({ granularity: selectedGranularity }, q)).then(function (data) {
+        if (current() && version === requestVersion) renderTrend(data);
+      }).catch(function () { if (current() && version === requestVersion && silent !== true) showError(trendHost, '趋势加载失败', loadCharts); });
       Api.usageModels(q).then(function (data) {
-        if (version === requestVersion) renderModels(data);
-      }).catch(function () { if (version === requestVersion) showError(modelHost, '模型分布加载失败', loadCharts); });
+        if (current() && version === requestVersion) renderModels(data);
+      }).catch(function () { if (current() && version === requestVersion && silent !== true) showError(modelHost, '模型分布加载失败', loadCharts); });
       Api.usageLogs(Object.assign({ page: 1, page_size: 5 }, q)).then(function (data) {
-        if (version === requestVersion) renderRecent(data);
-      }).catch(function () { if (version === requestVersion) showError(recentHost, '调用记录加载失败', loadCharts); });
+        if (current() && version === requestVersion) renderRecent(data);
+      }).catch(function () { if (current() && version === requestVersion && silent !== true) showError(recentHost, '调用记录加载失败', loadCharts); });
     }
 
+    function refreshVisible() {
+      if (!current() || !App.isPageActive(page)) return;
+      refreshedAt = Date.now();
+      loadSummary(true);
+      loadCharts(true);
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshVisible, 60000);
+    }
+    function userUpdated() { if (current() && lastSummary) renderSummary(lastSummary); }
+    global.addEventListener('pp:user-updated', userUpdated);
+    page.addEventListener('pp:page-activate', function () {
+      clearTimeout(refreshTimer);
+      if (Date.now() - refreshedAt >= 60000) refreshVisible();
+      else refreshTimer = setTimeout(refreshVisible, 60000 - (Date.now() - refreshedAt));
+    });
+    page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
+    page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); global.removeEventListener('pp:user-updated', userUpdated); });
     loadSummary();
     loadCharts();
     return page;

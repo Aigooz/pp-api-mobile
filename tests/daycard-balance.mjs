@@ -12,7 +12,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 const raw = (data, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(data) });
-let daycardBalance = 2, daycardPrice = 3.66, subscription = null, infoError = false, buyMode = 'success';
+let daycardBalance = 2, accountBalance = 10, daycardPrice = 3.66, subscription = null, infoError = false, buyMode = 'success';
 let buys = [];
 
 await page.route('**/__proxy/**', async route => {
@@ -21,7 +21,7 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
   if (path === '/api/v1/model-plaza') return route.fulfill(ok({ groups: [] }));
   if (path === '/api/v1/auth/login') return route.fulfill(ok({ access_token: 'daycard-token', user: { id: 1, email: 'test@example.test', balance: 10 } }));
-  if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 10 }));
+  if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: accountBalance }));
   if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, enabled_payment_types: ['alipay'] }));
   if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true } },
     plans: [{ id: 1, name: '日卡', price: 3.66, currency: 'CNY' }, { id: 2, name: '其他套餐', price: 5, currency: 'CNY' }] }));
@@ -39,6 +39,7 @@ await page.route('**/__proxy/**', async route => {
     if (buyMode === 'bad-request') return route.fulfill(raw({ error: '余额不足' }, 400));
     if (buyMode === 'uncertain') return route.fulfill(raw({ error: '服务异常' }, 503));
     daycardBalance -= daycardPrice;
+    accountBalance = 6.34;
     subscription = { expires_at: '2026-12-01T10:00:00+08:00' };
     return route.fulfill(raw({ paid: daycardPrice }));
   }
@@ -138,6 +139,11 @@ try {
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-daycard-active-390.png', animations: 'disabled', fullPage: true });
   assert.equal(buys.length, 3);
   assert.deepEqual(buys, Array(3).fill({ body: {}, authorization: 'Bearer daycard-token' }));
+  await page.locator('.payment-balance').getByText('$6.34').waitFor();
+  await page.getByRole('navigation').getByRole('button', { name: '我的', exact: true }).click();
+  await page.locator('#view').getByText('$6.34').waitFor();
+  await page.getByRole('button', { name: '首页', exact: true }).click();
+  await page.locator('.dashboard').getByText('$6.34').waitFor();
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);

@@ -454,7 +454,8 @@
     var groupsRow = h('div', { class: 'chips' });
     var rateRow = h('div', { class: 'chips' });
     var listHost = h('div', { class: 'plaza-groups' });
-    var statusByModel = Object.create(null);
+    var statusByModel = Object.create(null), statusTimer = null, statusPending = false, statusUpdated = 0;
+    var description = h('div', { class: 'plaza-description' });
 
     function statusKey(model, group) { return JSON.stringify([String(model), String(group)]); }
     function modelStatus(model, group) {
@@ -470,20 +471,25 @@
       });
     }
     function loadStatus() {
+      if (statusPending) return;
+      statusPending = true;
       Api.channelStatus().then(function (data) {
-        if (!host.isConnected) return;
+        if (!App.isPageRetained(host)) return;
         statusByModel = Object.create(null);
         data.items.forEach(function (item) {
           if (!item || !item.model || !item.group) return;
           var key = statusKey(item.model, item.group);
           statusByModel[key] = Object.prototype.hasOwnProperty.call(statusByModel, key) ? false : item;
         });
+        statusUpdated = Date.now();
         updateStatusDots();
       }).catch(function () {
-        if (!host.isConnected) return;
-        statusByModel = Object.create(null);
-        updateStatusDots();
-      }).then(function () { if (host.isConnected) setTimeout(function () { if (host.isConnected) loadStatus(); }, 60000); });
+        if (!App.isPageRetained(host)) return;
+        if (!statusUpdated) { statusByModel = Object.create(null); updateStatusDots(); }
+      }).then(function () {
+        statusPending = false;
+        if (App.isPageActive(host)) statusTimer = setTimeout(loadStatus, 60000);
+      });
     }
     loadStatus();
 
@@ -573,13 +579,28 @@
       updateStatusDots();
     }
 
-    if (plaza && plaza.description) host.appendChild(h('div', { class: 'plaza-description' }, plaza.description));
+    host.appendChild(description);
     host.appendChild(searchInput);
     host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '平台'), platformRow));
     host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '分组'), groupsRow));
     host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '倍率'), rateRow));
     host.appendChild(listHost);
-    paint();
+    function updatePlaza() {
+      plaza = S2.plaza;
+      description.textContent = plaza && plaza.description || '';
+      description.hidden = !description.textContent;
+      paint();
+    }
+    host.addEventListener('pp:page-plaza-updated', updatePlaza);
+    host.addEventListener('pp:page-activate', function () {
+      if (String(gid) !== String(S2.plazaGroup || 0)) { gid = S2.plazaGroup || 0; paint(); }
+      clearTimeout(statusTimer);
+      if (!statusUpdated || Date.now() - statusUpdated >= 60000) loadStatus();
+      else statusTimer = setTimeout(loadStatus, 60000 - (Date.now() - statusUpdated));
+    });
+    host.addEventListener('pp:page-deactivate', function () { clearTimeout(statusTimer); });
+    host.addEventListener('pp:page-dispose', function () { clearTimeout(statusTimer); });
+    updatePlaza();
     return host;
   }
 

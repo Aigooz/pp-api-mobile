@@ -272,9 +272,8 @@
             if (current()) U.toast('日卡开通成功，已扣 ¥' + money(result.paid), 'ok');
             if (current()) {
               loadDaycard(); loadSubscriptions(); loadOrders();
-              Api.me().then(function (user) {
-                if (!current()) return;
-                global.S.user = user;
+              App.refreshUser().then(function (user) {
+                if (!current() || !user) return;
                 balance.textContent = '$' + U.credits(C.balanceOf(user || {}));
               }).catch(function () {});
             }
@@ -350,9 +349,8 @@
         if (!updated.qr_code) activeOrder.qr_code = order.qr_code;
         shared.order = activeOrder;
         if (String(updated.status).toUpperCase() === 'COMPLETED') {
-          Api.me().then(function (user) {
-            if (!current()) return;
-            global.S.user = user;
+          App.refreshUser().then(function (user) {
+            if (!current() || !user) return;
             balance.textContent = '$' + U.credits(C.balanceOf(user || {}));
           }).catch(function () {});
           loadSubscriptions();

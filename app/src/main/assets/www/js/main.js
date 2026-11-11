@@ -19,6 +19,8 @@
   var view, appbar, titleEl, subEl, actionsEl, tabbar;
   var currentPath = '';
   var publicGeneration = 0;
+  var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
+  var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
 
   var ROUTES = {
     '/home': { title: 'Pp API', tab: 'home', render: function () { return C.renderHome(); } },
@@ -68,7 +70,7 @@
     tabbar = U.el('nav', { class: 'tabbar' });
     TABS.forEach(function (t) {
       var b = U.el('button', { class: 'tab', 'data-tab': t.key, html: U.ic(t.icon, 22) + '<span>' + t.label + '</span>' });
-      b.addEventListener('click', function () { App.go(t.path); });
+      b.addEventListener('click', function () { if (location.hash !== t.path) App.go(t.path); });
       tabbar.appendChild(b);
     });
     app.appendChild(appbar);
@@ -84,9 +86,9 @@
     updateBtn.addEventListener('click', function () { App.go('#/updates'); });
     global.addEventListener('pp:updates-changed', updateIndicator);
     updateIndicator();
-    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('sparkle', 19), title: '切换主题' });
+    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('sparkle', 22), title: '切换主题', 'aria-label': '切换主题' });
     themeBtn.addEventListener('click', toggleTheme);
-    var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 19), title: '刷新' });
+    var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 22), title: '刷新', 'aria-label': '刷新' });
     refreshBtn.addEventListener('click', function () {
       Api.clearCache();
       U.toast('正在刷新…');
@@ -143,10 +145,66 @@
     return { path: '/' + parts[0], param: parts.slice(1).join('/') };
   }
 
-  function renderRoute() {
+  function pageEvent(entry, name) {
+    if (entry && entry.slot.firstElementChild) entry.slot.firstElementChild.dispatchEvent(new CustomEvent('pp:page-' + name));
+  }
+
+  function disposePage(entry) {
+    if (!entry) return;
+    pageEvent(entry, 'dispose');
+    if (entry.slot.parentNode) entry.slot.remove();
+    if (pageCache[entry.path] === entry) delete pageCache[entry.path];
+    if (activePage === entry) activePage = null;
+  }
+
+  function clearPages() {
+    preloadGeneration++;
+    if (activePage && !cachedRoutes[activePage.path]) disposePage(activePage);
+    Object.keys(pageCache).forEach(function (path) { disposePage(pageCache[path]); });
+    activePage = null;
+  }
+
+  function makePage(path, param) {
+    var def = ROUTES[path], entry = { path: path, slot: U.el('div', { class: 'route-slot' }), scroll: 0 };
+    if (cachedRoutes[path]) pageCache[path] = entry;
+    try {
+      var node = path === '/announcements' && param ? C.renderAnnouncements(param) : def.render(param);
+      if (node) entry.slot.appendChild(node);
+    } catch (e) {
+      entry.slot.appendChild(U.el('div', { class: 'page' },
+        U.el('div', { class: 'empty' }, U.el('p', null, '页面加载出错'), U.el('small', null, String(e && e.message || e)))));
+    }
+    return entry;
+  }
+
+  function preloadPages() {
+    var generation = ++preloadGeneration;
+    var paths = Api.AUTH.isLogged() ? ['/plaza', '/keys', '/chat', '/me', '/home', '/channel-status'] : ['/plaza', '/channel-status'];
+    function next() {
+      if (generation !== preloadGeneration || !view) return;
+      var path = paths.shift();
+      if (!path) return;
+      if (!pageCache[path]) makePage(path, '');
+      if (paths.length) setTimeout(next, 180);
+    }
+    setTimeout(next, 180);
+  }
+
+  function renderRoute(force) {
+    force = force === true;
     var r = parseHash();
     var def = ROUTES[r.path];
     if (!def) { def = ROUTES['/home']; r.path = '/home'; }
+
+    if (!force && activePage && activePage.path === r.path && activePage.param === r.param) return;
+    if (activePage) {
+      activePage.scroll = view.scrollTop;
+      pageEvent(activePage, 'deactivate');
+      if (cachedRoutes[activePage.path] && !force) activePage.slot.remove();
+      else disposePage(activePage);
+      activePage = null;
+    }
+    if (force && pageCache[r.path]) disposePage(pageCache[r.path]);
 
     if (currentPath === '/chat' && r.path !== '/chat') {
       document.body.classList.remove('chat-mode');
@@ -165,21 +223,14 @@
       b.classList.toggle('active', b.getAttribute('data-tab') === def.tab);
     });
 
-    view.innerHTML = '';
-    try {
-      var node = def.render(r.param);
-      if (node) view.appendChild(node);
-    } catch (e) {
-      view.appendChild(U.el('div', { class: 'page' },
-        U.el('div', { class: 'empty' }, U.el('p', null, '页面加载出错'), U.el('small', null, String(e && e.message || e)))));
-    }
-    view.scrollTop = 0;
+    var entry = pageCache[r.path] || makePage(r.path, r.param);
+    entry.param = r.param;
+    activePage = entry;
+    view.appendChild(entry.slot);
+    view.scrollTop = entry.scroll || 0;
+    appbar.classList.toggle('scrolled', view.scrollTop > 4);
+    pageEvent(entry, 'activate');
     syncSpace();
-
-    if (r.path === '/announcements' && r.param) {
-      view.innerHTML = '';
-      view.appendChild(C.renderAnnouncements(r.param));
-    }
   }
 
   var App = global.App = {
@@ -188,15 +239,16 @@
       if (path.charAt(0) !== '#') path = '#' + path;
       if (replace) {
         location.replace(path);
-        renderRoute();
+        renderRoute(true);
       } else if (location.hash === path) {
-        renderRoute();
+        renderRoute(true);
       } else {
         location.hash = path;
       }
     },
     resetAccountState: function () {
       publicGeneration++;
+      clearPages();
       S.user = Api.AUTH.user();
       S.keys = [];
       S.groupNames = {};
@@ -207,7 +259,15 @@
       S.useSelectedChatModel = false;
       Api.clearCache();
       U.closeOverlay();
+      preloadPages();
     },
+    isPageRetained: function (node) {
+      if (!node) return false;
+      if (node.isConnected) return true;
+      return Object.keys(pageCache).some(function (path) { return pageCache[path].slot.contains(node); });
+    },
+    isPageActive: function (node) { return !!(node && activePage && activePage.slot.contains(node) && activePage.slot.isConnected); },
+    invalidatePages: clearPages,
     switchAccount: function (id) {
       var pending = Api.AUTH.switchTo(id);
       if (Api.AUTH.currentId() === id) {
@@ -224,14 +284,14 @@
       return Api.me().then(function (u) {
         if (!Api.AUTH.matches(context)) return null;
         S.user = u;
-        if (currentPath === '/home' || currentPath === '/dashboard' || currentPath === '/me' || currentPath === '/purchase') renderRoute();
+        global.dispatchEvent(new CustomEvent('pp:user-updated'));
         return u;
       }).catch(function (e) {
         if ((e.status === 401 || e.code === 'UNAUTHORIZED') &&
             (Api.AUTH.matches(context) || !Api.AUTH.currentId())) {
           S.user = null;
           S.keys = [];
-          if (['/home', '/dashboard', '/keys', '/usage', '/me', '/redeem', '/purchase', '/affiliate'].indexOf(currentPath) >= 0) renderRoute();
+          if (['/home', '/dashboard', '/keys', '/usage', '/me', '/redeem', '/purchase', '/affiliate'].indexOf(currentPath) >= 0) renderRoute(true);
         }
         return null;
       });
@@ -257,19 +317,18 @@
         S.settings = s;
         if (s && s.registration_enabled === false) ROUTES['/register'] = ROUTES['/register'];
         document.title = (s && s.site_name) || 'Pp API';
-        if (currentPath === '/home' && !S.user) renderRoute();
+        if (currentPath === '/home' && !S.user) renderRoute(true);
       }).catch(function () {}),
       Api.plaza().then(function (p) {
         if (generation !== publicGeneration) return;
         S.plaza = p;
         S.plazaLoading = false;
-        // never re-render the chat page from a background load: it would
-        // rebuild the page under the user and drop in-progress state.
-        if ((currentPath === '/home' && !S.user) || currentPath === '/plaza') renderRoute();
+        if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
+        if (currentPath === '/home' && !S.user) renderRoute(true);
       }).catch(function () {
         if (generation !== publicGeneration) return;
         S.plazaLoading = false;
-        if (currentPath === '/plaza') renderRoute();
+        if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
       })
     ]);
   }
@@ -320,7 +379,8 @@
         } catch (e) {}
       }
     }
-    renderRoute();
+    if (isRefresh) clearPages();
+    renderRoute(isRefresh);
     loadPublic();
     if (Api.AUTH.isLogged()) {
       App.refreshUser();
@@ -328,6 +388,7 @@
     if (!isRefresh && global.Updates && global.Updates.supported()) {
       global.Updates.check(false);
     }
+    preloadPages();
     // insets
     if (global.__insetTop) applyInsets(global.__insetTop, global.__insetBottom || 0);
   }

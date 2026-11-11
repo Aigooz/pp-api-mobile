@@ -107,6 +107,7 @@
     var data = null;
     var pending = false;
     var timer = null;
+    var updatedAt = 0;
     var state = h('div', { class: 'channel-update', 'aria-live': 'polite' }, '正在加载渠道状态…');
     var reload = h('button', { class: 'icon-btn', title: '刷新渠道状态', 'aria-label': '刷新渠道状态',
       html: U.ic('refresh', 18), onclick: load });
@@ -193,7 +194,7 @@
 
     function schedule() {
       clearTimeout(timer);
-      timer = setTimeout(function () { if (host.isConnected) load(); }, 60000);
+      if (App.isPageActive(host)) timer = setTimeout(load, Math.max(0, 60000 - (Date.now() - updatedAt)));
     }
 
     function load() {
@@ -202,12 +203,14 @@
       reload.disabled = true;
       if (!data) state.textContent = '正在加载渠道状态…';
       Api.channelStatus().then(function (result) {
-        if (!host.isConnected) return;
+        if (!App.isPageRetained(host)) return;
         data = result;
+        updatedAt = Date.now();
         state.textContent = '更新 ' + U.datetime(result.updatedAt);
         paint();
       }).catch(function () {
-        if (!host.isConnected) return;
+        if (!App.isPageRetained(host)) return;
+        updatedAt = Date.now();
         state.textContent = data ? '更新失败，显示上次数据' : '渠道状态加载失败';
         if (!data) {
           content.innerHTML = '';
@@ -216,10 +219,16 @@
       }).then(function () {
         pending = false;
         reload.disabled = false;
-        if (host.isConnected) schedule();
+        schedule();
       });
     }
 
+    host.addEventListener('pp:page-activate', function () {
+      if (!updatedAt || Date.now() - updatedAt >= 60000) load();
+      else schedule();
+    });
+    host.addEventListener('pp:page-deactivate', function () { clearTimeout(timer); });
+    host.addEventListener('pp:page-dispose', function () { clearTimeout(timer); });
     load();
     return host;
   }
