@@ -389,15 +389,30 @@
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(refreshVisible, 60000);
     }
+    function liveUpdated(event) {
+      if (!current() || !App.isPageActive(page)) return;
+      refreshedAt = Date.now();
+      loadSummary(true);
+      loadCharts(true);
+      if (event && event.detail && event.detail.reason === 'visible') {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshVisible, 60000);
+      }
+    }
     function userUpdated() { if (current() && lastSummary) renderSummary(lastSummary); }
     global.addEventListener('pp:user-updated', userUpdated);
+    global.addEventListener('pp:live-refreshed', liveUpdated);
     page.addEventListener('pp:page-activate', function () {
       clearTimeout(refreshTimer);
-      if (Date.now() - refreshedAt >= 60000) refreshVisible();
-      else refreshTimer = setTimeout(refreshVisible, 60000 - (Date.now() - refreshedAt));
+      refreshVisible();
+      refreshTimer = setTimeout(refreshVisible, 60000);
     });
     page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
-    page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); global.removeEventListener('pp:user-updated', userUpdated); });
+    page.addEventListener('pp:page-dispose', function () {
+      clearTimeout(refreshTimer);
+      global.removeEventListener('pp:user-updated', userUpdated);
+      global.removeEventListener('pp:live-refreshed', liveUpdated);
+    });
     loadSummary();
     loadCharts();
     return page;
