@@ -453,7 +453,13 @@
   var Api = {
     ORIGIN: ORIGIN, API: API, V1: V1, AUTH: AUTH, base: api, clearCache: clearCache,
     settings: function () { return cached('settings', 5 * 60e3, function () { return api('/settings/public', { auth: false }); }); },
-    plaza: function () { return cached('plaza', 10 * 60e3, function () { return api('/model-plaza'); }); },
+    plaza: function (force) {
+      if (force) {
+        delete cache.plaza;
+        return api('/model-plaza').then(function (value) { cache.plaza = { at: Date.now(), value: value }; return value; });
+      }
+      return cached('plaza', 10 * 60e3, function () { return api('/model-plaza'); });
+    },
     channelStatus: function () {
       return request('GET', ORIGIN + '/api/public/channel-status', { 'Accept': 'application/json' }).then(function (res) {
         var data = parse(res);
@@ -463,6 +469,18 @@
         return data;
       });
     },
+    // Stable-content fingerprint used by the live refresh layer to
+    // announce newly published model groups without polling the whole plaza.
+    modelPlazaVersion: function () { return Api.plaza(true).then(function (plaza) {
+      var raw = plaza && typeof plaza === 'object' ? plaza : {};
+      var stamp = raw.updated_at || raw.updatedAt || raw.version;
+      if (stamp) return String(stamp);
+      return JSON.stringify((raw.groups || []).map(function (group) {
+        return [group.id, group.name, group.platform, group.subscription_type || '', (group.models || []).map(function (model) {
+          return model && (model.name || model.id);
+        }).filter(Boolean).sort().join(',')].join(':');
+      }).sort());
+    }); },
     announcements: function () {
       if (!AUTH.isLogged()) return Promise.resolve([]);
       return api('/announcements');
