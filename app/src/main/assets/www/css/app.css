@@ -334,6 +334,8 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .dashboard-date-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .dashboard-date-row label { min-width: 0; color: var(--muted); font-size: 11px; }
 .dashboard-date { display: block; min-width: 0; height: 38px; margin-top: 4px; padding: 0 6px; border-radius: 6px; font-size: 13px; }
+.dashboard-time-row { margin-top: 8px; }
+.dashboard-range-note { margin-top: 7px; }
 .dashboard-control-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
 .dashboard-granularity { width: 150px; max-width: 58%; }
 .dashboard-platforms { display: grid; gap: 8px; }
@@ -383,6 +385,28 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .dashboard-recent-info strong, .dashboard-recent-price b { display: block; font-size: 12.5px; }
 .dashboard-recent-info small, .dashboard-recent-price small { display: block; color: var(--muted); font-size: 11px; }
 .dashboard-recent-price { flex: 0 0 auto; text-align: right; }
+.payment-balance { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.payment-balance strong { color: var(--ink); font-size: 22px; font-variant-numeric: tabular-nums; }
+.payment-products, .payment-methods { display: grid; gap: 8px; }
+.payment-methods { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.payment-choice { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 48px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; }
+.payment-choice:has(input:checked) { border-color: var(--teal); }
+.payment-choice input { accent-color: var(--teal); flex: 0 0 auto; }
+.payment-choice span { min-width: 0; overflow-wrap: anywhere; }
+.payment-choice strong, .payment-choice small { display: block; }
+.payment-choice small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.payment-plan-detail, .payment-help { color: var(--muted); font-size: 12px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.payment-help { margin-top: 12px; }
+.payment-limit { margin-top: 5px; }
+.payment-total { margin: 12px 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+.payment-order-panel, .payment-orders { padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.payment-order-panel > .tiny { margin-top: 5px; overflow-wrap: anywhere; }
+.payment-qr { display: block; max-width: 220px; width: 75%; height: auto; margin: 12px auto; background: #fff; }
+.payment-order-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.payment-order-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.payment-order-row:last-child { border-bottom: 0; }
+.payment-order-row > div { min-width: 0; overflow-wrap: anywhere; }
+.payment-order-row button { flex: 0 0 auto; }
 .model-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; padding: 3px; margin-bottom: 14px; border-radius: 8px; background: var(--surface-2); }
 .model-tabs button { min-width: 0; height: 36px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
 .model-tabs button.active { background: var(--surface); color: var(--teal); box-shadow: 0 1px 3px rgba(0, 0, 0, .1); }

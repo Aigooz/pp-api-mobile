@@ -62,6 +62,8 @@
     start.setDate(end.getDate() - 6);
     var startInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(start), 'aria-label': '开始日期' });
     var endInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(end), 'aria-label': '结束日期' });
+    var startTime = h('input', { type: 'time', class: 'input dashboard-date', value: '00:00', 'aria-label': '开始时间' });
+    var endTime = h('input', { type: 'time', class: 'input dashboard-date', value: '23:59', 'aria-label': '结束时间' });
     var granularity = 'day';
     var requestVersion = 0;
 
@@ -80,6 +82,9 @@
     var dateControls = h('div', { class: 'dashboard-controls' },
       h('div', { class: 'dashboard-date-row' },
         h('label', null, '开始日期', startInput), h('label', null, '结束日期', endInput)),
+      h('div', { class: 'dashboard-date-row dashboard-time-row' },
+        h('label', null, '开始时间', startTime), h('label', null, '结束时间', endTime)),
+      h('div', { class: 'tiny muted dashboard-range-note' }, '按设备本地时间统计，包含结束分钟'),
       h('div', { class: 'dashboard-control-row' }, granularityControl,
         h('button', { class: 'btn btn-sm', onclick: loadCharts }, '应用日期'))
     );
@@ -337,13 +342,25 @@
     }
 
     function loadCharts() {
-      if (!startInput.value || !endInput.value || startInput.value > endInput.value) {
-        U.toast('请选择有效的日期范围', 'err');
-        return;
-      }
       var version = ++requestVersion;
+      var range;
+      try { range = global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
+      catch (error) { U.toast(error.message, 'err'); return; }
       var q = query();
       loading(trendHost); loading(modelHost); loading(recentHost);
+      if (!range.wholeDays) {
+        global.UsageAnalysis.fetchRecords(range).then(function (records) {
+          if (version !== requestVersion) return;
+          var result = global.UsageAnalysis.aggregate(records, granularity);
+          renderTrend({ trend: result.trend });
+          renderModels({ models: result.models });
+          renderRecent(result.records);
+        }).catch(function (error) {
+          if (version !== requestVersion) return;
+          [trendHost, modelHost, recentHost].forEach(function (host) { showError(host, error.message || '时段统计加载失败', loadCharts); });
+        });
+        return;
+      }
       Api.usageTrend(Object.assign({ granularity: granularity }, q)).then(function (data) {
         if (version === requestVersion) renderTrend(data);
       }).catch(function () { if (version === requestVersion) showError(trendHost, '趋势加载失败', loadCharts); });

@@ -217,7 +217,7 @@
     return new Promise(function (resolve) {
       sheet({
         title: title,
-        body: el('p', { class: 'small muted', text: message || '' }),
+        body: el('p', { class: 'small muted', text: message || '', style: { whiteSpace: 'pre-line' } }),
         actions: [
           { label: '取消', onClick: function () { resolve(false); } },
           { label: okLabel || '确定', kind: danger ? 'danger' : 'primary', onClick: function () { resolve(true); } }

@@ -31,7 +31,7 @@
     '/me': { title: '我的', tab: 'me', render: function () { return global.PagesUser.renderMe(); } },
     '/accounts': { title: '账号管理', tab: 'me', render: function () { return global.PagesUser.renderAccounts(); } },
     '/redeem': { title: '兑换码', tab: 'me', render: function () { return global.PagesUser.renderRedeem(); } },
-    '/purchase': { title: '充值中心', tab: 'me', render: function () { return global.PagesUser.renderPurchase(); } },
+    '/purchase': { title: '充值中心', tab: 'me', render: function () { return global.PagesPayment.renderPurchase(); } },
     '/affiliate': { title: '邀请返利', tab: 'me', render: function () { return global.PagesUser.renderAffiliate(); } },
     '/about': { title: '关于', tab: 'me', render: function () { return C.renderAbout(); } },
     '/updates': { title: '软件更新', tab: 'me', render: function () { return global.Updates.render(); } },

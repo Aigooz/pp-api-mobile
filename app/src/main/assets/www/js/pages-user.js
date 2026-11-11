@@ -253,6 +253,13 @@
     var trendHost = h('div', { class: 'section' });
     var modelHost = h('div', { class: 'section' });
     var logsHost = h('div', { class: 'section' });
+    var end = new Date(), start = new Date();
+    start.setDate(end.getDate() - (range === '7d' ? 6 : range === '30d' ? 29 : 0));
+    var startInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(start), 'aria-label': '开始日期' });
+    var endInput = h('input', { type: 'date', class: 'input dashboard-date', value: U.ymd(end), 'aria-label': '结束日期' });
+    var startTime = h('input', { type: 'time', class: 'input dashboard-date', value: '00:00', 'aria-label': '开始时间' });
+    var endTime = h('input', { type: 'time', class: 'input dashboard-date', value: '23:59', 'aria-label': '结束时间' });
+    var requestVersion = 0;
     var seg = h('div', { class: 'seg' }, [
       { k: 'today', t: '今日' }, { k: '7d', t: '近 7 天' }, { k: '30d', t: '近 30 天' }
     ].map(function (o) {
@@ -262,34 +269,46 @@
           range = o.k; global.S.usageRange = o.k;
           Array.prototype.forEach.call(seg.children, function (b) { b.className = ''; });
           this.className = 'active';
+          var last = new Date(), first = new Date();
+          first.setDate(last.getDate() - (range === '7d' ? 6 : range === '30d' ? 29 : 0));
+          startInput.value = U.ymd(first); endInput.value = U.ymd(last);
+          startTime.value = '00:00'; endTime.value = '23:59';
           load();
         }
       }, o.t);
     }));
 
     page.appendChild(seg);
+    page.appendChild(h('div', { class: 'dashboard-controls section' },
+      h('div', { class: 'dashboard-date-row' }, h('label', null, '开始日期', startInput), h('label', null, '结束日期', endInput)),
+      h('div', { class: 'dashboard-date-row dashboard-time-row' }, h('label', null, '开始时间', startTime), h('label', null, '结束时间', endTime)),
+      h('div', { class: 'dashboard-control-row' }, h('span', { class: 'tiny muted' }, '本地时间，包含结束分钟'),
+        h('button', { class: 'btn btn-sm', onclick: function () {
+          Array.prototype.forEach.call(seg.children, function (b) { b.className = ''; });
+          load();
+        } }, '应用时间'))));
     page.appendChild(statsHost);
     page.appendChild(trendHost);
     page.appendChild(modelHost);
     page.appendChild(logsHost);
 
-    function rangeQuery() {
-      var end = new Date();
-      var start = new Date();
-      if (range === 'today') return { period: 'today' };
-      start.setDate(end.getDate() - (range === '7d' ? 6 : 29));
-      return { start_date: U.ymd(start), end_date: U.ymd(end) };
-    }
-
     function load() {
-      var q = rangeQuery();
+      var version = ++requestVersion, selected;
+      try { selected = global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
+      catch (error) { U.toast(error.message, 'err'); return; }
+      var q = { start_date: selected.startDate, end_date: selected.endDate };
+      var precise = selected.wholeDays ? null : global.UsageAnalysis.fetchRecords(selected).then(function (records) {
+        return global.UsageAnalysis.aggregate(records, 'day');
+      });
       statsHost.innerHTML = '';
+      trendHost.innerHTML = ''; modelHost.innerHTML = ''; logsHost.innerHTML = '';
       statsHost.appendChild(h('div', { class: 'grid-2' },
         h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '花费')),
         h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '请求'))
       ));
 
-      Api.usageStats(q).then(function (d) {
+      (precise ? precise.then(function (data) { return data.stats; }) : Api.usageStats(q)).then(function (d) {
+        if (version !== requestVersion) return;
         var st = d || {};
         if (st.data && typeof st.data === 'object') st = st.data;
         if (st.stats && typeof st.stats === 'object') st = st.stats;
@@ -304,14 +323,16 @@
           h('div', { class: 'card stat' }, h('b', null, U.tokens(inTok)), h('span', null, '输入 tokens')),
           h('div', { class: 'card stat' }, h('b', null, U.tokens(outTok)), h('span', null, '输出 tokens'))
         ));
-      }).catch(function () {
+      }).catch(function (error) {
+        if (version !== requestVersion) return;
         statsHost.innerHTML = '';
-        statsHost.appendChild(h('div', { class: 'notice warn' }, '用量统计暂不可用'));
+        statsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '用量统计暂不可用'));
       });
 
       var tq = Object.assign({}, q);
-      if (!tq.period) { tq.granularity = 'day'; }
-      Api.usageTrend(tq).then(function (d) {
+      tq.granularity = 'day';
+      (precise ? precise.then(function (data) { return { trend: data.trend }; }) : Api.usageTrend(tq)).then(function (d) {
+        if (version !== requestVersion) return;
         var list = arrOf(d);
         if (!list.length && d && Array.isArray(d.series)) list = d.series;
         if (!list.length && d && Array.isArray(d.dates)) {
@@ -325,11 +346,11 @@
         }
         if (!list.length) { trendHost.innerHTML = ''; return; }
         trendHost.innerHTML = '';
-        var vals = list.map(function (x) { return Number(pick(x, 'cost', 'total_cost', 'credits', 'value') || 0); });
+        var vals = list.map(function (x) { return Number(pick(x, 'actual_cost', 'cost', 'total_cost', 'credits', 'value') || 0); });
         var max = Math.max.apply(null, vals.concat([0.000001]));
         trendHost.appendChild(section('消耗趋势', null, null, card(h('div', { style: { padding: '14px' } },
-          h('div', { class: 'bars' }, list.slice(-30).map(function (x, i) {
-            var v = Number(pick(x, 'cost', 'total_cost', 'credits', 'value') || 0);
+          h('div', { class: 'bars' }, list.map(function (x, i) {
+            var v = Number(pick(x, 'actual_cost', 'cost', 'total_cost', 'credits', 'value') || 0);
             return h('i', null, h('b', { style: { height: Math.max(4, Math.round(v / max * 66)) + 'px' } }));
           })),
           h('div', { class: 'axis' },
@@ -337,16 +358,17 @@
             h('span', null, '峰值 $' + U.price(max))
           )
         ))));
-      }).catch(function () {});
+      }).catch(function (error) { if (version === requestVersion && !precise) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败')); });
 
-      Api.usageModels(tq).then(function (d) {
+      (precise ? precise.then(function (data) { return { models: data.models }; }) : Api.usageModels(q)).then(function (d) {
+        if (version !== requestVersion) return;
         var list = d && Array.isArray(d.models) ? d.models : arrOf(d);
         if (!list.length) { modelHost.innerHTML = ''; return; }
-        list.sort(function (a, b) { return Number(pick(b, 'total_cost', 'cost') || 0) - Number(pick(a, 'total_cost', 'cost') || 0); });
-        var top = list.slice(0, 6);
+        list.sort(function (a, b) { return Number(pick(b, 'actual_cost', 'total_cost', 'cost') || 0) - Number(pick(a, 'actual_cost', 'total_cost', 'cost') || 0); });
+        var top = list;
         modelHost.innerHTML = '';
         modelHost.appendChild(section('模型消耗', null, null, card(top.map(function (m) {
-          var cost = Number(pick(m, 'total_cost', 'cost') || 0);
+          var cost = Number(pick(m, 'actual_cost', 'total_cost', 'cost') || 0);
           var reqs = Number(pick(m, 'requests', 'request_count', 'count') || 0);
           return h('div', { class: 'model-row' },
             h('div', { class: 'model-avatar' }, String(pick(m, 'model', 'name') || '?').slice(0, 2)),
@@ -356,9 +378,10 @@
             h('div', { class: 'price' }, h('b', null, '$' + U.credits(cost)))
           );
         }))));
-      }).catch(function () {});
+      }).catch(function (error) { if (version === requestVersion && !precise) modelHost.appendChild(h('div', { class: 'notice warn' }, error.message || '模型统计加载失败')); });
 
-      Api.usageLogs(Object.assign({ page: 1, page_size: 25 }, q)).then(function (d) {
+      (precise ? precise.then(function (data) { return data.records.slice(0, 25); }) : Api.usageLogs(Object.assign({ page: 1, page_size: 25 }, q))).then(function (d) {
+        if (version !== requestVersion) return;
         var list = arrOf(d);
         logsHost.innerHTML = '';
         logsHost.appendChild(section('调用记录', null, null,
@@ -371,12 +394,12 @@
                 h('div', { class: 'li-title nowrap', style: { fontSize: '13px' } }, pick(log, 'model', 'model_name') || '请求'),
                 h('div', { class: 'li-sub' },
                   U.datetime(pick(log, 'created_at', 'timestamp', 'time')) + ' · ' +
-                  U.tokens(Number(pick(log, 'total_tokens') || 0)) + ' tokens')
+                  U.tokens(Number(pick(log, 'total_tokens') || (Number(log.input_tokens || 0) + Number(log.output_tokens || 0) + Number(log.cache_creation_tokens || 0) + Number(log.cache_read_tokens || 0)))) + ' tokens')
               ),
               h('div', { class: 'li-tail' }, h('span', { class: bad ? 'badge danger' : 'badge' }, '$' + U.price(Number(pick(log, 'actual_cost', 'total_cost', 'cost') || 0))))
             );
           })) : emptyState('暂无记录', '发起调用后会显示在这里', 'chart')));
-      }).catch(function () {});
+      }).catch(function (error) { if (version === requestVersion && !precise) logsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '调用记录加载失败')); });
     }
     load();
     return page;
@@ -605,50 +628,6 @@
     return page;
   }
 
-  // ---------------- purchase ----------------
-  function renderPurchase() {
-    if (!Api.AUTH.isLogged()) return needLogin();
-    var page = h('div', { class: 'page' });
-    var subscriptions = h('div', { class: 'section' });
-    page.appendChild(h('div', { class: 'card pad' },
-      h('div', { class: 'row between' },
-        h('div', null,
-          h('div', { class: 'tiny muted' }, '账户余额'),
-          h('div', { style: { fontSize: '26px', fontWeight: '700' } }, '$' + U.credits(balanceOf(global.S.user || {})))
-        ),
-        h('span', { class: 'badge teal' }, 'Pp API')
-      ),
-      h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '14px' }, onclick: function () { openWebPay(); } }, '充值余额 / 购买订阅'),
-      h('div', { class: 'tiny muted', style: { textAlign: 'center', marginTop: '8px' } }, '将打开 Pp API 官方收银台')
-    ));
-    page.appendChild(subscriptions);
-
-    Api.subscriptions().then(function (d) {
-      var list = arrOf(d);
-      subscriptions.innerHTML = '';
-      subscriptions.appendChild(section('我的订阅', null, null, list.length
-        ? card(list.map(function (item) {
-            var group = pick(item, 'group_name', 'name') || (item.group && item.group.name) || '模型订阅';
-            var until = pick(item, 'expires_at', 'expired_at', 'end_at');
-            return h('div', { class: 'list-item' },
-              h('span', { class: 'li-icon', html: U.ic('star', 16) }),
-              h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, group), h('div', { class: 'li-sub' }, until ? '有效至 ' + U.date(until) : '有效订阅')),
-              h('span', { class: 'badge ok' }, '生效中'));
-          }))
-        : h('div', { class: 'card' }, emptyState('暂无生效订阅', '可在官方收银台查看可购买套餐', 'star'))));
-    }).catch(function () {
-      subscriptions.appendChild(h('div', { class: 'notice warn' }, '订阅状态暂时无法读取，请在官网充值页查看。'));
-    });
-
-    return page;
-  }
-
-  function openWebPay() {
-    var url = (global.S.settings && global.S.settings.purchase_subscription_url) || (Api.ORIGIN + '/recharge');
-    open(url);
-    U.toast('正在打开 Pp API 官方收银台');
-  }
-
   // ---------------- affiliate ----------------
   function renderAffiliate() {
     if (!Api.AUTH.isLogged()) return needLogin();
@@ -685,7 +664,7 @@
 
   global.PagesUser = {
     renderKeys: renderKeys, renderUsage: renderUsage, renderMe: renderMe, renderAccounts: renderAccounts,
-    renderRedeem: renderRedeem, renderPurchase: renderPurchase, renderAffiliate: renderAffiliate,
+    renderRedeem: renderRedeem, renderAffiliate: renderAffiliate,
     needLogin: needLogin
   };
 })(window);

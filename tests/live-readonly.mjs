@@ -48,10 +48,32 @@ try {
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByText('用量明细').click();
   await page.getByText('输入 tokens').waitFor({ timeout: 30000 });
+  const sample = await page.evaluate(async () => {
+    const result = await Api.usageLogs({ page: 1, page_size: 1 });
+    if (!result.items.length) return null;
+    const date = new Date(result.items[0].created_at);
+    const pad = n => String(n).padStart(2, '0');
+    return { day: U.ymd(date), time: pad(date.getHours()) + ':' + pad(date.getMinutes()), id: result.items[0].id };
+  });
+  if (sample) {
+    const exact = await page.evaluate(async sample => {
+      const range = UsageAnalysis.parseRange(sample.day, sample.time, sample.day, sample.time);
+      const records = await UsageAnalysis.fetchRecords(range);
+      const result = UsageAnalysis.aggregate(records, 'hour');
+      return { ids: records.map(row => row.id), count: result.stats.total_requests, models: result.models.length };
+    }, sample);
+    assert.ok(exact.ids.includes(sample.id));
+    assert.equal(exact.count, exact.ids.length);
+    assert.ok(exact.models > 0);
+  }
+  await page.goto(base + '/#/purchase');
+  await page.getByText('选择商品').waitFor({ timeout: 30000 });
+  await page.getByText('最近订单').waitFor({ timeout: 30000 });
+  assert.equal(await page.getByText('订单加载失败').count(), 0);
   await page.goto(base + '/#/announcements');
   await page.locator('#view .list-item').first().waitFor({ timeout: 30000 });
   assert.deepEqual(errors, []);
-  console.log('Live account: dashboard, plaza pricing, login, keys, usage and announcements passed');
+  console.log('Live account: dashboard, precise usage, checkout configuration, orders and announcements passed (read-only)');
 } finally {
   await context.close();
   await browser.close();

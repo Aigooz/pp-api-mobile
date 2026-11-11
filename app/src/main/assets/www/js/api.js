@@ -536,7 +536,9 @@
     paymentInfo: function () { return api('/payment/checkout-info'); },
     paymentLimits: function () { return api('/payment/limits'); },
     createOrder: function (payload) { return api('/payment/orders', { method: 'POST', body: payload }); },
-    myOrders: function (query) { return api('/payment/orders', { query: query }); },
+    myOrders: function (query) { return api('/payment/orders/my', { query: query }); },
+    paymentOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id)); },
+    cancelOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id) + '/cancel', { method: 'POST' }); },
     verifyOrder: function (outTradeNo) { return api('/payment/orders/verify', { method: 'POST', body: { out_trade_no: outTradeNo } }); },
 
     subscriptions: function () { return api('/subscriptions/active'); },
