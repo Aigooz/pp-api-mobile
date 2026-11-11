@@ -21,6 +21,8 @@
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
+  var LIVE_REFRESH_MS = 60000;
+  var liveTimer = null, livePending = false, liveLastAt = 0;
   var THEMES = [
     { key: 'auto', name: '跟随系统', sub: '自动切换海蓝浅色与深色', colors: ['#0873ca', '#0e1113'] },
     { key: 'ocean', name: '海蓝', sub: '默认主题', colors: ['#0873ca', '#2f607a'] },
@@ -368,7 +370,7 @@
         document.title = (s && s.site_name) || 'Pp API';
         if (currentPath === '/home' && !S.user) renderRoute(true);
       }).catch(function () {}),
-      Api.plaza().then(function (p) {
+      Api.plaza(true).then(function (p) {
         if (generation !== publicGeneration) return;
         S.plaza = p;
         S.plazaLoading = false;
@@ -381,6 +383,110 @@
       })
     ]);
   }
+
+  function requestLiveData(options) {
+    return Promise.all([
+      Api.settings().then(function (s) {
+        S.settings = s;
+        document.title = (s && s.site_name) || 'Pp API';
+        return { kind: 'settings', value: s };
+      }).catch(function () { shellRefreshFailed('settings'); return null; }),
+      Api.plaza(true).then(function (p) {
+        S.plaza = p;
+        S.plazaLoading = false;
+        if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
+        return { kind: 'plaza', value: p };
+      }).catch(function () { S.plazaLoading = false; shellRefreshFailed('plaza'); return null; }),
+      Api.channelStatus().then(function (data) {
+        return { kind: 'channel', value: data };
+      }).catch(function () { shellRefreshFailed('channel'); return null; })
+    ]).then(function (results) {
+      liveLastAt = Date.now();
+      var changed = {};
+      results.forEach(function (result) {
+        if (!result) return;
+        changed[result.kind] = result.value;
+      });
+      global.dispatchEvent(new CustomEvent('pp:live-refreshed', {
+        detail: { reason: options && options.reason || 'timer', changed: changed, at: liveLastAt }
+      }));
+      return changed;
+    }).then(function (changed) {
+      options = options || {};
+      if (!changed.plaza) return changed;
+      return Promise.resolve().then(function () {
+        var known = U.store.get('plaza_channel_snapshot', null);
+        var snapshot = null;
+        var groups = [];
+        ((changed.plaza && changed.plaza.groups) || []).forEach(function (group) {
+          var models = Array.isArray(group.models) ? group.models.map(function (model) { return model && (model.name || model.id || String(model)); }).filter(Boolean) : [];
+          if (!models.length) return;
+          groups.push({ id: group.id, name: group.name || '未命名分组', platform: group.platform || '', models: models,
+            subscription: group.subscription_type === 'subscription', updatedAt: group.updated_at || group.updatedAt || '' });
+        });
+        var signature = groups.map(function (group) {
+          return [group.id, group.name, group.platform, group.subscription, group.updatedAt, group.models.slice().sort().join(',')].join(':');
+        }).sort().join('|');
+        var summary = changed.channel && Array.isArray(changed.channel.items) ? changed.channel.items : [];
+        var next = { signature: signature, groups: groups, at: Date.now(), summary: summary };
+        var previous = known && typeof known === 'object' ? known : null;
+        var added = [];
+        if (previous && previous.signature !== signature) {
+          var oldNames = (previous.groups || []).map(function (group) { return String(group.id) + ':' + group.name; });
+          groups.forEach(function (group) {
+            if (oldNames.indexOf(String(group.id) + ':' + group.name) < 0) added.push(group.name);
+          });
+        }
+        U.store.set('plaza_channel_snapshot', next);
+        if (added.length) {
+          global.dispatchEvent(new CustomEvent('pp:content-added', { detail: { groups: added, count: added.length } }));
+          if (changed.plaza && currentPath !== '/plaza') U.toast('模型广场新增 ' + added.length + ' 个分组，已更新', 'ok');
+        }
+        return changed;
+      }).catch(function () { return changed; });
+    });
+  }
+
+  function shellRefreshFailed(kind) {
+    global.dispatchEvent(new CustomEvent('pp:live-refresh-failed', { detail: { kind: kind } }));
+  }
+
+  function scheduleLiveRefresh(delay) {
+    clearTimeout(liveTimer);
+    var wait = delay === undefined ? LIVE_REFRESH_MS : Math.max(5000, delay);
+    liveTimer = setTimeout(function () {
+      liveTimer = null;
+      if (!document.hidden) refreshLive('timer');
+      else scheduleLiveRefresh(LIVE_REFRESH_MS);
+    }, wait);
+  }
+
+  function refreshLive(reason) {
+    if (livePending) return Promise.resolve(null);
+    livePending = true;
+    return requestLiveData({ reason: reason }).then(function (result) {
+      return result;
+    }).catch(function () { return null; }).then(function (result) {
+      livePending = false;
+      if (!document.hidden) scheduleLiveRefresh();
+      return result;
+    });
+  }
+
+  function bindLiveRefresh() {
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        clearTimeout(liveTimer);
+        liveTimer = null;
+      } else {
+        refreshLive('visible');
+      }
+    });
+    global.addEventListener('online', function () { refreshLive('online'); });
+    global.addEventListener('pp:keys-changed', function () { refreshLive('keys'); });
+    scheduleLiveRefresh(12000);
+  }
+  global.__ppLiveRefresh = function (reason) { return refreshLive(reason || 'manual'); };
 
   // Keep inputs above the soft keyboard. Two cases:
   //  * WebView resizes (adjustResize): innerHeight shrinks, --kb stays 0.
@@ -422,6 +528,7 @@
       buildShell();
       bindKeyboard();
       window.addEventListener('hashchange', renderRoute);
+      bindLiveRefresh();
       if (global.matchMedia) {
         try {
           matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (S.theme === 'auto') applyTheme(); });
