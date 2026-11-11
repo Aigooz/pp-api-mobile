@@ -17,7 +17,7 @@ Pp API 的第三方移动客户端，提供仪表盘、模型广场、令牌管�
 
 ## iOS
 
-iOS 工程位于 `ios/`。安装和更新需要 Mac、Xcode 和 Apple 签名，并通过 TestFlight、App Store 或其他适用的 Apple 分发方式提供。Android 的 GitHub APK 更新机制不能在 iOS 上安装应用，当前 iOS 尚未配置分发渠道。
+iOS 工程位于 `ios/`。GitHub Releases 提供未签名 IPA；可在 Windows 使用 Sideloadly 和自己的 Apple ID 签名安装，详细步骤见 `ios/README.md`。Android 的 APK 更新机制不能在 iOS 上安装应用，iOS 更新需重新签名。
 
 ## 说明
 

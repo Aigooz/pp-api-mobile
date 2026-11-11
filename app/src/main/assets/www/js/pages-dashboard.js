@@ -206,7 +206,7 @@
         series.forEach(function (item) { if (!item.percent) max = Math.max(max, number(row[item.key])); });
       });
       max = niceMax(max);
-      var width = Math.max(260, Math.min(2400, 90 + Math.max(rows.length - 1, 1) * 36));
+      var width = Math.max(360, Math.min(2400, 90 + Math.max(rows.length - 1, 1) * 36));
       var height = 220, left = 48, right = width - 38, top = 12, bottom = 181;
       var plotWidth = right - left, plotHeight = bottom - top;
       function xAt(index) { return rows.length === 1 ? (left + right) / 2 : left + index * plotWidth / (rows.length - 1); }
@@ -214,8 +214,8 @@
         var value = item.percent ? cacheHit(row) / 100 : Math.max(0, number(row[item.key])) / max;
         return bottom - value * plotHeight;
       }
-      var chart = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, class: 'dashboard-trend-svg',
-        role: 'group', 'aria-label': 'Token 用量趋势图', style: 'min-width:' + width + 'px' });
+      var chart = svg('svg', { viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none', class: 'dashboard-trend-svg',
+        role: 'group', 'aria-label': 'Token 用量趋势图', style: width > 360 ? 'min-width:' + width + 'px' : '' });
       for (var tick = 0; tick <= 4; tick++) {
         var y = bottom - tick * plotHeight / 4;
         chart.appendChild(svg('line', { x1: left, y1: y, x2: right, y2: y, class: 'dashboard-chart-grid' }));

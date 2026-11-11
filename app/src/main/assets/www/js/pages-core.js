@@ -427,6 +427,14 @@
   }
 
   // ---------------- plaza ----------------
+  function modelTabs(active) {
+    return h('div', { class: 'model-tabs', role: 'group', 'aria-label': '模型页面' },
+      h('button', { class: active === 'plaza' ? 'active' : '', 'aria-current': active === 'plaza' ? 'page' : null,
+        onclick: function () { App.go('#/plaza'); } }, '模型广场'),
+      h('button', { class: active === 'status' ? 'active' : '', 'aria-current': active === 'status' ? 'page' : null,
+        onclick: function () { App.go('#/channel-status'); } }, '渠道状态'));
+  }
+
   function renderPlaza() {
     var S2 = global.S;
     var plaza = S2.plaza;
@@ -435,6 +443,7 @@
     var platform = '';
     var rate = '';
     var host = h('div', { class: 'page plaza-page' });
+    host.appendChild(modelTabs('plaza'));
 
     var searchInput = h('input', {
       class: 'input', placeholder: '搜索模型名称、分组或厂商', type: 'search', 'aria-label': '搜索模型',
@@ -641,6 +650,7 @@
     h: h, section: section, listItem: listItem, emptyState: emptyState, card: card,
     arrOf: arrOf, totalOf: totalOf, pick: pick, balanceOf: balanceOf,
     plazaModels: plazaModels, modelRow: modelRow, platformKey: platformKey,
+    modelTabs: modelTabs,
     renderHome: renderHome, renderPlaza: renderPlaza, renderAnnouncements: renderAnnouncements,
     renderAbout: renderAbout, open: open, priceLabel: priceLabel
   };

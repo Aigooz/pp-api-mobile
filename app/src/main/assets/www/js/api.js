@@ -9,6 +9,7 @@
 
   function browserUrl(url) {
     if (global.location.hostname !== '127.0.0.1') return url;
+    if (url === ORIGIN + '/api/public/channel-status') return '/__proxy/site/api/public/channel-status';
     if (url.indexOf(API + '/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(V1 + '/') === 0) return '/__proxy/model' + url.slice('https://api.ipkey.vip'.length);
     return url;
@@ -441,6 +442,15 @@
     ORIGIN: ORIGIN, API: API, V1: V1, AUTH: AUTH, base: api, clearCache: clearCache,
     settings: function () { return cached('settings', 5 * 60e3, function () { return api('/settings/public', { auth: false }); }); },
     plaza: function () { return cached('plaza', 10 * 60e3, function () { return api('/model-plaza'); }); },
+    channelStatus: function () {
+      return request('GET', ORIGIN + '/api/public/channel-status', { 'Accept': 'application/json' }).then(function (res) {
+        var data = parse(res);
+        if (res.status < 200 || res.status >= 300 || !data || !Array.isArray(data.items)) {
+          throw mkErr(res.status, 'CHANNEL_STATUS', '渠道状态加载失败，请稍后重试');
+        }
+        return data;
+      });
+    },
     announcements: function () {
       if (!AUTH.isLogged()) return Promise.resolve([]);
       return api('/announcements');

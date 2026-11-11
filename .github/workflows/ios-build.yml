@@ -37,8 +37,10 @@ jobs:
           test -f "$app/PpApiMobile"
           test -f "$app/www/index.html"
           test -f "$app/www/js/pages-dashboard.js"
+          test -f "$app/www/js/pages-channel.js"
           test -f "$app/www/js/updates.js"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
           file "$app/PpApiMobile" | grep -q arm64
           mkdir -p "$payload"
           ditto "$app" "$payload/PpApiMobile.app"

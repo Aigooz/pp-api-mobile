@@ -15,6 +15,8 @@ const modelQueries = [];
 let manyPoints = false;
 let zeroModels = false;
 let singlePoint = false;
+let failStatus = true;
+let statusRequests = 0;
 await page.route('**/__proxy/**', async route => {
   const p = new URL(route.request().url()).pathname.replace('/__proxy/site', '');
   if (p === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
@@ -26,6 +28,19 @@ await page.route('**/__proxy/**', async route => {
       { name: 'demo-image', pricing: { billing_mode: 'image', per_request_price: 2 }, official_pricing: { per_request_price: 2 } }
     ] }
   ] }));
+  if (p === '/api/public/channel-status') {
+    statusRequests++;
+    if (failStatus) return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+    const now = Date.now();
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ updatedAt: new Date(now).toISOString(), items: [
+      { model: 'demo-model', group: '测试分组', vendor: 'openai', vendorLabel: 'OpenAI', status: 'operational', latency: 1000, ping: 80, availability: 99.2,
+        timeline: [{ status: 'operational', latency_ms: 1000, ping_ms: 80, at: new Date(now - 1800000).toISOString() },
+          { status: 'degraded', latency_ms: 6000, ping_ms: 100, at: new Date(now).toISOString() }] },
+      { model: 'demo-image', group: '图片分组', vendor: 'image-platform', status: 'error', latency: 30000, ping: 20, availability: 90,
+        timeline: [{ status: 'error', latency_ms: 30000, ping_ms: 20, at: new Date(now).toISOString() }] },
+      { model: 'unknown-model', group: '测试分组', status: 'unknown', latency: null, ping: null, availability: null, timeline: [] }
+    ] }) });
+  }
   if (p === '/api/v1/auth/login') return route.fulfill(ok({ access_token: 'fake-access', refresh_token: 'fake-refresh', user: { id: 1, email: 'test@example.test', balance: 3 } }));
   if (p === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
   if (p === '/api/v1/keys') return route.fulfill(ok({ items: [] }));
@@ -59,6 +74,8 @@ try {
   assert.equal(denied.status, 403);
   const wrapped = await fetch(base + '/__proxy/site/https://attacker.example/', { headers: { 'X-Pp-Preview': '1' } });
   assert.equal(wrapped.status, 403);
+  const statusPost = await fetch(base + '/__proxy/site/api/public/channel-status', { method: 'POST', headers: { 'X-Pp-Preview': '1' } });
+  assert.equal(statusPost.status, 403);
   await page.goto(base);
   await page.getByText('demo-model').first().waitFor();
   assert.equal(await page.locator('.tab').count(), 5);
@@ -80,6 +97,36 @@ try {
   await plaza.getByRole('button', { name: /demo-model/ }).click();
   assert.match(await page.locator('.sheet').innerText(), /官方价/);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await plaza.getByRole('button', { name: '渠道状态' }).click();
+  await page.getByText('渠道状态加载失败').waitFor();
+  failStatus = false;
+  await page.getByRole('button', { name: '重试' }).click();
+  await page.locator('.channel-item').first().waitFor();
+  assert.equal(statusRequests, 2);
+  assert.equal(await page.locator('.tab.active').getAttribute('data-tab'), 'plaza');
+  assert.equal(await page.locator('.channel-item').count(), 3);
+  assert.match(await page.locator('.channel-summary').innerText(), /1 个故障/);
+  assert.equal(await page.locator('.channel-latency-chart').count(), 1);
+  assert.equal(await page.locator('.channel-item').last().locator('.channel-state').innerText(), '未知');
+  assert.match(await page.locator('.channel-item').last().innerText(), /可用率\s+—/);
+  await page.getByRole('button', { name: /测试分组 2/ }).click();
+  assert.equal(await page.locator('.channel-item').count(), 2);
+  await page.getByRole('searchbox', { name: '搜索渠道' }).fill('demo-model');
+  assert.equal(await page.locator('.channel-item').count(), 1);
+  await page.getByRole('button', { name: '查看 demo-model 的探测记录' }).click();
+  assert.match(await page.locator('.sheet').innerText(), /偏慢[\s\S]*6\.00 s/);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.querySelector('#view').scrollWidth), await page.evaluate(() => document.querySelector('#view').clientWidth));
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-channel-390.png', animations: 'disabled' });
+  await page.getByRole('button', { name: '刷新渠道状态' }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="刷新渠道状态"]').disabled);
+  assert.equal(statusRequests, 3);
+  await page.getByRole('button', { name: '模型广场' }).click();
+  await page.locator('.plaza-group').first().waitFor();
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByRole('button', { name: '去登录' }).click();
   await page.locator('input[type=email]').fill('test@example.test');
@@ -103,6 +150,13 @@ try {
   assert.match(await page.locator('.dashboard-model-table').innerText(), /demo-model-2/);
   assert.equal(await page.locator('.dashboard-trend-line').count(), 5);
   assert.equal(await page.locator('.dashboard-trend-point').count(), 3);
+  const chartGeometry = await page.locator('.dashboard-trend-svg').evaluate(el => ({
+    ratio: Math.abs(el.querySelector('.dashboard-chart-grid').getBoundingClientRect().width) / el.getBoundingClientRect().width,
+    chartWidth: el.getBoundingClientRect().width,
+    containerWidth: el.parentElement.clientWidth
+  }));
+  assert.ok(chartGeometry.ratio > 0.75, 'trend plot should use most of the chart width');
+  assert.equal(Math.round(chartGeometry.chartWidth), chartGeometry.containerWidth);
   await page.getByRole('button', { name: '按小时' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dashboard-trend-point').length === 3);
   assert.equal(trendQueries.at(-1).get('granularity'), 'hour');
@@ -154,6 +208,7 @@ try {
   zeroModels = true;
   await page.getByRole('button', { name: '应用日期' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dashboard-trend-point').length === 80);
+  assert.ok(await page.locator('.dashboard-chart-scroll').evaluate(el => el.scrollWidth > el.clientWidth));
   assert.equal(await page.locator('.dashboard-donut-segment').count(), 0);
   await page.locator('.dashboard-trend-point').first().dispatchEvent('click');
   assert.match(await page.locator('.dashboard-chart-detail').innerText(), /point-0/);

@@ -32,8 +32,19 @@ try {
   await page.locator('.plaza-group').first().waitFor({ timeout: 30000 });
   await page.getByText('官方价').first().waitFor();
   await page.getByText('缓存读取').first().waitFor();
+  await page.getByRole('button', { name: '渠道状态' }).click();
+  await page.locator('.channel-item').first().waitFor({ timeout: 30000 });
+  await page.getByText('平均可用率').waitFor();
+  await page.getByRole('button', { name: '刷新渠道状态' }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-label="刷新渠道状态"]').disabled);
+  assert.ok(await page.locator('.channel-timeline').count());
   await page.getByRole('navigation').getByRole('button', { name: '令牌', exact: true }).click();
-  await page.getByText('还没有令牌').waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: '新建' }).waitFor({ timeout: 30000 });
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#view').textContent;
+    return text.includes('还没有令牌') || text.includes('Base URL') || text.includes('加载失败');
+  }, null, { timeout: 30000 });
+  assert.equal(await page.getByText('加载失败', { exact: true }).count(), 0);
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByText('用量明细').click();
   await page.getByText('输入 tokens').waitFor({ timeout: 30000 });

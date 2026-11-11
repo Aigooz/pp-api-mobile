@@ -24,6 +24,7 @@
     '/home': { title: 'Pp API', tab: 'home', render: function () { return C.renderHome(); } },
     '/dashboard': { title: '仪表盘', tab: 'home', render: function () { return global.PagesDashboard.renderDashboard(); } },
     '/plaza': { title: '模型广场', tab: 'plaza', render: function () { return C.renderPlaza(); } },
+    '/channel-status': { title: '渠道状态', tab: 'plaza', render: function () { return global.PagesChannel.render(); } },
     '/chat': { title: '对话', tab: 'chat', render: function () { return global.PagesChat.renderChat(); }, full: true },
     '/keys': { title: '我的令牌', tab: 'keys', render: function () { return global.PagesUser.renderKeys(); } },
     '/usage': { title: '用量明细', tab: 'me', render: function () { return global.PagesUser.renderUsage(); } },
