@@ -27,6 +27,8 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         webView.backgroundColor = view.backgroundColor
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.bounces = false
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = false
         webView.scrollView.isDirectionalLockEnabled = true
         webView.allowsBackForwardNavigationGestures = false
         webView.translatesAutoresizingMaskIntoConstraints = false

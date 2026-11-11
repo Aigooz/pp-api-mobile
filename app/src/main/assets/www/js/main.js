@@ -21,6 +21,20 @@
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
+  var THEMES = [
+    { key: 'auto', name: '跟随系统', sub: '自动切换海蓝浅色与深色', colors: ['#0873ca', '#0e1113'] },
+    { key: 'ocean', name: '海蓝', sub: '默认主题', colors: ['#0873ca', '#2f607a'] },
+    { key: 'mint', name: '薄荷', sub: '清爽青绿色', colors: ['#0b8f7a', '#1d7164'] },
+    { key: 'sunset', name: '日落', sub: '暖橙色调', colors: ['#d55d2d', '#b34d2d'] },
+    { key: 'violet', name: '星紫', sub: '紫罗兰色调', colors: ['#7357d6', '#674bbd'] },
+    { key: 'rose', name: '玫瑰', sub: '柔粉色色调', colors: ['#c84b76', '#ac3e67'] },
+    { key: 'dark', name: '深色', sub: '经典深色模式', colors: ['#2c91e4', '#0e1113'] },
+    { key: 'mint-dark', name: '深海', sub: '深色与青绿色', colors: ['#46c7ac', '#123a34'] },
+    { key: 'sunset-dark', name: '暖夜', sub: '深色与暖橙色', colors: ['#f08a5b', '#43251d'] },
+    { key: 'violet-dark', name: '夜幕', sub: '深色与星紫', colors: ['#a58bf5', '#2d2453'] },
+    { key: 'rose-dark', name: '暗玫', sub: '深色与玫红', colors: ['#ef83a8', '#451d30'] }
+  ];
+  var THEME_KEYS = THEMES.map(function (item) { return item.key; });
 
   var ROUTES = {
     '/home': { title: 'Pp API', tab: 'home', render: function () { return C.renderHome(); } },
@@ -86,8 +100,8 @@
     updateBtn.addEventListener('click', function () { App.go('#/updates'); });
     global.addEventListener('pp:updates-changed', updateIndicator);
     updateIndicator();
-    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('sparkle', 22), title: '切换主题', 'aria-label': '切换主题' });
-    themeBtn.addEventListener('click', toggleTheme);
+    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('sparkle', 22), title: '主题外观', 'aria-label': '主题外观' });
+    themeBtn.addEventListener('click', openThemePicker);
     var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 22), title: '刷新', 'aria-label': '刷新' });
     refreshBtn.addEventListener('click', function () {
       Api.clearCache();
@@ -104,10 +118,14 @@
       try { new ResizeObserver(syncSpace).observe(tabbar); } catch (e) {}
     }
 
+    var scrollFrame = 0;
     view.addEventListener('scroll', function () {
-      if (view.scrollTop > 4) appbar.classList.add('scrolled');
-      else appbar.classList.remove('scrolled');
-    });
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(function () {
+        scrollFrame = 0;
+        appbar.classList.toggle('scrolled', view.scrollTop > 4);
+      });
+    }, { passive: true });
   }
 
   // Distance from the bottom of the viewport to the top of the floating bar,
@@ -122,19 +140,46 @@
   }
 
   function applyTheme() {
-    var mode = S.theme;
-    var dark = mode === 'dark' || (mode === 'auto' && global.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    var mode = THEME_KEYS.indexOf(S.theme) >= 0 ? S.theme : 'ocean';
+    var resolved = mode === 'auto' && global.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : mode;
+    document.documentElement.setAttribute('data-theme', resolved);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    var dark = /(^|-)dark$/.test(resolved);
+    var color = dark ? '#0e1113' : getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f6f8';
+    if (meta) meta.setAttribute('content', color);
     if (global.Native && global.Native.statusBar) {
-      global.Native.statusBar(dark ? '#0e1113' : '#f5f6f8', !dark);
+      global.Native.statusBar(color, !dark);
     }
   }
 
-  function toggleTheme() {
-    S.theme = (document.documentElement.getAttribute('data-theme') === 'dark') ? 'light' : 'dark';
-    U.store.set('theme', S.theme);
+  function setTheme(key, quiet) {
+    if (THEME_KEYS.indexOf(key) < 0) key = 'ocean';
+    S.theme = key;
+    U.store.set('theme', key);
     applyTheme();
-    U.toast(S.theme === 'dark' ? '深色模式' : '浅色模式');
+    if (!quiet) U.toast('已切换到' + (THEMES.filter(function (item) { return item.key === key; })[0] || {}).name, 'ok');
+  }
+
+  function openThemePicker() {
+    var host = U.el('div', { class: 'theme-grid' });
+    function paint() {
+      host.innerHTML = '';
+      THEMES.forEach(function (theme) {
+        var active = S.theme === theme.key;
+        host.appendChild(U.el('button', {
+          type: 'button', class: 'theme-choice' + (active ? ' active' : ''),
+          'aria-pressed': active ? 'true' : 'false',
+          style: { '--swatch': theme.colors[0], '--swatch-2': theme.colors[1] },
+          onclick: function () { setTheme(theme.key); paint(); }
+        },
+          U.el('span', { class: 'theme-choice-name' }, U.el('i'), theme.name),
+          U.el('small', null, theme.sub),
+          active ? U.el('span', { class: 'theme-choice-check', html: U.ic('check', 17) }) : null
+        ));
+      });
+    }
+    paint();
+    U.sheet({ title: '主题外观', body: host, actions: [{ label: '完成' }] });
   }
 
   function parseHash() {
@@ -180,14 +225,18 @@
   function preloadPages() {
     var generation = ++preloadGeneration;
     var paths = Api.AUTH.isLogged() ? ['/plaza', '/keys', '/chat', '/me', '/home', '/channel-status'] : ['/plaza', '/channel-status'];
+    function scheduleNext(callback) {
+      if (global.requestIdleCallback) global.requestIdleCallback(callback, { timeout: 900 });
+      else setTimeout(callback, 160);
+    }
     function next() {
       if (generation !== preloadGeneration || !view) return;
       var path = paths.shift();
       if (!path) return;
       if (!pageCache[path]) makePage(path, '');
-      if (paths.length) setTimeout(next, 180);
+      if (paths.length) scheduleNext(next);
     }
-    setTimeout(next, 180);
+    scheduleNext(next);
   }
 
   function renderRoute(force) {

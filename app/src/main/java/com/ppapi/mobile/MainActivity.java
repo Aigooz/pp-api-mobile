@@ -98,6 +98,7 @@ public class MainActivity extends Activity {
         }
 
         web = new WebView(this);
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         openUpdatesOnLoad = ACTION_UPDATE.equals(getIntent().getAction());
         web.setBackgroundColor(Color.parseColor("#0E1113"));
         WebSettings s = web.getSettings();
