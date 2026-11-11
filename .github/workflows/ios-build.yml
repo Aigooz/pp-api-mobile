@@ -1,0 +1,54 @@
+name: Build iOS package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for iPhone and iPad
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild \
+            -project ios/PpApiMobile.xcodeproj \
+            -scheme PpApiMobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/pp-ios-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            build
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/pp-ios-build/Build/Products/Release-iphoneos/PpApiMobile.app"
+          payload="$RUNNER_TEMP/pp-ios-package/Payload"
+          test -f "$app/PpApiMobile"
+          test -f "$app/www/index.html"
+          test -f "$app/www/js/pages-dashboard.js"
+          test -f "$app/www/js/updates.js"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
+          file "$app/PpApiMobile" | grep -q arm64
+          mkdir -p "$payload"
+          ditto "$app" "$payload/PpApiMobile.app"
+          cd "$RUNNER_TEMP/pp-ios-package"
+          ditto -c -k --keepParent Payload "$GITHUB_WORKSPACE/Pp-API-iOS-unsigned.ipa"
+          unzip -l "$GITHUB_WORKSPACE/Pp-API-iOS-unsigned.ipa" | grep -E 'Payload/PpApiMobile.app/(PpApiMobile|www/index.html)$'
+          shasum -a 256 "$GITHUB_WORKSPACE/Pp-API-iOS-unsigned.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pp-API-iOS-unsigned
+          path: Pp-API-iOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
