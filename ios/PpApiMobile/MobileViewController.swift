@@ -53,7 +53,7 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
             statusBarGlass.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             statusBarGlass.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             statusBarGlass.topAnchor.constraint(equalTo: view.topAnchor),
-            statusBarGlass.heightAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            statusBarGlass.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             statusBarTint.leadingAnchor.constraint(equalTo: statusBarGlass.leadingAnchor),
             statusBarTint.trailingAnchor.constraint(equalTo: statusBarGlass.trailingAnchor),
             statusBarTint.topAnchor.constraint(equalTo: statusBarGlass.topAnchor),
