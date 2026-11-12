@@ -549,7 +549,7 @@
           var chunk = d.content || d.reasoning_content || '';
           if (chunk) {
             aiMsg.content += chunk;
-            if (!frame) frame = global.setTimeout(paintStream, 80);
+        if (!frame) frame = global.setTimeout(paintStream, 120);
           }
         },
         onDone: function () { finish(null); },
