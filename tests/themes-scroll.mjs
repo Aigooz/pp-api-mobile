@@ -34,6 +34,23 @@ async function run(engine, name) {
   try {
     await page.goto(base + '/#/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.getByText('快捷操作').waitFor();
+    await page.getByRole('button', { name: '对话', exact: true }).click();
+    await page.getByRole('button', { name: '对话设置' }).waitFor();
+    const iconCenters = await page.locator('.tool-btn').evaluateAll(buttons => buttons.map(button => {
+      const box = button.getBoundingClientRect();
+      const icon = button.querySelector('svg').getBoundingClientRect();
+      return {
+        dx: Math.abs((box.left + box.width / 2) - (icon.left + icon.width / 2)),
+        dy: Math.abs((box.top + box.height / 2) - (icon.top + icon.height / 2)),
+        padding: getComputedStyle(button).padding,
+        appearance: getComputedStyle(button).webkitAppearance
+      };
+    }));
+    assert.equal(iconCenters.length, 2);
+    assert.ok(iconCenters.every(item => item.dx < 0.1 && item.dy < 0.1), JSON.stringify(iconCenters));
+    assert.ok(iconCenters.every(item => /^0px( 0px){0,3}$/.test(item.padding) && item.appearance === 'none'));
+    await page.getByRole('button', { name: '首页', exact: true }).click();
+    await page.getByText('快捷操作').waitFor();
     await page.getByRole('button', { name: '切换到暗色' }).click();
     assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'dark');
     await page.getByRole('button', { name: '我的', exact: true }).click();
