@@ -18,6 +18,7 @@ let singlePoint = false;
 let failStatus = true;
 let statusRequests = 0;
 let noReliability = false;
+let emptyKeys = false;
 await page.route('**/__proxy/**', async route => {
   const p = new URL(route.request().url()).pathname.replace('/__proxy/site', '');
   if (p === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
@@ -44,7 +45,10 @@ await page.route('**/__proxy/**', async route => {
   }
   if (p === '/api/v1/auth/login') return route.fulfill(ok({ access_token: 'fake-access', refresh_token: 'fake-refresh', user: { id: 1, email: 'test@example.test', balance: 3 } }));
   if (p === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
-  if (p === '/api/v1/keys') return route.fulfill(ok({ items: [] }));
+  if (p === '/api/v1/keys') return route.fulfill(ok({ items: emptyKeys ? [] : [
+    { id: 1, name: 'A', status: 'active', current_concurrency: 2 },
+    { id: 2, name: 'B', status: 'active', current_concurrency: 3 }
+  ] }));
   if (p === '/api/v1/groups/available') return route.fulfill(ok([{ id: 1, name: '测试分组' }]));
   if (p === '/api/v1/usage/stats') return route.fulfill(ok({ total_actual_cost: 0.5, total_requests: 2, total_input_tokens: 20, total_output_tokens: 30 }));
   if (p === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({ total_api_keys: 2, active_api_keys: 1, total_requests: 18, today_requests: 3, today_cost: 0.8, today_actual_cost: 0.4, total_cost: 2, total_actual_cost: 1, today_tokens: 50, today_input_tokens: 20, today_output_tokens: 30, total_tokens: 500, rpm: 2, tpm: 30, average_duration_ms: 1250, ...(noReliability ? {} : { success_rate: 0.9, total_errors: 2, today_success_rate: 0.8, today_errors: 1 }), total_cache_read_tokens: 40, today_cache_read_tokens: 10, by_platform: [{ platform: 'openai', today_actual_cost: 0.4, total_actual_cost: 1, total_requests: 18, total_tokens: 500 }] }));
@@ -140,12 +144,13 @@ try {
   assert.match(await page.locator('.dashboard').innerText(), /80\.0%/);
   assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
   assert.match(await page.locator('.dashboard').innerText(), /今日出错 1/);
+  assert.match(await page.locator('.dashboard').innerText(), /当前并发 5 路/);
   const metricDetails = page.locator('.dashboard-metric-detail');
   assert.equal(await metricDetails.nth(3).locator(':scope > div').count(), 3);
   assert.equal(await metricDetails.nth(4).locator(':scope > div').count(), 3);
   assert.equal(await metricDetails.nth(5).locator(':scope > div').count(), 3);
   assert.equal(await metricDetails.nth(6).locator(':scope > div').count(), 3);
-  assert.equal(await metricDetails.nth(7).locator(':scope > div').count(), 2);
+  assert.equal(await metricDetails.nth(7).locator(':scope > div').count(), 3);
   noReliability = true;
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:live-refreshed')));
   await page.waitForFunction(() => !document.querySelector('.dashboard-grid').textContent.includes('今日成功率'));
@@ -249,6 +254,8 @@ try {
   await page.getByText('20', { exact: true }).waitFor();
   await page.getByText('demo-model').first().waitFor();
   await page.getByRole('button', { name: '令牌', exact: true }).click();
+  emptyKeys = true;
+  await page.getByRole('button', { name: '刷新' }).click();
   await page.getByText('还没有令牌').waitFor();
   await page.getByRole('button', { name: '新建' }).click();
   await page.getByRole('button', { name: '选择分组' }).getByText('请选择分组').waitFor();

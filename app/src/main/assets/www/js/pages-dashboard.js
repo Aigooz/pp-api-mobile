@@ -71,6 +71,7 @@
     var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
     var granularity = 'day';
     var requestVersion = 0, summaryVersion = 0, lastSummary = null, appliedQuery = null, refreshedAt = Date.now(), refreshTimer = null;
+    var totalConcurrency = null;
     var account = Api.AUTH.context();
     function current() { return Api.AUTH.matches(account) && App.isPageRetained(page); }
 
@@ -127,6 +128,7 @@
         error_count: stats.today_error_count, errors: stats.today_errors, status_known: stats.today_status_known }).errors;
       var todaySuccess = global.UsageAnalysis.values({ total_requests: number(stats.today_requests), success_rate: stats.today_success_rate,
         success_requests: stats.today_success_requests, total_errors: todayErrors, status_known: stats.today_status_known }).successRate;
+      var concurrencyText = totalConcurrency == null ? '—' : U.num(totalConcurrency) + ' 路';
       var requestDetail = ['累计 ' + U.num(number(stats.total_requests))];
       if (todaySuccess != null) requestDetail.push('今日成功率 ' + percentText(todaySuccess));
       if (todayErrors != null) requestDetail.push('今日出错 ' + U.num(todayErrors));
@@ -142,8 +144,26 @@
         metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'),
         metric('累计 Tokens', token(stats.total_tokens), ['输入 ' + token(stats.total_input_tokens), '输出 ' + token(stats.total_output_tokens), '缓存 ' + token(totalCache)], 'chart'),
         metric('今日缓存命中率', percentText(todayHit), ['累计命中率 ' + percentText(totalHit), '今日缓存读 ' + token(stats.today_cache_read_tokens), '累计缓存读 ' + token(stats.total_cache_read_tokens)], 'bolt'),
-        metric('实时性能', U.num(number(stats.rpm)) + ' RPM', [U.num(number(stats.tpm)) + ' TPM', '平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms')], 'clock')
+        metric('实时性能', U.num(number(stats.rpm)) + ' RPM', [U.num(number(stats.tpm)) + ' TPM', '平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms'), '当前并发 ' + concurrencyText], 'clock')
       ));
+    }
+
+    function loadConcurrency() {
+      var cached = global.S.keys;
+      var request = cached && cached.length ? Promise.resolve({ items: cached }) : Api.keys(1, 100);
+      return request.then(function (result) {
+        if (!current()) return;
+        var items = arrOf(result), sum = 0, known = 0;
+        if (items.length) global.S.keys = items;
+        items.forEach(function (key) {
+          var value = pick(key, 'current_concurrency');
+          if (value === undefined || value === null || value === '' || !isFinite(Number(value)) || Number(value) < 0) return;
+          sum += Number(value);
+          known++;
+        });
+        totalConcurrency = items.length && known === items.length ? sum : (known ? sum : null);
+        if (lastSummary) renderSummary(lastSummary);
+      }).catch(function () {});
     }
 
     function renderPlatforms(stats, quotas) {
@@ -204,6 +224,7 @@
         lastSummary = stats;
         renderSummary(stats);
         renderPlatforms(stats, {});
+        loadConcurrency();
         return Api.platformQuotas().then(function (quotas) { if (current() && version === summaryVersion) renderPlatforms(stats, quotas || {}); }).catch(function () {
           if (current() && version === summaryVersion) platformHost.appendChild(h('div', { class: 'dashboard-error' }, '平台额度暂不可用 ', h('button', { onclick: loadSummary }, '重试')));
         });
