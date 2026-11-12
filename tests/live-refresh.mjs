@@ -15,7 +15,8 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
-const calls = { plaza: 0, status: 0, dashboard: 0, trend: 0 };
+const calls = { plaza: 0, status: 0, dashboard: 0, trend: 0, me: 0 };
+let balance = 3;
 let plazaGeneration = 1;
 let channelGeneration = 1;
 
@@ -40,7 +41,7 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
   if (path === '/api/v1/model-plaza') { calls.plaza++; return route.fulfill(ok(plaza())); }
   if (path === '/api/public/channel-status') { calls.status++; return route.fulfill(ok(channels())); }
-  if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
+  if (path === '/api/v1/auth/me') { calls.me++; return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: balance })); }
   if (path === '/api/v1/keys') return route.fulfill(ok({ items: [] }));
   if (path === '/api/v1/usage/dashboard/stats') { calls.dashboard++; return route.fulfill(ok({ total_api_keys: 1, active_api_keys: 1, today_requests: calls.dashboard, total_requests: 10, total_tokens: 100 })); }
   if (path === '/api/v1/user/platform-quotas') return route.fulfill(ok({ platform_quotas: [] }));
@@ -55,6 +56,15 @@ try {
   await page.goto(base + '/#/home');
   await page.getByText('快捷操作').waitFor();
   await page.waitForFunction(() => !!window.__ppLiveRefresh);
+  await page.waitForFunction(() => !!window.__ppBalanceRefresh);
+  const initialMe = calls.me;
+  balance = 7.25;
+  const refreshed = await page.evaluate(() => window.__ppBalanceRefresh());
+  assert.equal(Number(refreshed.balance), 7.25);
+  assert.ok(calls.me > initialMe, 'balance refresh should request the account endpoint');
+  assert.equal(await page.getByText('$7.25').count() > 0, true);
+  await page.waitForTimeout(10000);
+  assert.ok(calls.me >= initialMe + 2, 'balance refresh should run on the ten-second interval');
   const initial = { ...calls };
   plazaGeneration = 2;
   channelGeneration = 2;
