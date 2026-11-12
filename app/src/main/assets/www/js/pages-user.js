@@ -510,6 +510,7 @@
     if (!Api.AUTH.isLogged()) {
       var guestPage = needLogin();
       guestPage.appendChild(h('div', { class: 'section' }, h('div', { class: 'list' },
+        listItem('sparkle', '主题外观', '浅色、深色与多种配色', null, function () { global.AppTheme.open(); }),
         listItem('refresh', '软件更新', '检查新版本与更新通知', null, function () { App.go('#/updates'); }),
         listItem('doc', '关于 Pp API', '版本、条款与联系方式', null, function () { App.go('#/about'); })
       )));
@@ -554,6 +555,7 @@
 
     page.appendChild(h('div', { class: 'section' }, h('div', { class: 'list' },
       listItem('users', '账号管理', '切换或添加账号', null, function () { App.go('#/accounts'); }),
+      listItem('sparkle', '主题外观', '浅色、深色与多种配色', null, function () { global.AppTheme.open(); }),
       listItem('lock', '修改密码', '定期更换更安全', null, function () { openPasswordSheet(); }),
       listItem('refresh', '清除本地缓存', '重新拉取模型与公告', null, function () {
         Api.clearCache();
