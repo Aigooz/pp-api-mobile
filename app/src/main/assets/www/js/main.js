@@ -17,6 +17,7 @@
   };
 
   var view, appbar, titleEl, subEl, actionsEl, tabbar;
+  var tabIndicator, tabButtons = [], tabDrag = null;
   var currentPath = '';
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
@@ -85,11 +86,16 @@
     view = U.el('main', { id: 'view' });
     var fade = U.el('div', { class: 'bottom-fade' });
     tabbar = U.el('nav', { class: 'tabbar' });
+    tabIndicator = U.el('span', { class: 'tab-indicator', 'aria-hidden': 'true' });
+    tabbar.appendChild(tabIndicator);
+    tabButtons = [];
     TABS.forEach(function (t) {
       var b = U.el('button', { class: 'tab', 'data-tab': t.key, html: U.ic(t.icon, 22) + '<span>' + t.label + '</span>' });
       b.addEventListener('click', function () { if (location.hash !== t.path) App.go(t.path); });
+      tabButtons.push(b);
       tabbar.appendChild(b);
     });
+    setupTabIndicator();
     app.appendChild(appbar);
     app.appendChild(view);
     app.appendChild(fade);
@@ -141,6 +147,107 @@
     }, { passive: true });
   }
 
+  function activeTabIndex() {
+    var index = 0;
+    tabButtons.forEach(function (button, i) { if (button.classList.contains('active')) index = i; });
+    return index;
+  }
+
+  function tabCenter(index) {
+    var button = tabButtons[index];
+    if (!button) return { left: 0, width: 0 };
+    var bar = tabbar.getBoundingClientRect();
+    var rect = button.getBoundingClientRect();
+    var border = parseFloat(getComputedStyle(tabbar).borderLeftWidth) || 0;
+    return { left: rect.left - bar.left - border, width: rect.width };
+  }
+
+  function placeTabIndicator(index, stretch, offset) {
+    if (!tabIndicator) return;
+    var target = tabCenter(index);
+    var width = Math.max(46, Math.min(54, target.width * .86));
+    var firstPlace = tabIndicator.getAttribute('data-placed') !== '1';
+    if (firstPlace) tabIndicator.style.transition = 'none';
+    tabIndicator.style.width = width + 'px';
+    var center = target.left + target.width / 2 + (offset || 0);
+    tabIndicator.style.transform = 'translateX(' + (center - width / 2) + 'px) scaleX(' + (stretch || 1) + ')';
+    if (firstPlace) {
+      void tabIndicator.offsetWidth;
+      tabIndicator.style.transition = '';
+      tabIndicator.setAttribute('data-placed', '1');
+    }
+  }
+
+  function syncTabIndicator() {
+    if (!tabIndicator || !tabButtons.length || tabbar.style.display === 'none') return;
+    placeTabIndicator(activeTabIndex());
+  }
+
+  function setupTabIndicator() {
+    var startX = 0, startIndex = 0, moved = false;
+    function point(event) {
+      var touch = event.touches && event.touches[0];
+      return touch ? touch.clientX : event.clientX;
+    }
+    function move(event) {
+      if (!tabDrag) return;
+      var x = point(event);
+      var delta = x - startX;
+      moved = moved || Math.abs(delta) > 6;
+      var origin = tabCenter(startIndex);
+      var width = Math.max(46, Math.min(54, origin.width * .86));
+      var center = origin.left + origin.width / 2 + delta;
+      tabIndicator.style.transform = 'translateX(' + (center - width / 2) + 'px) scaleX(' +
+        (1 + Math.min(.22, Math.abs(delta) / origin.width * .22)) + ')';
+      if (event.cancelable) event.preventDefault();
+    }
+    function end(event) {
+      if (!tabDrag) return;
+      var current = tabDrag;
+      tabDrag = null;
+      tabbar.classList.remove('dragging');
+      if (!moved && current.allowClick) return;
+      var nearest = startIndex, best = Infinity;
+      var bar = tabbar.getBoundingClientRect();
+      var pointer = point(event || current.lastEvent || { clientX: startX });
+      tabButtons.forEach(function (button, index) {
+        var rect = button.getBoundingClientRect();
+        var center = rect.left + rect.width / 2 - bar.left;
+        var distance = Math.abs(pointer - (bar.left + center));
+        if (distance < best) { best = distance; nearest = index; }
+      });
+      var target = TABS[nearest];
+      if (target && location.hash !== target.path) App.go(target.path);
+      else placeTabIndicator(nearest);
+    }
+    function begin(event) {
+      if (event.button && event.button !== 0) return;
+      startX = point(event);
+      startIndex = activeTabIndex();
+      moved = false;
+      var target = event.target.closest ? event.target.closest('.tab') : null;
+      tabDrag = { allowClick: !target, lastEvent: event };
+      tabbar.classList.add('dragging');
+      placeTabIndicator(startIndex);
+    }
+    tabbar.addEventListener('touchstart', begin, { passive: true });
+    tabbar.addEventListener('touchmove', move, { passive: false });
+    tabbar.addEventListener('touchend', end, { passive: true });
+    tabbar.addEventListener('touchcancel', end, { passive: true });
+    tabbar.addEventListener('mousedown', begin);
+    document.addEventListener('mousemove', function (event) {
+      if (!tabDrag) return;
+      tabDrag.lastEvent = event;
+      move(event);
+    });
+    document.addEventListener('mouseup', function (event) {
+      if (!tabDrag) return;
+      tabDrag.lastEvent = event;
+      end(event);
+    });
+    global.addEventListener('resize', syncTabIndicator);
+  }
+
   // Distance from the bottom of the viewport to the top of the floating bar,
   // so the scroll area and the chat composer never hide underneath it.
   function syncSpace() {
@@ -150,6 +257,7 @@
     var space = Math.max(0, Math.round(global.innerHeight - rect.top));
     document.documentElement.style.setProperty('--tabbar-space', space + 'px');
     document.documentElement.style.setProperty('--tabbar-h', Math.round(rect.height) + 'px');
+    syncTabIndicator();
   }
 
   function applyTheme() {
@@ -292,6 +400,7 @@
     Array.prototype.forEach.call(tabbar.children, function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === def.tab);
     });
+    syncTabIndicator();
 
     var entry = pageCache[r.path] || makePage(r.path, r.param);
     entry.param = r.param;

@@ -41,15 +41,23 @@ async function run(engine, name) {
       return {
         blur: tabbar.backdropFilter || tabbar.webkitBackdropFilter,
         background: tabbar.backgroundImage,
-        activeShadow: tabStyle.boxShadow,
         activeFilter: getComputedStyle(active.querySelector('svg')).filter,
+        indicator: (() => {
+          const node = document.querySelector('.tab-indicator');
+          const style = getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          const activeRect = active.getBoundingClientRect();
+          return { background: style.backgroundImage, radius: style.borderRadius, dx: Math.abs((rect.left + rect.width / 2) - (activeRect.left + activeRect.width / 2)), width: rect.width };
+        })(),
         fade: getComputedStyle(document.querySelector('.bottom-fade')).backgroundImage
       };
     });
-    assert.match(glass.blur, /blur\(32px\)/);
+    assert.match(glass.blur, /blur\(46px\)/);
     assert.match(glass.background, /linear-gradient/);
-    assert.notEqual(glass.activeShadow, 'none');
     assert.match(glass.activeFilter, /drop-shadow/);
+    assert.match(glass.indicator.background, /radial-gradient/);
+    assert.ok(glass.indicator.dx < 0.5, JSON.stringify(glass.indicator));
+    assert.ok(glass.indicator.width >= 46 && glass.indicator.width <= 54);
     assert.match(glass.fade, /radial-gradient/);
     await page.getByRole('button', { name: '对话', exact: true }).click();
     await page.getByRole('button', { name: '对话设置' }).waitFor();
