@@ -134,7 +134,9 @@
       if (scrollFrame) return;
       scrollFrame = requestAnimationFrame(function () {
         scrollFrame = 0;
-        appbar.classList.toggle('scrolled', view.scrollTop > 4);
+        var scrolled = view.scrollTop > 4;
+        appbar.classList.toggle('scrolled', scrolled);
+        document.body.classList.toggle('scrolled', scrolled);
       });
     }, { passive: true });
   }
@@ -296,7 +298,9 @@
     activePage = entry;
     view.appendChild(entry.slot);
     view.scrollTop = entry.scroll || 0;
-    appbar.classList.toggle('scrolled', view.scrollTop > 4);
+    var routeScrolled = view.scrollTop > 4;
+    appbar.classList.toggle('scrolled', routeScrolled);
+    document.body.classList.toggle('scrolled', routeScrolled);
     pageEvent(entry, 'activate');
     syncSpace();
   }
