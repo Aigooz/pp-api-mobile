@@ -126,9 +126,28 @@ a { color: var(--teal); text-decoration: none; }
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid transparent;
-  transition: border-color .2s;
+  transition: border-color .28s ease, background-color .28s ease, box-shadow .28s ease, transform .28s ease;
   z-index: 20;
+  isolation: isolate;
 }
+.appbar::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: -1;
+  opacity: var(--glass-opacity, .48);
+  background:
+    radial-gradient(120% 150% at 12% -30%, rgba(255, 255, 255, .62), transparent 54%),
+    linear-gradient(105deg, rgba(255, 255, 255, .24), transparent 42%, rgba(255, 255, 255, .16));
+  transition: opacity .32s ease, transform .42s cubic-bezier(.2, .8, .3, 1);
+}
+.appbar::after {
+  content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--teal) 52%, transparent), transparent);
+  opacity: var(--glass-line, .32);
+  transform: scaleX(var(--glass-line-scale, .82));
+  transform-origin: center;
+  transition: opacity .3s ease, transform .42s cubic-bezier(.2, .8, .3, 1);
+}
+body.scrolled .appbar { --glass-opacity: .72; --glass-line: .9; --glass-line-scale: 1; box-shadow: 0 8px 28px rgba(16, 24, 40, .08); }
+.appbar-leading, .appbar-actions { position: relative; z-index: 1; }
 .appbar.scrolled { border-bottom-color: var(--line); }
 .appbar-leading { flex: 1; min-width: 0; }
 .appbar-title { font-size: 17px; font-weight: 700; flex: 1; min-width: 0; }
@@ -140,13 +159,14 @@ a { color: var(--teal); text-decoration: none; }
 }
 .appbar-actions .icon-btn svg { display: block; flex: 0 0 22px; width: 22px; height: 22px; }
 .icon-btn {
+  appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;
   width: 36px; height: 36px; border-radius: 12px; border: 0;
   background: transparent; color: var(--ink-2);
   display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer;
 }
 .icon-btn:active { background: var(--surface-2); }
-.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn svg { display: block; flex: 0 0 auto; width: 20px; height: 20px; }
 .update-indicator { position: relative; color: var(--teal); }
 .update-indicator::after { content: ''; position: absolute; width: 7px; height: 7px; top: 3px; right: 3px; border-radius: 50%; background: var(--danger); border: 1px solid var(--bg); }
 .brand-mark { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 5px; object-fit: cover; }
@@ -182,6 +202,16 @@ main::-webkit-scrollbar { width: 0; }
 .tabbar::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, .55), transparent 60%);
+}
+[data-theme="dark"] .appbar::before, [data-theme="mint-dark"] .appbar::before, [data-theme="sunset-dark"] .appbar::before,
+[data-theme="violet-dark"] .appbar::before, [data-theme="rose-dark"] .appbar::before {
+  background:
+    radial-gradient(120% 150% at 12% -30%, rgba(255, 255, 255, .14), transparent 56%),
+    linear-gradient(105deg, rgba(255, 255, 255, .07), transparent 42%, rgba(255, 255, 255, .045));
+}
+[data-theme="dark"] .appbar, [data-theme="mint-dark"] .appbar, [data-theme="sunset-dark"] .appbar,
+[data-theme="violet-dark"] .appbar, [data-theme="rose-dark"] .appbar {
+  background: var(--bar-bg);
 }
 [data-theme="dark"] .tabbar, [data-theme="mint-dark"] .tabbar, [data-theme="sunset-dark"] .tabbar,
 [data-theme="violet-dark"] .tabbar, [data-theme="rose-dark"] .tabbar {
@@ -616,11 +646,12 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   max-height: 120px; padding: 8px 0; font-size: 15px; line-height: 1.4;
 }
 .send-btn {
+  appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;
   width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--teal);
   color: #fff; display: grid; place-items: center; flex: 0 0 auto;
 }
 .send-btn[disabled] { background: var(--surface-2); color: var(--muted-2); }
-.send-btn svg { width: 18px; height: 18px; }
+.send-btn svg { display: block; width: 18px; height: 18px; }
 .composer-meta {
   display: flex; gap: 6px; align-items: center; padding: 6px 6px 0;
   font-size: 11px; color: var(--muted); overflow: hidden;
@@ -818,11 +849,12 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-toolbar .chip { max-width: 36vw; overflow: hidden; flex: 0 1 auto; }
 .chat-toolbar .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-btn {
+  appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;
   width: 36px; height: 36px; flex: 0 0 auto; border-radius: 12px; border: 1px solid var(--line);
   background: var(--surface); color: var(--ink-2); display: grid; place-items: center;
 }
 .tool-btn:active { background: var(--surface-2); }
-.tool-btn svg { width: 18px; height: 18px; }
+.tool-btn svg { display: block; width: 18px; height: 18px; }
 .suggests { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
 .suggest {
   text-align: left; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line);
