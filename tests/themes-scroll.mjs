@@ -53,12 +53,15 @@ async function run(engine, name) {
       };
     });
     assert.match(glass.blur, /blur\(46px\)/);
-    assert.match(glass.background, /linear-gradient/);
-    assert.match(glass.activeFilter, /drop-shadow/);
-    assert.match(glass.indicator.background, /radial-gradient/);
+    assert.equal(glass.activeFilter, 'none');
     assert.ok(glass.indicator.dx < 0.5, JSON.stringify(glass.indicator));
     assert.ok(glass.indicator.width >= 46 && glass.indicator.width <= 54);
-    assert.match(glass.fade, /radial-gradient/);
+    assert.doesNotMatch(glass.fade, /radial-gradient/);
+    for (const inset of [0, 24, 34]) {
+      await page.evaluate(value => window.__applyInsets(0, value), inset);
+      const bounds = await page.locator('.tabbar').boundingBox();
+      assert.ok(bounds.y + bounds.height <= 844 - inset - 9, JSON.stringify({ inset, bounds }));
+    }
     await page.getByRole('button', { name: '对话', exact: true }).click();
     await page.getByRole('button', { name: '对话设置' }).waitFor();
     const iconCenters = await page.locator('.tool-btn').evaluateAll(buttons => buttons.map(button => {

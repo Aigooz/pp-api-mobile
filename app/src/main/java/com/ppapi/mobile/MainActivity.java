@@ -154,8 +154,19 @@ public class MainActivity extends Activity {
                     int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
                     if (id > 0) statusBar = getResources().getDimensionPixelSize(id);
                     float cssTop = loc[1] > 0 ? 0f : statusBar / (d == 0 ? 1 : d);
+                    int navigationBar = 0;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && view.getRootWindowInsets() != null) {
+                        navigationBar = view.getRootWindowInsets().getSystemWindowInsetBottom();
+                    } else {
+                        int navId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+                        if (navId > 0) navigationBar = getResources().getDimensionPixelSize(navId);
+                    }
+                    int[] windowLoc = new int[2];
+                    view.getLocationInWindow(windowLoc);
+                    int alreadyInset = Math.max(0, w.getDecorView().getHeight() - windowLoc[1] - view.getHeight());
+                    float cssBottom = Math.max(0, navigationBar - alreadyInset) / (d == 0 ? 1 : d);
                     view.evaluateJavascript("window.__applyInsets && window.__applyInsets("
-                            + cssTop + ",0)", null);
+                            + cssTop + "," + cssBottom + ")", null);
                     if (openUpdatesOnLoad) {
                         openUpdatesOnLoad = false;
                         view.evaluateJavascript("window.App && window.App.go('#/updates', true)", null);
