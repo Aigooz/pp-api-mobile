@@ -117,8 +117,13 @@
       x: '0', y: '0', width: width, height: height,
       result: 'glassMap'
     }));
-    filter.appendChild(svgNode('feDisplacementMap', {
+    filter.appendChild(svgNode('feGaussianBlur', {
       in: 'SourceGraphic',
+      stdDeviation: 18,
+      result: 'frost'
+    }));
+    filter.appendChild(svgNode('feDisplacementMap', {
+      in: 'frost',
       in2: 'glassMap',
       scale: scale,
       xChannelSelector: 'R',
@@ -127,6 +132,12 @@
     }));
     filter.appendChild(svgNode('feComposite', {
       in: 'refracted', in2: 'glassMap', operator: 'in', result: 'shaped'
+    }));
+    filter.appendChild(svgNode('feColorMatrix', {
+      in: 'shaped',
+      type: 'saturate',
+      values: 1.28,
+      result: 'tinted'
     }));
     var defs = svgNode('defs', {});
     defs.appendChild(filter);
