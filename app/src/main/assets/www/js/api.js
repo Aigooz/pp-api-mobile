@@ -272,7 +272,9 @@
       if (!u || context && !contextMatches(context)) return Promise.resolve(false);
       var current = activeAccount();
       if (!current) return Promise.resolve(false);
+      var previous = JSON.stringify(current.user || null);
       current.user = sanitizeUser(u);
+      if (JSON.stringify(current.user || null) === previous) return Promise.resolve(true);
       return persistVault();
     },
     expire: function (id, reason) {
@@ -521,11 +523,15 @@
     reset: function (payload) {
       return api('/auth/reset-password', { method: 'POST', body: payload, auth: false });
     },
-    me: function () {
+    me: function (options) {
       var context = authContext();
       return api('/auth/me').then(function (d) {
         if (!contextMatches(context)) throw switchedError();
         var u = d && d.user ? d.user : d;
+        if (options && options.balanceOnly) {
+          var merged = Object.assign({}, AUTH.user() || {}, u);
+          return AUTH.setUser(merged, context).then(function () { return merged; });
+        }
         return AUTH.setUser(u, context).then(function () { return u; });
       });
     },
