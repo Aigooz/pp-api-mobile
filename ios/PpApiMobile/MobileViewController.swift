@@ -7,6 +7,8 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
     private var statusBarStyle: UIStatusBarStyle = .darkContent
     private let statusBarGlass = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let statusBarTint = UIView()
+    private let bottomGlass = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+    private let bottomTint = UIView()
 
     override var preferredStatusBarStyle: UIStatusBarStyle { statusBarStyle }
     override var prefersHomeIndicatorAutoHidden: Bool { false }
@@ -44,6 +46,14 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         statusBarTint.backgroundColor = UIColor.clear
         view.addSubview(statusBarGlass)
         view.addSubview(statusBarTint)
+        bottomGlass.translatesAutoresizingMaskIntoConstraints = false
+        bottomGlass.isUserInteractionEnabled = false
+        bottomGlass.alpha = 0.72
+        bottomTint.translatesAutoresizingMaskIntoConstraints = false
+        bottomTint.isUserInteractionEnabled = false
+        bottomTint.backgroundColor = UIColor.clear
+        view.addSubview(bottomGlass)
+        view.addSubview(bottomTint)
 
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -57,7 +67,15 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
             statusBarTint.leadingAnchor.constraint(equalTo: statusBarGlass.leadingAnchor),
             statusBarTint.trailingAnchor.constraint(equalTo: statusBarGlass.trailingAnchor),
             statusBarTint.topAnchor.constraint(equalTo: statusBarGlass.topAnchor),
-            statusBarTint.bottomAnchor.constraint(equalTo: statusBarGlass.bottomAnchor)
+            statusBarTint.bottomAnchor.constraint(equalTo: statusBarGlass.bottomAnchor),
+            bottomGlass.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomGlass.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomGlass.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            bottomGlass.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomTint.leadingAnchor.constraint(equalTo: bottomGlass.leadingAnchor),
+            bottomTint.trailingAnchor.constraint(equalTo: bottomGlass.trailingAnchor),
+            bottomTint.topAnchor.constraint(equalTo: bottomGlass.topAnchor),
+            bottomTint.bottomAnchor.constraint(equalTo: bottomGlass.bottomAnchor)
         ])
 
         bridge.webView = webView
@@ -105,6 +123,8 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
             self.statusBarTint.backgroundColor = color?.withAlphaComponent(0.16)
             self.statusBarGlass.alpha = color == nil ? 0.58 : 0.76
+            self.bottomTint.backgroundColor = color?.withAlphaComponent(0.12)
+            self.bottomGlass.alpha = color == nil ? 0.54 : 0.7
         }
     }
 

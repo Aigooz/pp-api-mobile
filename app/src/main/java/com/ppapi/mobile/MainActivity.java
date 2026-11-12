@@ -94,9 +94,13 @@ public class MainActivity extends Activity {
 
         Window w = getWindow();
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        w.setStatusBarColor(Color.parseColor("#0E1113"));
+        w.setStatusBarColor(Color.TRANSPARENT);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            w.setNavigationBarColor(Color.parseColor("#0E1113"));
+            w.setNavigationBarColor(Color.TRANSPARENT);
+            w.setStatusBarColor(Color.TRANSPARENT);
+            w.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             w.setNavigationBarDividerColor(Color.TRANSPARENT);
@@ -686,11 +690,19 @@ public class MainActivity extends Activity {
                         animator.start();
                         View dv = w.getDecorView();
                         int flags = dv.getSystemUiVisibility();
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                              flags |= View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                                      View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+                          }
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             if (darkIcons) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
                             else flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                            dv.setSystemUiVisibility(flags);
-                        }
+                          }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                              if (darkIcons) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                              else flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                          }
+                          dv.setSystemUiVisibility(flags);
                     } catch (Exception ignored) {}
                 }
             });

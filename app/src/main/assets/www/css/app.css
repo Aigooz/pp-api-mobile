@@ -191,17 +191,27 @@ main::-webkit-scrollbar { width: 0; }
   display: flex; align-items: center;
   height: 62px; padding: 0 6px;
   border-radius: 31px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, .74), rgba(255, 255, 255, .5));
-  backdrop-filter: blur(28px) saturate(200%);
-  -webkit-backdrop-filter: blur(28px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, .6);
-  box-shadow: 0 12px 30px rgba(16, 24, 40, .14), 0 2px 8px rgba(16, 24, 40, .06),
-    inset 0 1px 0 rgba(255, 255, 255, .8);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .58), rgba(255, 255, 255, .34));
+  backdrop-filter: blur(32px) saturate(220%);
+  -webkit-backdrop-filter: blur(32px) saturate(220%);
+  border: 1px solid rgba(255, 255, 255, .52);
+  box-shadow: 0 14px 36px rgba(16, 24, 40, .16), 0 2px 10px rgba(16, 24, 40, .07),
+    inset 0 1px 0 rgba(255, 255, 255, .86), inset 0 -1px 0 rgba(255, 255, 255, .18);
   overflow: hidden;
+  transition: background .3s ease, box-shadow .3s ease, border-color .3s ease;
 }
 .tabbar::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, .55), transparent 60%);
+  background:
+    radial-gradient(120% 90% at 18% -10%, rgba(255, 255, 255, .7), transparent 58%),
+    linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, .3) 46%, transparent 72%);
+  mix-blend-mode: screen;
+  opacity: .9;
+}
+.tabbar::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .72), transparent);
+  opacity: .7;
 }
 [data-theme="dark"] .appbar::before, [data-theme="mint-dark"] .appbar::before, [data-theme="sunset-dark"] .appbar::before,
 [data-theme="violet-dark"] .appbar::before, [data-theme="rose-dark"] .appbar::before {
@@ -215,13 +225,16 @@ main::-webkit-scrollbar { width: 0; }
 }
 [data-theme="dark"] .tabbar, [data-theme="mint-dark"] .tabbar, [data-theme="sunset-dark"] .tabbar,
 [data-theme="violet-dark"] .tabbar, [data-theme="rose-dark"] .tabbar {
-  background: linear-gradient(180deg, rgba(38, 43, 48, .78), rgba(20, 23, 26, .66));
-  border-color: rgba(255, 255, 255, .08);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .07);
+  background: linear-gradient(180deg, rgba(43, 49, 55, .62), rgba(17, 20, 23, .48));
+  border-color: rgba(255, 255, 255, .12);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .52), inset 0 1px 0 rgba(255, 255, 255, .12),
+    inset 0 -1px 0 rgba(255, 255, 255, .04);
 }
 [data-theme="dark"] .tabbar::before, [data-theme="mint-dark"] .tabbar::before, [data-theme="sunset-dark"] .tabbar::before,
 [data-theme="violet-dark"] .tabbar::before, [data-theme="rose-dark"] .tabbar::before {
-  background: radial-gradient(120% 80% at 20% 0%, rgba(255, 255, 255, .12), transparent 60%);
+  background:
+    radial-gradient(120% 90% at 18% -10%, rgba(255, 255, 255, .2), transparent 58%),
+    linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, .1) 46%, transparent 72%);
 }
 .tab {
   position: relative; z-index: 1;
@@ -232,10 +245,19 @@ main::-webkit-scrollbar { width: 0; }
   transition: transform .16s ease, background .2s ease, color .2s ease;
 }
 .tab svg { width: 22px; height: 22px; }
-.tab.active { color: var(--teal); background: var(--teal-soft); }
+.tab.active {
+  color: var(--teal);
+  background:
+    radial-gradient(90% 120% at 50% 0%, color-mix(in srgb, var(--teal) 26%, transparent), var(--teal-soft) 62%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 6px 16px color-mix(in srgb, var(--teal) 22%, transparent);
+}
+.tab.active svg { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--teal) 58%, transparent)); }
 .tab:active { transform: scale(.94); }
 [data-theme="dark"] .tab.active, [data-theme="mint-dark"] .tab.active, [data-theme="sunset-dark"] .tab.active,
-[data-theme="violet-dark"] .tab.active, [data-theme="rose-dark"] .tab.active { background: var(--teal-soft); }
+[data-theme="violet-dark"] .tab.active, [data-theme="rose-dark"] .tab.active {
+  background: radial-gradient(90% 120% at 50% 0%, color-mix(in srgb, var(--teal) 32%, transparent), var(--teal-soft) 66%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14), 0 8px 20px color-mix(in srgb, var(--teal) 26%, transparent);
+}
 
 /* ---------- hero ---------- */
 .hero {
@@ -263,9 +285,18 @@ main::-webkit-scrollbar { width: 0; }
 .section-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
 .section-head a, .section-head button { font-size: 12.5px; color: var(--muted); background: none; border: 0; padding: 0; }
 .card {
+  position: relative;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
 }
+.card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--teal) 6%, transparent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, .12), transparent 30%);
+  opacity: .75;
+}
+.card > * { position: relative; z-index: 1; }
 .card.pad { padding: 16px; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -663,14 +694,19 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .bottom-fade {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
   height: calc(var(--tabbar-space, 92px) + 26px);
-  background: linear-gradient(180deg, rgba(245, 246, 248, 0) 0%,
-    rgba(245, 246, 248, .82) 44%, #f5f6f8 82%);
+  background:
+    linear-gradient(180deg, rgba(245, 246, 248, 0) 0%, rgba(245, 246, 248, .74) 44%,
+      color-mix(in srgb, var(--bg) 92%, transparent) 82%),
+    radial-gradient(120% 80% at 50% 100%, color-mix(in srgb, var(--teal) 9%, transparent), transparent 68%);
   pointer-events: none;
+  transition: background .3s ease;
 }
 [data-theme="dark"] .bottom-fade, [data-theme="mint-dark"] .bottom-fade, [data-theme="sunset-dark"] .bottom-fade,
 [data-theme="violet-dark"] .bottom-fade, [data-theme="rose-dark"] .bottom-fade {
-  background: linear-gradient(180deg, rgba(14, 17, 19, 0) 0%,
-    rgba(14, 17, 19, .84) 44%, #0e1113 82%);
+  background:
+    linear-gradient(180deg, rgba(14, 17, 19, 0) 0%, rgba(14, 17, 19, .8) 44%,
+      rgba(14, 17, 19, .95) 82%),
+    radial-gradient(120% 80% at 50% 100%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 68%);
 }
 body.chat-mode .bottom-fade { height: calc(var(--tabbar-space, 92px) + 122px); }
 

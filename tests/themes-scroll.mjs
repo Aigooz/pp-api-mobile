@@ -34,6 +34,23 @@ async function run(engine, name) {
   try {
     await page.goto(base + '/#/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.getByText('快捷操作').waitFor();
+    const glass = await page.evaluate(() => {
+      const tabbar = getComputedStyle(document.querySelector('.tabbar'));
+      const active = document.querySelector('.tab.active');
+      const tabStyle = getComputedStyle(active);
+      return {
+        blur: tabbar.backdropFilter || tabbar.webkitBackdropFilter,
+        background: tabbar.backgroundImage,
+        activeShadow: tabStyle.boxShadow,
+        activeFilter: getComputedStyle(active.querySelector('svg')).filter,
+        fade: getComputedStyle(document.querySelector('.bottom-fade')).backgroundImage
+      };
+    });
+    assert.match(glass.blur, /blur\(32px\)/);
+    assert.match(glass.background, /linear-gradient/);
+    assert.notEqual(glass.activeShadow, 'none');
+    assert.match(glass.activeFilter, /drop-shadow/);
+    assert.match(glass.fade, /radial-gradient/);
     await page.getByRole('button', { name: '对话', exact: true }).click();
     await page.getByRole('button', { name: '对话设置' }).waitFor();
     const iconCenters = await page.locator('.tool-btn').evaluateAll(buttons => buttons.map(button => {
