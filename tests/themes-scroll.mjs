@@ -32,10 +32,13 @@ async function run(engine, name) {
     return route.fulfill(ok([]));
   });
   try {
-    await page.goto(base + '/#/home');
+    await page.goto(base + '/#/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.getByText('快捷操作').waitFor();
-    await page.getByRole('button', { name: '主题外观' }).click();
-    await page.getByText('主题外观', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '切换到暗色' }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'dark');
+    await page.getByRole('button', { name: '我的', exact: true }).click();
+    await page.getByText('主题外观', { exact: true }).click();
+    await page.getByRole('heading', { name: '主题外观' }).waitFor();
     assert.equal(await page.locator('.theme-choice').count(), 11);
     await page.getByRole('button', { name: /薄荷/ }).click();
     assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'mint');
@@ -45,6 +48,8 @@ async function run(engine, name) {
     const darkBg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
     assert.equal(darkBg, '#0e1113');
     await page.getByRole('button', { name: '完成' }).click();
+    await page.getByRole('button', { name: '首页', exact: true }).click();
+    await page.getByText('快捷操作').waitFor();
     await page.reload();
     await page.getByText('快捷操作').waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-theme')), 'violet-dark');
