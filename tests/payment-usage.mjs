@@ -32,7 +32,8 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
   if (path === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({}));
   if (path === '/api/v1/user/platform-quotas') return route.fulfill(ok({ platform_quotas: [] }));
-  if (path === '/api/v1/usage/stats') return route.fulfill(ok({ total_requests: 2, total_actual_cost: 5, total_input_tokens: 50, total_output_tokens: 2 }));
+  if (path === '/api/v1/usage/stats') return route.fulfill(ok({ total_requests: 2, total_actual_cost: 5, total_input_tokens: 50, total_output_tokens: 2,
+    total_cache_creation_tokens: 2, total_cache_read_tokens: 3, success_rate: 0.5, total_errors: 1 }));
   if (path === '/api/v1/usage/dashboard/trend') {
     lastTrend = url.searchParams;
     return route.fulfill(ok({ trend: [] }));
@@ -115,6 +116,22 @@ try {
   await page.getByText('inside-a', { exact: true }).first().waitFor();
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
+  assert.match(await page.locator('#view').innerText(), /100\.0%\s*成功率/);
+  assert.match(await page.locator('#view').innerText(), /10\.0%\s*缓存命中率/);
+  assert.match(await page.locator('#view').innerText(), /0\s*出错数/);
+  const metrics = await page.evaluate(() => ({
+    backend: UsageAnalysis.values({ total_requests: 10, total_errors: 2, status_known: 10,
+      total_input_tokens: 80, total_cache_creation_tokens: 20, total_cache_read_tokens: 20 }),
+    normalized: UsageAnalysis.values({ total_requests: 4, success_rate: 0.75, cache_hit_rate: 0.5 }),
+    failed: UsageAnalysis.isErrorRecord({ status_code: 429 }),
+    success: UsageAnalysis.isErrorRecord({ status_code: 200 }),
+    failedText: UsageAnalysis.isErrorRecord({ status: 'upstream_error' })
+  }));
+  assert.deepEqual(metrics.backend, { successRate: 80, cacheHitRate: 16.666666666666664, errors: 2 });
+  assert.deepEqual(metrics.normalized, { successRate: 75, cacheHitRate: 50, errors: null });
+  assert.equal(metrics.failed, true);
+  assert.equal(metrics.success, false);
+  assert.equal(metrics.failedText, true);
 
   ordersFail = true;
   await page.goto(base + '/#/purchase');
