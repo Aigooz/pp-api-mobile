@@ -61,7 +61,12 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
             }
         case "statusBar":
             if let dark = body["darkIcons"] as? Bool {
-                DispatchQueue.main.async { self.viewController?.setStatusBarStyle(dark: dark) }
+                let raw = body["color"] as? String
+                DispatchQueue.main.async {
+                    self.viewController?.setStatusBarStyle(dark: dark)
+                    if let raw, let color = Self.color(raw) { self.viewController?.setStatusBarColor(color) }
+                    else { self.viewController?.setStatusBarColor(nil) }
+                }
             }
         case "keepAwake":
             if let on = body["on"] as? Bool {
@@ -285,5 +290,17 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
         }
         if host == "api.ipkey.vip" { return url.path.hasPrefix("/v1/") }
         return false
+    }
+
+    private static func color(_ raw: String) -> UIColor? {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6 || value.count == 8, let number = UInt64(value, radix: 16) else { return nil }
+        let hasAlpha = value.count == 8
+        let red = CGFloat((number >> (hasAlpha ? 24 : 16)) & 0xff) / 255
+        let green = CGFloat((number >> (hasAlpha ? 16 : 8)) & 0xff) / 255
+        let blue = CGFloat((number >> (hasAlpha ? 8 : 0)) & 0xff) / 255
+        let alpha = hasAlpha ? CGFloat(number & 0xff) / 255 : 1
+        return UIColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
