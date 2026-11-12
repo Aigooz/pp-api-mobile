@@ -41,10 +41,10 @@
     return match ? match[1] + (match[2] ? ' ' + match[2] : '') : date;
   }
 
-  function metric(label, value, detail, icon, action) {
+  function metric(label, value, detail, icon, action, valueClass) {
     return h(action ? 'button' : 'div', { class: 'card dashboard-metric', onclick: action || null },
       h('div', { class: 'dashboard-metric-label' }, h('i', { html: U.ic(icon, 16) }), label),
-      h('strong', null, value),
+      h('strong', valueClass ? { class: valueClass } : null, value),
       h('div', { class: 'dashboard-metric-detail' }, detail)
     );
   }
@@ -117,7 +117,7 @@
       var duration = number(stats.average_duration_ms);
       summaryHost.innerHTML = '';
       summaryHost.appendChild(h('div', { class: 'dashboard-grid' },
-        metric('账户余额', money(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }),
+        metric('账户余额', money(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }, 'dashboard-balance-value'),
         metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); }),
         metric('今日请求', U.num(number(stats.today_requests)), '累计 ' + U.num(number(stats.total_requests)), 'chart'),
         metric('今日费用', money(stats.today_actual_cost), '标准 ' + money(stats.today_cost) + ' · 累计实际 ' + money(stats.total_actual_cost) + ' / 标准 ' + money(stats.total_cost), 'card'),
@@ -399,7 +399,12 @@
         refreshTimer = setTimeout(refreshVisible, 60000);
       }
     }
-    function userUpdated() { if (current() && lastSummary) renderSummary(lastSummary); }
+    function userUpdated() {
+      if (!current()) return;
+      var balanceValue = summaryHost.querySelector('.dashboard-balance-value');
+      if (balanceValue) balanceValue.textContent = money(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
+      else if (lastSummary) renderSummary(lastSummary);
+    }
     global.addEventListener('pp:user-updated', userUpdated);
     global.addEventListener('pp:live-refreshed', liveUpdated);
     page.addEventListener('pp:page-activate', function () {
