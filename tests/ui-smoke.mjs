@@ -140,6 +140,12 @@ try {
   assert.match(await page.locator('.dashboard').innerText(), /80\.0%/);
   assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
   assert.match(await page.locator('.dashboard').innerText(), /今日出错 1/);
+  const metricDetails = page.locator('.dashboard-metric-detail');
+  assert.equal(await metricDetails.nth(3).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(4).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(5).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(6).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(7).locator(':scope > div').count(), 2);
   noReliability = true;
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:live-refreshed')));
   await page.waitForFunction(() => !document.querySelector('.dashboard-grid').textContent.includes('今日成功率'));
@@ -148,6 +154,7 @@ try {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.locator('.dashboard-metric').count(), 8);
     assert.equal(await page.evaluate(() => document.querySelector('#view').scrollWidth), await page.evaluate(() => document.querySelector('#view').clientWidth));
+    assert.equal(await page.locator('.dashboard-metric-detail').evaluateAll(elements => elements.every(el => el.scrollWidth <= el.clientWidth)), true);
   }
   await page.getByText('平台用量').waitFor();
   await page.getByText('每日额度').waitFor();

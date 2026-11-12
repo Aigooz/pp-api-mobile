@@ -48,7 +48,9 @@
     return h(action ? 'button' : 'div', { class: 'card dashboard-metric', onclick: action || null },
       h('div', { class: 'dashboard-metric-label' }, h('i', { html: U.ic(icon, 16) }), label),
       h('strong', valueClass ? { class: valueClass } : null, value),
-      h('div', { class: 'dashboard-metric-detail' }, detail)
+      h('div', { class: 'dashboard-metric-detail' }, (Array.isArray(detail) ? detail : [detail]).map(function (line) {
+        return h('div', null, line);
+      }))
     );
   }
 
@@ -125,22 +127,22 @@
         error_count: stats.today_error_count, errors: stats.today_errors, status_known: stats.today_status_known }).errors;
       var todaySuccess = global.UsageAnalysis.values({ total_requests: number(stats.today_requests), success_rate: stats.today_success_rate,
         success_requests: stats.today_success_requests, total_errors: todayErrors, status_known: stats.today_status_known }).successRate;
-      var requestDetail = '累计 ' + U.num(number(stats.total_requests));
-      if (todaySuccess != null) requestDetail += ' · 今日成功率 ' + percentText(todaySuccess);
-      if (todayErrors != null) requestDetail += ' · 今日出错 ' + U.num(todayErrors);
-      if (reliability.successRate != null) requestDetail += ' · 总成功率 ' + percentText(reliability.successRate);
-      if (reliability.errors != null) requestDetail += ' · 累计出错 ' + U.num(reliability.errors);
+      var requestDetail = ['累计 ' + U.num(number(stats.total_requests))];
+      if (todaySuccess != null) requestDetail.push('今日成功率 ' + percentText(todaySuccess));
+      if (todayErrors != null) requestDetail.push('今日出错 ' + U.num(todayErrors));
+      if (reliability.successRate != null) requestDetail.push('总成功率 ' + percentText(reliability.successRate));
+      if (reliability.errors != null) requestDetail.push('累计出错 ' + U.num(reliability.errors));
       summaryHost.innerHTML = '';
       var totalHit = reliability.cacheHitRate;
       summaryHost.appendChild(h('div', { class: 'dashboard-grid' },
         metric('账户余额', money(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }, 'dashboard-balance-value'),
         metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); }),
         metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
-        metric('今日费用', money(stats.today_actual_cost), '标准 ' + money(stats.today_cost) + ' · 累计实际 ' + money(stats.total_actual_cost) + ' / 标准 ' + money(stats.total_cost), 'card'),
-        metric('今日 Tokens', token(stats.today_tokens), '输入 ' + token(stats.today_input_tokens) + ' · 输出 ' + token(stats.today_output_tokens) + ' · 缓存 ' + token(todayCache), 'bolt'),
-        metric('累计 Tokens', token(stats.total_tokens), '输入 ' + token(stats.total_input_tokens) + ' · 输出 ' + token(stats.total_output_tokens) + ' · 缓存 ' + token(totalCache), 'chart'),
-        metric('今日缓存命中率', percentText(todayHit), '累计 ' + percentText(totalHit) + ' · 今日缓存读 ' + token(stats.today_cache_read_tokens) + ' · 累计 ' + token(stats.total_cache_read_tokens), 'bolt'),
-        metric('实时性能', U.num(number(stats.rpm)) + ' RPM', U.num(number(stats.tpm)) + ' TPM · 平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms'), 'clock')
+        metric('今日费用', money(stats.today_actual_cost), ['今日标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost), '累计标准 ' + money(stats.total_cost)], 'card'),
+        metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'),
+        metric('累计 Tokens', token(stats.total_tokens), ['输入 ' + token(stats.total_input_tokens), '输出 ' + token(stats.total_output_tokens), '缓存 ' + token(totalCache)], 'chart'),
+        metric('今日缓存命中率', percentText(todayHit), ['累计命中率 ' + percentText(totalHit), '今日缓存读 ' + token(stats.today_cache_read_tokens), '累计缓存读 ' + token(stats.total_cache_read_tokens)], 'bolt'),
+        metric('实时性能', U.num(number(stats.rpm)) + ' RPM', [U.num(number(stats.tpm)) + ' TPM', '平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms')], 'clock')
       ));
     }
 
