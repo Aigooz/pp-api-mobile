@@ -22,6 +22,24 @@
   }
 
   function failure(message) { return new Error(message); }
+  function metricNumber(row, names) {
+    for (var i = 0; i < names.length; i++) {
+      var value = row[names[i]];
+      if (value === null || value === undefined || value === '') continue;
+      if (isFinite(Number(value))) return Number(value);
+    }
+    return null;
+  }
+  function isErrorRecord(row) {
+    var status = row.status;
+    if (status !== null && status !== undefined && status !== '') {
+      var text = String(status).toLowerCase();
+      if (/success|ok|completed|200|201|202|204/.test(text)) return false;
+      if (/error|fail|exception|timeout|4\d\d|5\d\d/.test(text)) return true;
+    }
+    var code = metricNumber(row, ['status_code', 'http_status', 'statusCode']);
+    return code !== null && (code < 200 || code >= 400);
+  }
   function fetchRecords(range) {
     // The service filters dates in its own timezone. Pad both sides, then filter instants locally.
     var q = { start_date: U.ymd(new Date(range.start.getTime() - 86400000)),
@@ -59,7 +77,8 @@
 
   function aggregate(records, granularity) {
     var models = Object.create(null), buckets = Object.create(null), totals = { total_requests: 0, total_input_tokens: 0, total_output_tokens: 0,
-      total_cache_creation_tokens: 0, total_cache_read_tokens: 0, total_actual_cost: 0, total_cost: 0 };
+      total_cache_creation_tokens: 0, total_cache_read_tokens: 0, total_actual_cost: 0, total_cost: 0,
+      total_errors: 0, success_requests: 0, status_known: 0 };
     var fields = ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'actual_cost', 'total_cost'];
     records.forEach(function (row) {
       fields.forEach(function (field) {
@@ -74,6 +93,8 @@
       if (!buckets[bucket]) buckets[bucket] = { date: bucket, requests: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, total_tokens: 0, cost: 0, actual_cost: 0 };
       var m = models[name], b = buckets[bucket];
       m.requests++; b.requests++; totals.total_requests++;
+      if (isErrorRecord(row)) totals.total_errors++;
+      if (row.status != null || row.status_code != null || row.http_status != null || row.statusCode != null) totals.status_known++;
       ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens'].forEach(function (field) {
         var n = Number(row[field]); m[field] += n; b[field] += n; totals['total_' + field] += n;
         m.total_tokens += n; b.total_tokens += n;
@@ -86,5 +107,23 @@
       models: Object.keys(models).map(function (key) { return models[key]; }), records: records };
   }
 
-  global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate };
+  function values(stats) {
+    var requests = Number(stats && (stats.total_requests != null ? stats.total_requests : stats.requests)) || 0;
+    var errors = metricNumber(stats || {}, ['total_errors', 'error_count', 'errors', 'failed_requests', 'failed_count']);
+    var successRate = metricNumber(stats || {}, ['success_rate', 'request_success_rate']);
+    if (successRate != null && successRate <= 1) successRate *= 100;
+    if (successRate == null && requests > 0 && errors != null && Number(stats.status_known || 0) > 0) {
+      successRate = Math.max(0, Math.min(100, (requests - errors) / requests * 100));
+    }
+    var input = Number(stats && (stats.total_input_tokens != null ? stats.total_input_tokens : stats.input_tokens)) || 0;
+    var write = Number(stats && (stats.total_cache_creation_tokens != null ? stats.total_cache_creation_tokens : stats.cache_creation_tokens)) || 0;
+    var read = Number(stats && (stats.total_cache_read_tokens != null ? stats.total_cache_read_tokens : stats.cache_read_tokens)) || 0;
+    var base = input + write + read;
+    var hitRate = metricNumber(stats || {}, ['cache_hit_rate', 'cache_rate']);
+    if (hitRate != null && hitRate <= 1) hitRate *= 100;
+    if (hitRate == null && base > 0) hitRate = read / base * 100;
+    return { successRate: successRate, cacheHitRate: hitRate, errors: errors };
+  }
+
+  global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate, values: values, isErrorRecord: isErrorRecord };
 })(window);
