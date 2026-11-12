@@ -16,7 +16,7 @@
     theme: U.store.get('theme', 'auto')
   };
 
-  var view, appbar, titleEl, subEl, actionsEl, tabbar;
+    var view, appbar, titleEl, subEl, actionsEl, tabbar, glassSurface;
   var tabIndicator, tabButtons = [], tabDrag = null;
   var currentPath = '';
   var publicGeneration = 0;
@@ -96,6 +96,7 @@
       tabbar.appendChild(b);
     });
     setupTabIndicator();
+    if (global.PpGlass) glassSurface = global.PpGlass.create(tabbar);
     app.appendChild(appbar);
     app.appendChild(view);
     app.appendChild(fade);

@@ -34,12 +34,25 @@ async function run(engine, name) {
   try {
     await page.goto(base + '/#/home', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.getByText('快捷操作').waitFor();
+    await page.waitForFunction(() => {
+      const node = document.querySelector('.tabbar');
+      return node && (node.classList.contains('glass-refract') || node.classList.contains('glass-fallback'));
+    });
     const glass = await page.evaluate(() => {
       const tabbar = getComputedStyle(document.querySelector('.tabbar'));
       const active = document.querySelector('.tab.active');
       const tabStyle = getComputedStyle(active);
       return {
-        blur: tabbar.backdropFilter || tabbar.webkitBackdropFilter,
+        blur: (() => {
+          const layer = document.querySelector('.tabbar-glass');
+          const style = getComputedStyle(layer);
+          const classList = document.querySelector('.tabbar').classList;
+          return {
+            value: style.backdropFilter || style.webkitBackdropFilter,
+            refract: classList.contains('glass-refract'),
+            fallback: classList.contains('glass-fallback')
+          };
+        })(),
         background: tabbar.backgroundImage,
         activeFilter: getComputedStyle(active.querySelector('svg')).filter,
         indicator: (() => {
@@ -52,8 +65,13 @@ async function run(engine, name) {
         fade: getComputedStyle(document.querySelector('.bottom-fade')).backgroundImage
       };
     });
-    assert.match(glass.blur, /blur\(44px\)/);
-    assert.match(glass.blur, /saturate\(1\.9\)/);
+    if (glass.blur.refract) {
+      assert.match(glass.blur.value, /url\(/);
+    } else {
+      assert.equal(glass.blur.fallback, true);
+      assert.match(glass.blur.value, /blur\(46px\)/);
+      assert.match(glass.blur.value, /saturate\(2\)/);
+    }
     assert.equal(glass.activeFilter, 'none');
     assert.ok(glass.indicator.dx < 0.5, JSON.stringify(glass.indicator));
     assert.ok(glass.indicator.width >= 46 && glass.indicator.width <= 54);
