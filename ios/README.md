@@ -6,7 +6,7 @@ The iOS app wraps the shared mobile interface from `app/src/main/assets/www` in 
 
 本项目提供的是未签名的 IPA，不能直接在 iPhone 或 iPad 上点击安装。设备需要 iOS 15 或更新版本，可使用自己的 Apple ID 和 [Sideloadly](https://sideloadly.io/) 签名后安装：
 
-1. 从 [GitHub 发布页面](https://github.com/Aigooz/pp-api-mobile-updates/releases/latest) 下载 `Pp-API-iOS-unsigned.ipa`，并从 Sideloadly 官网下载 Windows 版。
+1. 从 [GitHub 发布页面](https://github.com/Aigooz/pp-api-mobile/releases/latest) 下载 `Pp-API-iOS-unsigned.ipa`，并从 Sideloadly 官网下载 Windows 版。
 2. 按 Sideloadly 官网提示安装 Apple 网站提供的 iTunes 和 iCloud。用 USB 连接设备，解锁并在设备上选择信任此电脑。
 3. 启动 Sideloadly，选择设备，将 IPA 拖入窗口，输入自己的 Apple ID，点击 Start 并按照提示完成认证。
 4. 如设备提示，前往「设置 → 通用 → VPN 与设备管理」信任开发者；iOS 16 及以上还可能需要在「设置 → 隐私与安全性 → 开发者模式」启用开发者模式并重启。

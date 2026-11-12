@@ -58,7 +58,7 @@
         : '请在 Android 客户端中检查和安装更新。'));
       if (ios) {
         page.appendChild(h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '16px' }, onclick: function () {
-          global.Native.open('https://github.com/Aigooz/pp-api-mobile-updates/releases/latest');
+          global.Native.open('https://github.com/Aigooz/pp-api-mobile/releases/latest');
         } }, '打开 GitHub 下载页面'));
       }
       return page;

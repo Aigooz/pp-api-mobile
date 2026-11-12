@@ -3,7 +3,7 @@ package com.ppapi.mobile;
 import java.util.regex.Pattern;
 
 final class UpdateRules {
-    static final String REPOSITORY = "Aigooz/pp-api-mobile-updates";
+    static final String REPOSITORY = "Aigooz/pp-api-mobile";
     static final String ASSET_NAME = "Pp-API-android.apk";
     static final long MAX_SIZE = 100L * 1024 * 1024;
     private static final Pattern TAG = Pattern.compile("v?[0-9]{1,6}\\.[0-9]{1,6}\\.[0-9]{1,6}");

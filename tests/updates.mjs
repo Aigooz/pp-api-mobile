@@ -78,7 +78,7 @@ try {
     await iosPage.getByText('当前版本 1.1.0').waitFor();
     await iosPage.getByText('iOS 安装包需要使用自己的 Apple ID 签名后安装；更新时也需要重新签名。').waitFor();
     await iosPage.getByRole('button', { name: '打开 GitHub 下载页面' }).click();
-    assert.equal(await iosPage.evaluate(() => window.openedUpdateUrl), 'https://github.com/Aigooz/pp-api-mobile-updates/releases/latest');
+    assert.equal(await iosPage.evaluate(() => window.openedUpdateUrl), 'https://github.com/Aigooz/pp-api-mobile/releases/latest');
   } finally {
     await iosContext.close();
   }

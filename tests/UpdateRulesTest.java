@@ -2,7 +2,7 @@ package com.ppapi.mobile;
 
 public final class UpdateRulesTest {
     private static final String HASH = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    private static final String URL = "https://github.com/Aigooz/pp-api-mobile-updates/releases/download/v1.2.3/Pp-API-android.apk";
+    private static final String URL = "https://github.com/Aigooz/pp-api-mobile/releases/download/v1.2.3/Pp-API-android.apk";
 
     private static void require(boolean value) {
         if (!value) throw new AssertionError();
@@ -25,6 +25,9 @@ public final class UpdateRulesTest {
         invalid("v1.2.3", "1.2.4", URL, HASH, 1024);
         invalid("v1.2.3", "1.2.3", URL.replace("github.com", "github.com.attacker.test"), HASH, 1024);
         invalid("v1.2.3", "1.2.3", URL.replace("Aigooz", "someone"), HASH, 1024);
+        invalid("v1.2.3", "1.2.3", URL.replace("pp-api-mobile/releases", "pp-api-mobile-updates/releases"), HASH, 1024);
+        invalid("v1.2.3", "1.2.3", URL.replace("v1.2.3/", "v1.2.4/"), HASH, 1024);
+        invalid("v1.2.3", "1.2.3", URL + "?download=1", HASH, 1024);
         invalid("v1.2.3", "1.2.3", URL, "", 1024);
         invalid("v1.2.3", "1.2.3", URL, HASH, 0);
         invalid("v1.2.3", "1.2.3", URL, HASH, UpdateRules.MAX_SIZE + 1);
