@@ -22,7 +22,8 @@
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
   var LIVE_REFRESH_MS = 60000;
-  var liveTimer = null, livePending = false, liveLastAt = 0;
+  var BALANCE_REFRESH_MS = 10000;
+  var liveTimer = null, balanceTimer = null, livePending = false, balancePending = false, liveLastAt = 0;
   var THEMES = [
     { key: 'auto', name: '跟随系统', sub: '自动切换海蓝浅色与深色', colors: ['#0873ca', '#0e1113'] },
     { key: 'ocean', name: '海蓝', sub: '默认主题', colors: ['#0873ca', '#2f607a'] },
@@ -102,8 +103,15 @@
     updateBtn.addEventListener('click', function () { App.go('#/updates'); });
     global.addEventListener('pp:updates-changed', updateIndicator);
     updateIndicator();
-    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('sparkle', 22), title: '主题外观', 'aria-label': '主题外观' });
-    themeBtn.addEventListener('click', openThemePicker);
+    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('moon', 22), title: '切换明暗', 'aria-label': '切换明暗', 'data-theme-toggle': 'true' });
+    function paintThemeButton() {
+      var dark = /(^|-)dark$/.test(document.documentElement.getAttribute('data-theme') || '');
+      themeBtn.innerHTML = U.ic(dark ? 'sun' : 'moon', 22);
+      themeBtn.title = dark ? '切换到亮色' : '切换到暗色';
+      themeBtn.setAttribute('aria-label', themeBtn.title);
+    }
+    themeBtn.addEventListener('click', function () { toggleLightDark(); paintThemeButton(); });
+    global.addEventListener('pp:theme-changed', paintThemeButton);
     var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 22), title: '刷新', 'aria-label': '刷新' });
     refreshBtn.addEventListener('click', function () {
       Api.clearCache();
@@ -113,8 +121,9 @@
     actionsEl.appendChild(updateBtn);
     actionsEl.appendChild(themeBtn);
     actionsEl.appendChild(refreshBtn);
+    paintThemeButton();
 
-    requestAnimationFrame(syncSpace);
+    if (global.requestAnimationFrame) requestAnimationFrame(syncSpace); else setTimeout(syncSpace, 16);
     window.addEventListener('resize', syncSpace);
     if (global.ResizeObserver) {
       try { new ResizeObserver(syncSpace).observe(tabbar); } catch (e) {}
@@ -145,6 +154,7 @@
     var mode = THEME_KEYS.indexOf(S.theme) >= 0 ? S.theme : 'ocean';
     var resolved = mode === 'auto' && global.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : mode;
     document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-mode', mode);
     var meta = document.querySelector('meta[name="theme-color"]');
     var dark = /(^|-)dark$/.test(resolved);
     var color = dark ? '#0e1113' : getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#f5f6f8';
@@ -152,6 +162,12 @@
     if (global.Native && global.Native.statusBar) {
       global.Native.statusBar(color, !dark);
     }
+    global.dispatchEvent(new CustomEvent('pp:theme-changed', { detail: { theme: resolved } }));
+  }
+
+  function toggleLightDark() {
+    var currentDark = /(^|-)dark$/.test(document.documentElement.getAttribute('data-theme') || '');
+    setTheme(currentDark ? 'ocean' : 'dark');
   }
 
   function setTheme(key, quiet) {
@@ -183,6 +199,7 @@
     paint();
     U.sheet({ title: '主题外观', body: host, actions: [{ label: '完成' }] });
   }
+  global.AppTheme = { set: setTheme, open: openThemePicker, themes: THEMES };
 
   function parseHash() {
     var raw = (location.hash || '').replace(/^#/, '');
@@ -473,20 +490,50 @@
     });
   }
 
+  function scheduleBalanceRefresh() {
+    clearTimeout(balanceTimer);
+    balanceTimer = setTimeout(function () {
+      balanceTimer = null;
+      if (!document.hidden && Api.AUTH.isLogged()) refreshBalance();
+      else scheduleBalanceRefresh();
+    }, BALANCE_REFRESH_MS);
+  }
+
+  function refreshBalance() {
+    if (balancePending || !Api.AUTH.isLogged()) return Promise.resolve(null);
+    balancePending = true;
+    var context = Api.AUTH.context();
+    return Api.me({ balanceOnly: true }).then(function (user) {
+      if (!Api.AUTH.matches(context)) return null;
+      S.user = user;
+      global.dispatchEvent(new CustomEvent('pp:user-updated'));
+      return user;
+    }).catch(function () { return null; }).then(function (user) {
+      balancePending = false;
+      scheduleBalanceRefresh();
+      return user;
+    });
+  }
+
   function bindLiveRefresh() {
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
         clearTimeout(liveTimer);
         liveTimer = null;
+        clearTimeout(balanceTimer);
+        balanceTimer = null;
       } else {
         refreshLive('visible');
+        refreshBalance();
       }
     });
-    global.addEventListener('online', function () { refreshLive('online'); });
+    global.addEventListener('online', function () { refreshLive('online'); refreshBalance(); });
     global.addEventListener('pp:keys-changed', function () { refreshLive('keys'); });
+    scheduleBalanceRefresh();
     scheduleLiveRefresh(12000);
   }
   global.__ppLiveRefresh = function (reason) { return refreshLive(reason || 'manual'); };
+  global.__ppBalanceRefresh = function () { return refreshBalance(); };
 
   // Keep inputs above the soft keyboard. Two cases:
   //  * WebView resizes (adjustResize): innerHeight shrinks, --kb stays 0.
