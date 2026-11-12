@@ -46,7 +46,7 @@ await page.route('**/__proxy/**', async route => {
   if (p === '/api/v1/keys') return route.fulfill(ok({ items: [] }));
   if (p === '/api/v1/groups/available') return route.fulfill(ok([{ id: 1, name: '测试分组' }]));
   if (p === '/api/v1/usage/stats') return route.fulfill(ok({ total_actual_cost: 0.5, total_requests: 2, total_input_tokens: 20, total_output_tokens: 30 }));
-  if (p === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({ total_api_keys: 2, active_api_keys: 1, total_requests: 18, today_requests: 3, today_cost: 0.8, today_actual_cost: 0.4, total_cost: 2, total_actual_cost: 1, today_tokens: 50, today_input_tokens: 20, today_output_tokens: 30, total_tokens: 500, rpm: 2, tpm: 30, average_duration_ms: 1250, by_platform: [{ platform: 'openai', today_actual_cost: 0.4, total_actual_cost: 1, total_requests: 18, total_tokens: 500 }] }));
+  if (p === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({ total_api_keys: 2, active_api_keys: 1, total_requests: 18, today_requests: 3, today_cost: 0.8, today_actual_cost: 0.4, total_cost: 2, total_actual_cost: 1, today_tokens: 50, today_input_tokens: 20, today_output_tokens: 30, total_tokens: 500, rpm: 2, tpm: 30, average_duration_ms: 1250, success_rate: 0.9, total_errors: 2, today_success_rate: 0.8, today_errors: 1, total_cache_read_tokens: 40, today_cache_read_tokens: 10, by_platform: [{ platform: 'openai', today_actual_cost: 0.4, total_actual_cost: 1, total_requests: 18, total_tokens: 500 }] }));
   if (p === '/api/v1/usage/dashboard/trend') {
     trendQueries.push(new URL(route.request().url()).searchParams);
     return route.fulfill(ok({ trend: manyPoints ? Array.from({ length: 80 }, (_, i) => ({ date: `point-${i}`, input_tokens: i + 1, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 })) : singlePoint ? [
@@ -134,6 +134,12 @@ try {
   await page.locator('input[type=password]').fill('fake-password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('账户余额').waitFor();
+  await page.getByText('今日成功率').waitFor();
+  await page.getByText('今日缓存命中率').waitFor();
+  await page.getByText('今日出错数').waitFor();
+  assert.match(await page.locator('.dashboard').innerText(), /80\.0%/);
+  assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
+  assert.match(await page.locator('.dashboard').innerText(), /失败 1 次/);
   await page.getByText('平均响应').waitFor();
   await page.getByText('平台用量').waitFor();
   await page.getByText('每日额度').waitFor();
