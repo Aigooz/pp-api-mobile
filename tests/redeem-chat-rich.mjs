@@ -90,7 +90,7 @@ async function setup(engine) {
 async function tokenRows(page) {
   await page.getByRole('button', { name: '查看 Token 使用量估算' }).click();
   const rows = await page.locator('.token-row').evaluateAll(nodes => Object.fromEntries(nodes.map(node => [node.firstElementChild.textContent, node.lastElementChild.textContent])));
-  await page.locator('.sheet').getByRole('button', { name: '关闭' }).dispatchEvent('click');
+  await page.evaluate(() => U.closeOverlay());
   await page.locator('.sheet').waitFor({ state: 'detached' });
   return rows;
 }
