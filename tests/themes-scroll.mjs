@@ -52,7 +52,8 @@ async function run(engine, name) {
         fade: getComputedStyle(document.querySelector('.bottom-fade')).backgroundImage
       };
     });
-    assert.match(glass.blur, /blur\(46px\)/);
+    assert.match(glass.blur, /blur\(44px\)/);
+    assert.match(glass.blur, /saturate\(1\.9\)/);
     assert.equal(glass.activeFilter, 'none');
     assert.ok(glass.indicator.dx < 0.5, JSON.stringify(glass.indicator));
     assert.ok(glass.indicator.width >= 46 && glass.indicator.width <= 54);

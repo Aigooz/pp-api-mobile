@@ -7,8 +7,10 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
     private var statusBarStyle: UIStatusBarStyle = .darkContent
     private let statusBarGlass = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let statusBarTint = UIView()
+    private let statusBarEdge = CAGradientLayer()
     private let bottomGlass = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
     private let bottomTint = UIView()
+    private let bottomEdge = CAGradientLayer()
 
     override var preferredStatusBarStyle: UIStatusBarStyle { statusBarStyle }
     override var prefersHomeIndicatorAutoHidden: Bool { false }
@@ -40,20 +42,28 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
 
         statusBarGlass.translatesAutoresizingMaskIntoConstraints = false
         statusBarGlass.isUserInteractionEnabled = false
-        statusBarGlass.alpha = 0.72
+        statusBarGlass.alpha = 0.46
         statusBarTint.translatesAutoresizingMaskIntoConstraints = false
         statusBarTint.isUserInteractionEnabled = false
         statusBarTint.backgroundColor = UIColor.clear
+        statusBarEdge.colors = [UIColor.white.withAlphaComponent(0.20).cgColor, UIColor.white.withAlphaComponent(0.02).cgColor]
+        statusBarEdge.startPoint = CGPoint(x: 0.5, y: 1)
+        statusBarEdge.endPoint = CGPoint(x: 0.5, y: 0)
         view.addSubview(statusBarGlass)
         view.addSubview(statusBarTint)
         bottomGlass.translatesAutoresizingMaskIntoConstraints = false
         bottomGlass.isUserInteractionEnabled = false
-        bottomGlass.alpha = 0.72
+        bottomGlass.alpha = 0.42
         bottomTint.translatesAutoresizingMaskIntoConstraints = false
         bottomTint.isUserInteractionEnabled = false
         bottomTint.backgroundColor = UIColor.clear
+        bottomEdge.colors = [UIColor.white.withAlphaComponent(0.02).cgColor, UIColor.white.withAlphaComponent(0.20).cgColor]
+        bottomEdge.startPoint = CGPoint(x: 0.5, y: 0)
+        bottomEdge.endPoint = CGPoint(x: 0.5, y: 1)
         view.addSubview(bottomGlass)
         view.addSubview(bottomTint)
+        statusBarTint.layer.addSublayer(statusBarEdge)
+        bottomTint.layer.addSublayer(bottomEdge)
 
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -112,6 +122,8 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         applyInsets()
+        statusBarEdge.frame = statusBarTint.bounds
+        bottomEdge.frame = bottomTint.bounds
     }
 
     func setStatusBarStyle(dark: Bool) {
@@ -121,10 +133,10 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
 
     func setStatusBarColor(_ color: UIColor?) {
         UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
-            self.statusBarTint.backgroundColor = color?.withAlphaComponent(0.16)
-            self.statusBarGlass.alpha = color == nil ? 0.58 : 0.76
-            self.bottomTint.backgroundColor = color?.withAlphaComponent(0.12)
-            self.bottomGlass.alpha = color == nil ? 0.54 : 0.7
+            self.statusBarTint.backgroundColor = color?.withAlphaComponent(0.08)
+            self.statusBarGlass.alpha = color == nil ? 0.34 : 0.48
+            self.bottomTint.backgroundColor = color?.withAlphaComponent(0.06)
+            self.bottomGlass.alpha = color == nil ? 0.32 : 0.44
         }
     }
 

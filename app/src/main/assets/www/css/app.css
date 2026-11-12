@@ -186,24 +186,43 @@ main::-webkit-scrollbar { width: 0; }
   display: flex; align-items: center;
   height: 62px; padding: 0 6px;
   border-radius: 31px;
-  background: rgba(245, 246, 248, .42);
-  backdrop-filter: blur(46px) saturate(190%);
-  -webkit-backdrop-filter: blur(46px) saturate(190%);
-  border: 1px solid rgba(255, 255, 255, .3);
-  box-shadow: 0 12px 32px rgba(16, 24, 40, .1), inset 0 1px 0 rgba(255, 255, 255, .5),
-    inset 0 -1px 0 rgba(255, 255, 255, .1);
+  background: rgba(250, 252, 255, .16);
+  backdrop-filter: blur(44px) saturate(190%) brightness(1.025);
+  -webkit-backdrop-filter: blur(44px) saturate(190%) brightness(1.025);
+  border: 1px solid rgba(255, 255, 255, .24);
+  box-shadow:
+    0 10px 30px rgba(16, 24, 40, .08),
+    0 2px 6px rgba(16, 24, 40, .04),
+    inset 0 1px 0 rgba(255, 255, 255, .38),
+    inset 0 -1px 0 rgba(255, 255, 255, .08);
   overflow: hidden;
   transition: background .3s ease, box-shadow .3s ease, border-color .3s ease;
 }
 .tabbar::before {
-  content: none;
+  content: ""; position: absolute; inset: 1px; border-radius: inherit; pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .01) 48%, rgba(255, 255, 255, .045));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  padding: 1px;
+  opacity: .5;
 }
 .tabbar::after {
-  content: none;
+  content: ""; position: absolute; left: 24px; right: 24px; top: 0; height: 42%; pointer-events: none;
+  border-radius: 0 0 50% 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .14), transparent);
+  filter: blur(5px);
+  opacity: .34;
 }
 .tab-indicator {
   position: absolute; top: 5px; height: 52px; width: 52px; left: 0; border-radius: 26px;
-  background: var(--teal-soft);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .13), transparent 52%),
+    var(--teal-soft);
+  border: 1px solid color-mix(in srgb, var(--teal) 11%, rgba(255, 255, 255, .14));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 3px 10px rgba(16, 24, 40, .04);
   transform-origin: center center;
   transition: transform .46s cubic-bezier(.34, 1.42, .5, 1), width .36s ease, background .3s ease;
   will-change: transform;
@@ -222,21 +241,32 @@ main::-webkit-scrollbar { width: 0; }
 }
 [data-theme="dark"] .tabbar, [data-theme="mint-dark"] .tabbar, [data-theme="sunset-dark"] .tabbar,
 [data-theme="violet-dark"] .tabbar, [data-theme="rose-dark"] .tabbar {
-  background: rgba(30, 34, 38, .48);
+  background: rgba(30, 35, 42, .14);
   border-color: rgba(255, 255, 255, .1);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .12),
-    inset 0 -1px 0 rgba(255, 255, 255, .03);
+  box-shadow:
+    0 14px 38px rgba(0, 0, 0, .38),
+    0 2px 8px rgba(0, 0, 0, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .1),
+    inset 0 -1px 0 rgba(255, 255, 255, .04);
 }
 [data-theme="dark"] .tabbar::before, [data-theme="mint-dark"] .tabbar::before, [data-theme="sunset-dark"] .tabbar::before,
 [data-theme="violet-dark"] .tabbar::before, [data-theme="rose-dark"] .tabbar::before {
   background:
-    radial-gradient(150% 130% at 50% -40%, rgba(255, 255, 255, .16), transparent 62%),
-    linear-gradient(115deg, transparent 24%, rgba(255, 255, 255, .06) 48%, transparent 78%);
+    linear-gradient(180deg, rgba(255, 255, 255, .075), rgba(255, 255, 255, .008) 48%, rgba(255, 255, 255, .025));
+  opacity: .5;
+}
+[data-theme="dark"] .tabbar::after, [data-theme="mint-dark"] .tabbar::after, [data-theme="sunset-dark"] .tabbar::after,
+[data-theme="violet-dark"] .tabbar::after, [data-theme="rose-dark"] .tabbar::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .09), transparent);
+  opacity: .34;
 }
 [data-theme="dark"] .tab-indicator, [data-theme="mint-dark"] .tab-indicator, [data-theme="sunset-dark"] .tab-indicator,
 [data-theme="violet-dark"] .tab-indicator, [data-theme="rose-dark"] .tab-indicator {
-  background: var(--teal-soft);
-  box-shadow: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .1), transparent 48%),
+    var(--teal-soft);
+  border-color: color-mix(in srgb, var(--teal) 16%, rgba(255, 255, 255, .06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .09), 0 3px 12px rgba(0, 0, 0, .12);
 }
 .tab {
   position: relative; z-index: 1;
