@@ -28,6 +28,8 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -95,6 +97,9 @@ public class MainActivity extends Activity {
         w.setStatusBarColor(Color.parseColor("#0E1113"));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             w.setNavigationBarColor(Color.parseColor("#0E1113"));
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            w.setNavigationBarDividerColor(Color.TRANSPARENT);
         }
 
         web = new WebView(this);
@@ -668,8 +673,17 @@ public class MainActivity extends Activity {
                 @Override public void run() {
                     try {
                         Window w = getWindow();
-                        w.setStatusBarColor(Color.parseColor(color));
-                        w.setNavigationBarColor(Color.parseColor(color));
+                        final int target = Color.parseColor(color);
+                        ValueAnimator animator = ValueAnimator.ofObject(new ArgbEvaluator(), w.getStatusBarColor(), target);
+                        animator.setDuration(280);
+                        animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                            @Override public void onAnimationUpdate(ValueAnimator valueAnimator) {
+                                int tint = (Integer) valueAnimator.getAnimatedValue();
+                                getWindow().setStatusBarColor(tint);
+                                getWindow().setNavigationBarColor(tint);
+                            }
+                        });
+                        animator.start();
                         View dv = w.getDecorView();
                         int flags = dv.getSystemUiVisibility();
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
