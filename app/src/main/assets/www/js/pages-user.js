@@ -416,12 +416,32 @@
         var reqs = Number(pick(st, 'requests', 'request_count', 'total_requests', 'count') || 0);
         var inTok = Number(pick(st, 'total_input_tokens', 'input_tokens', 'prompt_tokens') || 0);
         var outTok = Number(pick(st, 'total_output_tokens', 'output_tokens', 'completion_tokens') || 0);
+        var quality = global.UsageAnalysis.values(st);
+        var requests = Number(pick(st, 'total_requests', 'requests', 'request_count') || 0);
+        var errors = pick(st, 'total_errors', 'error_count', 'failed_requests');
+        var errorCount = errors === undefined || errors === null || errors === '' ? quality.errors : Number(errors);
+        var successRate = pick(st, 'success_rate', 'request_success_rate');
+        if (successRate !== undefined && successRate !== null && Number(successRate) <= 1) successRate = Number(successRate) * 100;
+        var cacheRead = Number(pick(st, 'total_cache_read_tokens', 'cache_read_tokens') || 0);
+        var cacheWrite = Number(pick(st, 'total_cache_creation_tokens', 'cache_creation_tokens') || 0);
+        var cacheRate = pick(st, 'cache_hit_rate', 'cache_rate');
+        if (cacheRate !== undefined && cacheRate !== null && Number(cacheRate) <= 1) cacheRate = Number(cacheRate) * 100;
+        if (cacheRate === undefined || cacheRate === null || !isFinite(Number(cacheRate))) {
+          var cacheBase = inTok + cacheWrite + cacheRead;
+          cacheRate = cacheBase > 0 ? cacheRead / cacheBase * 100 : null;
+        }
+        if (successRate === undefined || successRate === null || !isFinite(Number(successRate))) {
+          successRate = errorCount !== null && errorCount !== undefined && requests > 0 ? Math.max(0, (requests - Number(errorCount)) / requests * 100) : null;
+        }
         statsHost.innerHTML = '';
         statsHost.appendChild(h('div', { class: 'grid-2' },
           h('div', { class: 'card stat' }, h('b', null, '$' + U.credits(cost)), h('span', null, '花费')),
           h('div', { class: 'card stat' }, h('b', null, U.num(reqs)), h('span', null, '请求数')),
           h('div', { class: 'card stat' }, h('b', null, U.tokens(inTok)), h('span', null, '输入 tokens')),
-          h('div', { class: 'card stat' }, h('b', null, U.tokens(outTok)), h('span', null, '输出 tokens'))
+          h('div', { class: 'card stat' }, h('b', null, U.tokens(outTok)), h('span', null, '输出 tokens')),
+          h('div', { class: 'card stat' }, h('b', { class: 'stat-quality' }, successRate === null || successRate === undefined ? '未知' : Number(successRate).toFixed(1) + '%'), h('span', null, '成功率')),
+          h('div', { class: 'card stat' }, h('b', null, cacheRate === null || cacheRate === undefined ? '未知' : Number(cacheRate).toFixed(1) + '%'), h('span', null, '缓存命中率')),
+          h('div', { class: 'card stat' }, h('b', null, errorCount === null || errorCount === undefined ? '未知' : U.num(Number(errorCount))), h('span', null, '出错数'))
         ));
       }).catch(function (error) {
         if (version !== requestVersion) return;
@@ -486,8 +506,7 @@
         logsHost.innerHTML = '';
         logsHost.appendChild(section('调用记录', null, null,
           list.length ? card(list.map(function (log) {
-            var ok = String(pick(log, 'status', 'status_code') || 'success');
-            var bad = /error|fail|4\d\d|5\d\d/.test(ok);
+            var bad = global.UsageAnalysis.isErrorRecord(log);
             return h('div', { class: 'list-item' },
               h('span', { class: 'li-icon', style: { background: bad ? 'rgba(229,72,77,.1)' : '' }, html: U.ic(bad ? 'alert' : 'bolt', 16) }),
               h('div', { class: 'li-body' },
