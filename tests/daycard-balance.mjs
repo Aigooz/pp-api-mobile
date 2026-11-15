@@ -24,13 +24,22 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: accountBalance }));
   if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, enabled_payment_types: ['alipay'] }));
   if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true } },
-    plans: [{ id: 1, name: '日卡', price: 3.66, currency: 'CNY' }, { id: 2, name: '其他套餐', price: 5, currency: 'CNY' }] }));
+    plans: [{ id: 1, name: '日卡', price: 3.66, currency: 'CNY', group_id: 13 },
+      { id: 2, name: 'Claude 周卡', price: 18.88, currency: 'CNY', validity_days: 7, group_id: 16 },
+      { id: 3, name: '渠道直充', price: 5, currency: 'CNY', group_id: 21 }] }));
   if (path === '/api/v1/payment/orders/my') return route.fulfill(ok({ items: [], total: 0 }));
   if (path === '/api/v1/subscriptions/active') return route.fulfill(ok([]));
   if (path === '/api/daycard/info') {
     assert.equal(route.request().headers().authorization, 'Bearer daycard-token');
+    const gid = Number(url.searchParams.get('group_id'));
     if (infoError) return route.fulfill(raw({ error: '日卡服务故障' }, 503));
-    return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, currency: 'CNY' },
+    // The site echoes the 日卡 plan even for groups that sell nothing; only a matching
+    // group_id means this group really is balance-payable.
+    if (gid === 16) return route.fulfill(raw({ plan: { id: 2, name: 'Claude 周卡', price: 18.88, validity_days: 7, currency: 'CNY', group_id: 16 },
+      user: { id: 1, balance: daycardBalance }, subscription }));
+    if (gid !== 13) return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, currency: 'CNY', group_id: 13 },
+      user: { id: 1, balance: daycardBalance }, subscription }));
+    return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, currency: 'CNY', group_id: 13 },
       user: { id: 1, balance: daycardBalance }, subscription }));
   }
   if (path === '/api/daycard/buy') {
@@ -71,16 +80,21 @@ try {
   await purchasePage();
   await chooseBalance();
   assert.equal(await page.getByRole('button', { name: '账户余额不足' }).isDisabled(), true);
-  assert.match(await page.locator('.payment-balance-note').innerText(), /日卡余额 ¥2\.00/);
-  await page.getByText('其他套餐', { exact: true }).click();
+  assert.match(await page.locator('.payment-balance-note').innerText(), /账户余额 ¥2\.00/);
+  await page.getByText('渠道直充', { exact: true }).click();
   assert.equal(await page.getByText('余额支付', { exact: true }).count(), 0);
   assert.equal(await page.getByText('支付宝', { exact: true }).count(), 1);
+  // A plan whose group the site does not really sell must not offer balance payment,
+  // even though the endpoint echoes the 日卡 plan back for any group id.
+  await page.getByText('Claude 周卡', { exact: true }).click();
+  await page.getByText('余额支付', { exact: true }).waitFor();
+  assert.match(await page.locator('.payment-balance-note').innerText(), /订阅价格 ¥18\.88/);
 
   daycardBalance = 10;
   subscription = { expires_at: '2026-12-01T10:00:00+08:00' };
   await purchasePage();
   await chooseBalance();
-  assert.equal(await page.getByRole('button', { name: '已持有日卡' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '已持有该订阅' }).isDisabled(), true);
   assert.match(await page.locator('.payment-balance-note').innerText(), /已生效/);
 
   subscription = null;
@@ -88,7 +102,7 @@ try {
   await page.goto(base + '/#/me');
   await page.goto(base + '/#/purchase');
   await page.getByText('日卡', { exact: true }).click();
-  await page.getByText(/日卡余额支付信息加载失败/).waitFor();
+  await page.getByText(/日卡服务故障/).waitFor();
   assert.equal(await page.getByText('余额支付', { exact: true }).count(), 0);
   infoError = false;
   await page.getByRole('button', { name: '重试' }).click();
@@ -101,7 +115,7 @@ try {
   assert.match(await page.locator('.sheet').innerText(), /立即扣款/);
   daycardPrice = 4;
   await page.getByRole('button', { name: '确认支付', exact: true }).click();
-  await page.getByText('日卡价格、余额或状态已变化，请重新确认').waitFor();
+  await page.getByText('订阅价格、余额或状态已变化，请重新确认').waitFor();
   assert.equal(buys.length, 0);
   assert.match(await page.locator('.payment-total').innerText(), /¥4\.00/);
 
@@ -122,9 +136,9 @@ try {
   assert.equal(buys.length, 2);
   await purchasePage();
   await chooseBalance();
-  assert.equal(await page.getByRole('button', { name: '请先核对日卡状态' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '请先核对订阅状态' }).isDisabled(), true);
   await page.getByText('支付宝', { exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: '请先核对日卡状态' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '请先核对订阅状态' }).isDisabled(), true);
   await chooseBalance();
   await page.getByRole('button', { name: '刷新状态' }).click();
   await page.getByRole('button', { name: '已核对，允许重试' }).click();
@@ -134,11 +148,11 @@ try {
   buyMode = 'success';
   await confirmBalance();
   await page.getByRole('button', { name: '确认支付', exact: true }).evaluate(button => { button.click(); button.click(); });
-  await page.getByText('日卡开通成功，已扣 ¥3.66').waitFor();
-  await page.getByRole('button', { name: '已持有日卡' }).waitFor();
+  await page.getByText('订阅开通成功，已扣 ¥3.66').waitFor();
+  await page.getByRole('button', { name: '已持有该订阅' }).waitFor();
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-daycard-active-390.png', animations: 'disabled', fullPage: true });
   assert.equal(buys.length, 3);
-  assert.deepEqual(buys, Array(3).fill({ body: {}, authorization: 'Bearer daycard-token' }));
+  assert.deepEqual(buys, Array(3).fill({ body: { group_id: 13 }, authorization: 'Bearer daycard-token' }));
   await page.locator('.payment-balance').getByText('$6.34').waitFor();
   await page.getByRole('navigation').getByRole('button', { name: '我的', exact: true }).click();
   await page.locator('#view').getByText('$6.34').waitFor();

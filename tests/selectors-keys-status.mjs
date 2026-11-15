@@ -133,7 +133,7 @@ try {
   const beforeRefresh = keyGets;
   concurrencyValue = 7;
   await page.clock.install();
-  await page.clock.fastForward(30001);
+  await page.clock.fastForward(10001);
   await page.waitForFunction(() => document.querySelector('.key-concurrency strong')?.textContent === '7');
   assert.equal(keyGets, beforeRefresh + 1);
 

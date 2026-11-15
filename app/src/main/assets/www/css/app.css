@@ -591,6 +591,8 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .dashboard-recent-info { min-width: 0; overflow-wrap: anywhere; }
 .dashboard-recent-info strong, .dashboard-recent-price b { display: block; font-size: 12.5px; }
 .dashboard-recent-info small, .dashboard-recent-price small { display: block; color: var(--muted); font-size: 11px; }
+.dashboard-recent-info .recent-tokens, .dashboard-recent-info .recent-latency { font-variant-numeric: tabular-nums; margin-top: 3px; }
+.dashboard-recent-info .recent-latency { color: var(--muted-2); font-size: 10.5px; }
 .dashboard-recent-price { flex: 0 0 auto; text-align: right; }
 .payment-balance { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .payment-balance strong { color: var(--ink); font-size: 22px; font-variant-numeric: tabular-nums; }
@@ -846,6 +848,15 @@ body.kb-open .group-options { max-height: min(27vh, 220px); }
 .key-usage-grid span { min-width: 0; }
 .key-usage-grid b { display: block; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .key-usage button { padding: 0; border: 0; background: transparent; color: var(--teal); }
+.log-head { gap: 8px; align-items: baseline; }
+.log-sub { overflow-wrap: anywhere; }
+.log-metrics { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.log-metric { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.log-metric i { font-style: normal; color: var(--muted-2); font-size: 11px; }
+.log-metric b { color: var(--ink-2); font-weight: 600; }
+.log-metric.total b, .log-metric.total { color: var(--ink); }
+.log-latency { color: var(--muted-2); }
+.log-latency .log-metric b { color: var(--ink-2); }
 .plaza-model-name { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
 .plaza-status { flex: 0 0 8px; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--muted-2); }
 .plaza-status.ok { background: var(--ok); }

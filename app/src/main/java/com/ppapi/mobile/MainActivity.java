@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
         s.setUseWideViewPort(false);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setTextZoom(100);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);

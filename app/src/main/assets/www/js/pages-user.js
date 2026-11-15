@@ -5,6 +5,8 @@
   var C = global.PagesCore;
   var h = C.h, section = C.section, listItem = C.listItem, emptyState = C.emptyState, card = C.card;
   var arrOf = C.arrOf, pick = C.pick, balanceOf = C.balanceOf, open = C.open;
+  // Live cards (keys, concurrency, today's usage) share the app-wide 10s balance beat.
+  var KEY_LIVE_MS = 10000;
 
   function needLogin() {
     var box = h('div', { class: 'page' },
@@ -109,11 +111,11 @@
     ];
     if (String(k.status) !== 'active') children[0].style.opacity = '0.72';
     var node = h('div', { class: 'card', style: { marginBottom: '10px' } }, h('div', { class: 'keycard' }, children));
-    function loadStats() {
+    function loadStats(silent) {
       var today = U.ymd(new Date());
       var query = { api_key_id: k.id, start_date: today, end_date: today };
       try { query.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
-      stats.textContent = '今日用量加载中…';
+      if (silent !== true) stats.textContent = '今日用量加载中…';
       var request = Number.isSafeInteger(Number(k.id)) && Number(k.id) > 0 ? Api.usageStats(query) : Promise.reject(new Error('令牌信息不完整'));
       return request.then(function (data) {
         if (!Api.AUTH.matches(account) || !versionIsCurrent() || !App.isPageRetained(node)) return;
@@ -129,6 +131,7 @@
           h('span', null, '今日花费', h('b', null, '$' + U.credits(Number(cost))))));
       }).catch(function () {
         if (!Api.AUTH.matches(account) || !versionIsCurrent() || !App.isPageRetained(node)) return;
+        if (silent === true) return;
         stats.innerHTML = '';
         stats.appendChild(h('span', null, '今日用量暂不可用 '));
         stats.appendChild(h('button', { type: 'button', onclick: function () { loadStats(); } }, '重试'));
@@ -163,6 +166,7 @@
     var page = h('div', { class: 'page' });
     var host = h('div', { style: { marginTop: '10px' } });
     var account = Api.AUTH.context(), requestVersion = 0, concurrencyTimer = null, loadedAt = 0, cards = [];
+    var restartLive = null;
     page.appendChild(h('div', { class: 'row between', style: { marginBottom: '4px' } },
       h('div', { class: 'tiny muted' }, '令牌用于调用 API，请勿泄露给他人'),
       h('button', { class: 'btn btn-primary btn-sm', onclick: function () { openKeyEditor(null, reload); } },
@@ -203,18 +207,31 @@
           cards[next++].loadStats().then(loadNext);
         }
         for (var i = 0; i < Math.min(4, cards.length); i++) loadNext();
-        function refreshConcurrency() {
+        // Concurrency for every key arrives in one request; per-key usage rotates so a
+        // long key list never turns the 10s beat into a burst of calls.
+        var statsCursor = 0;
+        function refreshLive() {
           if (!current() || !App.isPageActive(page)) return;
-          Api.keys(1, 100).then(function (result) {
-            if (!current()) return;
-            var values = Object.create(null);
-            arrOf(result).forEach(function (item) { values[String(item.id)] = pick(item, 'current_concurrency'); });
-            cards.forEach(function (item) { item.setConcurrency(values[item.id]); });
-          }).catch(function () {
-            if (current()) cards.forEach(function (item) { item.setConcurrency(undefined); });
-          }).then(function () { if (current() && App.isPageActive(page)) concurrencyTimer = setTimeout(refreshConcurrency, 30000); });
+          var batch = cards.slice(statsCursor, statsCursor + 3);
+          statsCursor = (statsCursor + 3) % Math.max(1, cards.length);
+          Promise.all([
+            Api.keys(1, 100).then(function (result) {
+              if (!current()) return;
+              var values = Object.create(null);
+              arrOf(result).forEach(function (item) {
+                values[String(item.id)] = pick(item, 'current_concurrency');
+              });
+              cards.forEach(function (item) { item.setConcurrency(values[item.id]); });
+            }).catch(function () {
+              if (current()) cards.forEach(function (item) { item.setConcurrency(undefined); });
+            }),
+            Promise.all(batch.map(function (item) { return item.loadStats(true).catch(function () {}); }))
+          ]).then(function () {
+            if (current() && App.isPageActive(page)) concurrencyTimer = setTimeout(refreshLive, KEY_LIVE_MS);
+          });
         }
-        if (App.isPageActive(page)) concurrencyTimer = setTimeout(refreshConcurrency, 30000);
+        restartLive = function () { concurrencyTimer = setTimeout(refreshLive, KEY_LIVE_MS); };
+        if (App.isPageActive(page)) restartLive();
         host.appendChild(h('div', { class: 'card', style: { marginTop: '6px' } },
           h('div', { class: 'list-item', onclick: function () { U.copy(Api.V1); } },
             h('span', { class: 'li-icon', html: U.ic('external', 16) }),
@@ -229,8 +246,10 @@
       });
     }
     page.addEventListener('pp:page-activate', function () {
+      // Re-entering the tab only restarts the 10s live beat; a full reload waits until the
+      // cached list is genuinely stale so cached navigation stays instant.
       if (loadedAt && Date.now() - loadedAt >= 30000) reload(true);
-      else if (loadedAt && cards.length) { clearTimeout(concurrencyTimer); concurrencyTimer = setTimeout(function () { reload(true); }, 30000); }
+      else if (restartLive) { clearTimeout(concurrencyTimer); restartLive(); }
     });
     page.addEventListener('pp:page-deactivate', function () { clearTimeout(concurrencyTimer); });
     page.addEventListener('pp:page-dispose', function () { clearTimeout(concurrencyTimer); requestVersion++; });
@@ -507,15 +526,28 @@
         logsHost.appendChild(section('调用记录', null, null,
           list.length ? card(list.map(function (log) {
             var bad = global.UsageAnalysis.isErrorRecord(log);
+            var tok = global.UsageAnalysis.tokenBreakdown(log);
+            var lat = global.UsageAnalysis.latency(log);
             return h('div', { class: 'list-item' },
               h('span', { class: 'li-icon', style: { background: bad ? 'rgba(229,72,77,.1)' : '' }, html: U.ic(bad ? 'alert' : 'bolt', 16) }),
               h('div', { class: 'li-body' },
-                h('div', { class: 'li-title nowrap', style: { fontSize: '13px' } }, pick(log, 'model', 'model_name') || '请求'),
-                h('div', { class: 'li-sub' },
-                  U.datetime(pick(log, 'created_at', 'timestamp', 'time')) + ' · ' +
-                  U.tokens(Number(pick(log, 'total_tokens') || (Number(log.input_tokens || 0) + Number(log.output_tokens || 0) + Number(log.cache_creation_tokens || 0) + Number(log.cache_read_tokens || 0)))) + ' tokens')
-              ),
-              h('div', { class: 'li-tail' }, h('span', { class: bad ? 'badge danger' : 'badge' }, '$' + U.price(Number(pick(log, 'actual_cost', 'total_cost', 'cost') || 0))))
+                h('div', { class: 'row between log-head' },
+                  h('div', { class: 'li-title nowrap', style: { fontSize: '13px' } }, pick(log, 'model', 'model_name') || '请求'),
+                  h('span', { class: bad ? 'badge danger' : 'badge' }, '$' + U.price(Number(pick(log, 'actual_cost', 'total_cost', 'cost') || 0)))),
+                h('div', { class: 'li-sub log-sub' },
+                  U.datetime(pick(log, 'created_at', 'timestamp', 'time')) +
+                  (log.group && log.group.name ? ' · ' + log.group.name : (log['group.name'] ? ' · ' + log['group.name'] : '')) +
+                  (log.api_key && log.api_key.name ? ' · ' + log.api_key.name : '')),
+                h('div', { class: 'log-metrics' },
+                  h('span', { class: 'log-metric' }, h('i', null, '↓'), U.tokens(tok.input)),
+                  h('span', { class: 'log-metric' }, h('i', null, '↑'), U.tokens(tok.output)),
+                  h('span', { class: 'log-metric', title: '缓存读取 + 写入' }, h('i', null, '⚙'), U.tokens(tok.cache)),
+                  h('span', { class: 'log-metric total' }, h('i', null, '∑'), U.tokens(tok.total))),
+                lat ? h('div', { class: 'log-metrics log-latency' },
+                  h('span', { class: 'log-metric' }, '首字 ', h('b', null, global.UsageAnalysis.ms(lat.first))),
+                  h('span', { class: 'log-metric' }, '总耗时 ', h('b', null, global.UsageAnalysis.ms(lat.total))),
+                  lat.tps ? h('span', { class: 'log-metric' }, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null
+              )
             );
           })) : emptyState('暂无记录', '发起调用后会显示在这里', 'chart')));
       }).catch(function (error) { if (version === requestVersion && !precise) logsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '调用记录加载失败')); });

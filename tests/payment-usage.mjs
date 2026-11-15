@@ -50,8 +50,8 @@ await page.route('**/__proxy/**', async route => {
   }
   if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, min_amount: 1, max_amount: 500, daily_limit: 2000, enabled_payment_types: ['alipay', 'wxpay'], recharge_fee_rate: 1 }));
   if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true }, wxpay: { available: true } }, recharge_fee_rate: 1,
-    plans: [{ id: 8, name: '测试日卡', price: 3.66, validity_days: 1, description: '套餐说明', features: ['测试额度'] }], help_text: '支付说明' }));
-  if (path === '/api/daycard/info') return route.fulfill(raw({ plan: { id: 8, name: '测试日卡', price: 3.66, currency: 'CNY' }, user: { id: 1, balance: 10 }, subscription: null }));
+    plans: [{ id: 8, name: '测试日卡', price: 3.66, validity_days: 1, description: '套餐说明', features: ['测试额度'], group_id: 13 }], help_text: '支付说明' }));
+  if (path === '/api/daycard/info') return route.fulfill(raw({ plan: { id: 8, name: '测试日卡', price: 3.66, currency: 'CNY', group_id: 13 }, user: { id: 1, balance: 10 }, subscription: null }));
   if (path === '/api/v1/subscriptions/active') return route.fulfill(ok([]));
   if (path === '/api/v1/payment/orders/my') {
     if (ordersFail) return route.fulfill(fail('暂不可用'));

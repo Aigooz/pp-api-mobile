@@ -36,6 +36,9 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         webView.scrollView.alwaysBounceVertical = false
         webView.scrollView.alwaysBounceHorizontal = false
         webView.scrollView.isDirectionalLockEnabled = true
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = false
+        webView.scrollView.minimumZoomScale = 1
+        webView.scrollView.maximumZoomScale = 1
         webView.allowsBackForwardNavigationGestures = false
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
@@ -114,6 +117,27 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         ))
         controller.addUserScript(WKUserScript(
             source: Self.nativeShim,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+        // WKWebView ignores the page's user-scalable flag on some iOS versions; pin the
+        // viewport hard so a two-finger gesture can never zoom this native shell.
+        controller.addUserScript(WKUserScript(
+            source: """
+            (function () {
+              var lock = function () {
+                var meta = document.querySelector('meta[name=viewport]');
+                if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; (document.head || document.documentElement).appendChild(meta); }
+                meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover');
+              };
+              lock();
+              document.addEventListener('DOMContentLoaded', lock);
+              ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
+                document.addEventListener(name, function (e) { e.preventDefault(); }, { passive: false });
+              });
+              document.addEventListener('touchmove', function (e) { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+            })();
+            """,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))

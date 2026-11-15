@@ -10,7 +10,7 @@
   function browserUrl(url) {
     if (global.location.hostname !== '127.0.0.1') return url;
     if (url === ORIGIN + '/api/public/channel-status') return '/__proxy/site/api/public/channel-status';
-    if (url === ORIGIN + '/api/daycard/info' || url === ORIGIN + '/api/daycard/buy') return '/__proxy/site' + url.slice(ORIGIN.length);
+    if (url.indexOf(ORIGIN + '/api/daycard/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(API + '/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(V1 + '/') === 0) return '/__proxy/model' + url.slice('https://api.ipkey.vip'.length);
     return url;
@@ -432,7 +432,12 @@
       throw mkErr(res.status, 'DAYCARD_HTTP_' + res.status, localize(message) || '日卡服务暂不可用 (' + res.status + ')');
     }
     if (!value || typeof value !== 'object' || Array.isArray(value) || value.error) {
-      throw mkErr(res.status, 'DAYCARD_RESPONSE', localize(value && value.error) || '日卡服务返回不完整');
+      // The site answers business rejections (余额不足, 已持有订阅 …) with HTTP 200 + {error}.
+      // Those are definite answers, so mark them as final instead of leaving the payment in doubt.
+      var failure = mkErr(value && value.error ? 400 : res.status, 'DAYCARD_RESPONSE',
+        localize(value && value.error) || '日卡服务返回不完整');
+      failure.final = true;
+      throw failure;
     }
     return value;
   }
@@ -576,8 +581,13 @@
     paymentOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id)); },
     cancelOrder: function (id) { return api('/payment/orders/' + encodeURIComponent(id) + '/cancel', { method: 'POST' }); },
     verifyOrder: function (outTradeNo) { return api('/payment/orders/verify', { method: 'POST', body: { out_trade_no: outTradeNo } }); },
-    daycardInfo: function () { return api('/api/daycard/info', { daycard: true }); },
-    daycardBuy: function () { return api('/api/daycard/buy', { method: 'POST', body: {}, daycard: true }); },
+    daycardInfo: function (groupId) {
+      return api('/api/daycard/info', { daycard: true, query: groupId === undefined || groupId === null ? null : { group_id: groupId } });
+    },
+    daycardBuy: function (groupId) {
+      return api('/api/daycard/buy', { method: 'POST', daycard: true,
+        body: groupId === undefined || groupId === null ? {} : { group_id: Number(groupId) } });
+    },
 
     subscriptions: function () { return api('/subscriptions/active'); },
     // ---- raw OpenAI-compatible calls (used by chat fallbacks & images) ----

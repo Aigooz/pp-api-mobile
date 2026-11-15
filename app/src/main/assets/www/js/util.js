@@ -49,7 +49,7 @@
     if (a === 0) return '0';
     if (a >= 1000) return (n / 1000).toFixed(a >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k';
     if (a < 0.01) return n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-    if (a < 1) return n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+    if (a < 1) return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
     return n.toFixed(2).replace(/\.00$/, '');
   }
   function tokens(v) {

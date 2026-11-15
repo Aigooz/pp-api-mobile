@@ -13,7 +13,9 @@
   function money(value) {
     var n = number(value);
     if (n && Math.abs(n) < 0.000001) return '$' + n.toPrecision(4);
-    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    // Money reads as money: two decimals above a cent, and more only when it would round to 0.
+    if (n !== 0 && Math.abs(n) < 0.01) return '$' + n.toFixed(4);
+    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function token(value) { return U.tokens(number(value)); }
   function svg(tag, attrs) {
@@ -378,9 +380,15 @@
       recentHost.innerHTML = '';
       recentHost.appendChild(section('最近调用', '全部记录', function () { App.go('#/usage'); }, records.length
         ? h('div', { class: 'dashboard-recent' }, records.map(function (item) {
-            var tokens = number(item.input_tokens) + number(item.output_tokens);
+            var tok = global.UsageAnalysis.tokenBreakdown(item);
+            var lat = global.UsageAnalysis.latency(item);
             return h('div', { class: 'dashboard-recent-row' },
-              h('div', { class: 'dashboard-recent-info' }, h('strong', null, item.model || '请求'), h('small', null, U.datetime(item.created_at) + ' · ' + token(tokens) + ' tokens')),
+              h('div', { class: 'dashboard-recent-info' }, h('strong', null, item.model || '请求'),
+                h('small', null, U.datetime(item.created_at)),
+                h('small', { class: 'recent-tokens' }, '↓' + token(tok.input) + ' ↑' + token(tok.output) + ' ⚙' + token(tok.cache)),
+                lat && (lat.first != null || lat.tps) ? h('small', { class: 'recent-latency' },
+                  '首字 ' + global.UsageAnalysis.ms(lat.first) + ' · 总耗时 ' + global.UsageAnalysis.ms(lat.total) +
+                  (lat.tps ? ' · ' + lat.tps.toFixed(1) + ' tok/s' : '')) : null),
               h('div', { class: 'dashboard-recent-price' }, h('b', null, money(item.actual_cost)), h('small', null, '标准 ' + money(item.total_cost))));
           })) : h('div', { class: 'dashboard-empty' }, '所选时段暂无调用记录')));
     }

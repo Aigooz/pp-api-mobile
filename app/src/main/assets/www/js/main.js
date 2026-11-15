@@ -720,6 +720,18 @@
     syncSpace();
   }
   global.__applyInsets = function (top, bottom) { applyInsets(top, bottom); };
+  // The shell is a native app, not a document viewer: block multi-finger gestures and
+  // double-tap zoom wherever a WebView still tries to offer them.
+  (function lockZoom() {
+    document.addEventListener('touchstart', function (e) {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('touchmove', function (e) {
+      if (e.touches && e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+    document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+  })();
 
   document.addEventListener('DOMContentLoaded', function () {
     boot(false);

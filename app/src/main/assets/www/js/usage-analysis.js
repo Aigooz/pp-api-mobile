@@ -125,5 +125,34 @@
     return { successRate: successRate, cacheHitRate: hitRate, errors: errors };
   }
 
-  global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate, values: values, isErrorRecord: isErrorRecord };
+  // Per-request latency view. The service sends duration_ms and first_token_ms; TPS is the
+  // output rate after the first token, which is what the site's 输出 TPS column reports.
+  function latency(row) {
+    if (!row) return null;
+    var total = metricNumber(row, ['duration_ms', 'duration', 'latency_ms']);
+    var first = metricNumber(row, ['first_token_ms', 'ttft_ms', 'first_byte_ms']);
+    var output = metricNumber(row, ['output_tokens']);
+    if (total === null || total <= 0) return null;
+    var streaming = output !== null && first !== null && total > first;
+    var tps = streaming ? output / ((total - first) / 1000) : null;
+    return { first: first, total: total, output: output, tps: tps && isFinite(tps) && tps > 0 ? tps : null };
+  }
+  function tokenBreakdown(row) {
+    var input = metricNumber(row, ['input_tokens']) || 0;
+    var output = metricNumber(row, ['output_tokens']) || 0;
+    var cache = (metricNumber(row, ['cache_read_tokens']) || 0) + (metricNumber(row, ['cache_creation_tokens']) || 0);
+    var total = metricNumber(row, ['total_tokens']);
+    if (total === null) total = input + output + cache;
+    return { input: input, output: output, cache: cache, total: total };
+  }
+  function ms(value) {
+    if (value === null || value === undefined || !isFinite(Number(value))) return '—';
+    var n = Number(value);
+    if (n < 1000) return Math.round(n) + 'ms';
+    if (n < 60000) return (n / 1000).toFixed(n < 10000 ? 2 : 1) + 's';
+    return Math.floor(n / 60000) + 'm ' + Math.round(n % 60000 / 1000) + 's';
+  }
+
+  global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate, values: values,
+    isErrorRecord: isErrorRecord, latency: latency, tokenBreakdown: tokenBreakdown, ms: ms };
 })(window);
