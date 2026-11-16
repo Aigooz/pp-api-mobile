@@ -65,6 +65,12 @@
     if (Math.abs(n) < 0.01) return n.toFixed(4);
     return n.toFixed(2);
   }
+  // Spendable balance keeps four decimals so sub-cent movements stay visible.
+  function usd(v) {
+    var n = Number(v);
+    if (!isFinite(n)) return '—';
+    return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  }
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
   function date(v) {
     if (!v) return '—';
@@ -384,7 +390,7 @@
   global.U = {
     el: el, $: $, esc: esc, ic: ic, toast: toast, sheet: sheet, confirm: confirm, picker: picker, dateTimeField: dateTimeField,
     closeOverlay: closeOverlay, copy: copy, haptic: haptic, sleep: sleep,
-    num: num, credits: credits, tokens: tokens, price: price, date: date, datetime: datetime,
+    num: num, credits: credits, usd: usd, tokens: tokens, price: price, date: date, datetime: datetime,
     ago: ago, maskKey: maskKey, ymd: ymd, pad: pad, store: store
   };
 })(window);

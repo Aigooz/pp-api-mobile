@@ -171,8 +171,10 @@ try {
   assert.match(await page.locator('.dashboard').innerText(), /1\.25 s/);
   assert.match(await page.locator('.dashboard').innerText(), /累计实际/);
   assert.equal(await page.locator('.dashboard-donut-segment').count(), 2);
+  assert.deepEqual(await page.locator('.dashboard-donut-segment').evaluateAll(nodes => nodes.map(n => Number(n.dataset.share))), [60, 40]);
   const segment = await page.locator('.dashboard-donut-segment').first().getAttribute('stroke-dasharray');
-  assert.equal(Number(segment.split(' ')[0]), 60);
+  assert.ok(Number(segment.split(' ')[0]) < 60, 'slices keep a hairline gap');
+  assert.equal(await page.locator('.dashboard-donut-legend-row').count(), 2);
   assert.match(await page.locator('.dashboard-model-table').innerText(), /请求[\s\S]*Token[\s\S]*实际[\s\S]*标准/);
   assert.match(await page.locator('.dashboard-model-table').innerText(), /demo-model-2/);
   assert.equal(await page.locator('.dashboard-trend-line').count(), 5);

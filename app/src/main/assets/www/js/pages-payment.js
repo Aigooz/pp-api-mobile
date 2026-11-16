@@ -18,7 +18,7 @@
   function renderPurchase() {
     if (!Api.AUTH.isLogged()) return global.PagesUser.needLogin();
     var page = h('div', { class: 'page payment-page' });
-    var balance = h('strong', null, '$' + U.credits(C.balanceOf(global.S.user || Api.AUTH.user() || {})));
+    var balance = h('strong', null, '$' + U.usd(C.balanceOf(global.S.user || Api.AUTH.user() || {})));
     var formHost = h('div'), orderHost = h('div'), subscriptionHost = h('div');
     var info, config, selectedPlan = null, method = '', checking = false, ordersReady = false;
     // Balance-paid subscriptions are per model group, so everything is keyed by group id and
@@ -338,7 +338,7 @@
               loadDaycard(gid); loadSubscriptions(); loadOrders();
               App.refreshUser().then(function (user) {
                 if (!current() || !user) return;
-                balance.textContent = '$' + U.credits(C.balanceOf(user || {}));
+                balance.textContent = '$' + U.usd(C.balanceOf(user || {}));
               }).catch(function () {});
             }
           }).catch(function (error) {
@@ -417,7 +417,7 @@
         if (String(updated.status).toUpperCase() === 'COMPLETED') {
           App.refreshUser().then(function (user) {
             if (!current() || !user) return;
-            balance.textContent = '$' + U.credits(C.balanceOf(user || {}));
+            balance.textContent = '$' + U.usd(C.balanceOf(user || {}));
           }).catch(function () {});
           loadSubscriptions();
         }

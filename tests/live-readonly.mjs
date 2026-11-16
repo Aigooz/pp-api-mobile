@@ -81,7 +81,7 @@ try {
     .filter({ hasText: daycard.plan.name }).first();
   await product.click();
   await page.getByText('余额支付', { exact: true }).waitFor({ timeout: 30000 });
-  assert.match(await page.locator('.payment-balance-note').innerText(), /日卡余额/);
+  assert.match(await page.locator('.payment-balance-note').innerText(), /账户余额 ¥[\d.]+ · 订阅价格 ¥[\d.]+/);
   await page.goto(base + '/#/announcements');
   await page.locator('#view .list-item').first().waitFor({ timeout: 30000 });
   assert.deepEqual(errors, []);

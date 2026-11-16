@@ -573,7 +573,7 @@
     var role = pick(u, 'role', 'user_role') || '';
     var roleText = /admin/.test(String(role)) ? '管理员' : (/observer/.test(String(role)) ? '观察者' : '用户');
 
-    var balanceBadge = h('span', { class: 'badge teal' }, '$' + U.credits(balanceOf(u)));
+    var balanceBadge = h('span', { class: 'badge teal' }, '$' + U.usd(balanceOf(u)));
     page.appendChild(h('div', { class: 'card pad' },
       h('div', { class: 'row' },
         h('div', {
@@ -639,7 +639,7 @@
 
     page.appendChild(h('div', { class: 'footer-note' }, 'Pp API ' + (global.Updates ? global.Updates.version() : '1.0.0')));
     function updateUser() {
-      if (App.isPageRetained(page)) balanceBadge.textContent = '$' + U.credits(balanceOf(global.S.user || Api.AUTH.user() || {}));
+      if (App.isPageRetained(page)) balanceBadge.textContent = '$' + U.usd(balanceOf(global.S.user || Api.AUTH.user() || {}));
     }
     global.addEventListener('pp:user-updated', updateUser);
     page.addEventListener('pp:page-dispose', function () { global.removeEventListener('pp:user-updated', updateUser); });

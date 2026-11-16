@@ -17,6 +17,8 @@
     if (n !== 0 && Math.abs(n) < 0.01) return '$' + n.toFixed(4);
     return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  // Balance is a live, spendable figure: keep all four decimals visible instead of rounding cents away.
+  function balanceMoney(value) { return '$' + U.usd(value); }
   function token(value) { return U.tokens(number(value)); }
   function svg(tag, attrs) {
     var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -35,6 +37,57 @@
     var read = Math.max(0, number(row.cache_read_tokens));
     var base = Math.max(0, number(row.input_tokens)) + read + Math.max(0, number(row.cache_creation_tokens));
     return base ? read / base * 100 : 0;
+  }
+
+  // ---------- donut ----------
+  var DONUT_COLORS = ['#4f7cf7', '#22b07d', '#f0a03c', '#e5646b', '#8b6bf0', '#e268a8', '#2bb6c9', '#8fbf3f'];
+
+  function shade(hex, amount) {
+    var value = String(hex).replace('#', '');
+    var rgb = [0, 2, 4].map(function (i) {
+      var channel = parseInt(value.substr(i, 2), 16) / 255;
+      channel = amount >= 0 ? channel + (1 - channel) * amount : channel * (1 + amount);
+      return Math.round(Math.min(1, Math.max(0, channel)) * 255);
+    });
+    return '#' + rgb.map(function (c) { return ('0' + c.toString(16)).slice(-2); }).join('');
+  }
+
+  function donut(models, total) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var R = 44, CX = 60, CY = 60;
+    var ring = svg('svg', { viewBox: '0 0 120 120', class: 'dashboard-donut', role: 'img',
+      'aria-label': '模型 Token 分布，共 ' + models.length + ' 个模型，总计 ' + U.num(total) + ' Tokens' });
+    var defs = document.createElementNS(NS, 'defs');
+    models.forEach(function (_, index) {
+      var color = DONUT_COLORS[index % DONUT_COLORS.length];
+      var gradient = svg('linearGradient', { id: 'donut-grad-' + index, x1: '0', y1: '0', x2: '1', y2: '1' });
+      gradient.appendChild(svg('stop', { offset: '0%', 'stop-color': shade(color, 0.18) }));
+      gradient.appendChild(svg('stop', { offset: '100%', 'stop-color': shade(color, -0.14) }));
+      defs.appendChild(gradient);
+    });
+    var glow = svg('filter', { id: 'donut-glow', x: '-20%', y: '-20%', width: '140%', height: '140%' });
+    glow.appendChild(svg('feDropShadow', { dx: '0', dy: '2', stdDeviation: '2.4', 'flood-color': '#0b1220', 'flood-opacity': '0.22' }));
+    defs.appendChild(glow);
+    ring.appendChild(defs);
+    ring.appendChild(svg('circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: 'var(--surface-2)', 'stroke-width': 13 }));
+    var slices = svg('g', { filter: 'url(#donut-glow)', class: 'dashboard-donut-slices' });
+    var offset = 0;
+    var visible = models.filter(function (model) { return total && number(model.total_tokens) > 0; }).length;
+    models.forEach(function (model, index) {
+      var share = total ? Math.max(0, number(model.total_tokens)) / total * 100 : 0;
+      if (share > 0) {
+        // Leave a hairline gap between slices so neighbouring tones stay legible.
+        var gap = visible > 1 ? Math.min(share * 0.4, share > 4 ? 0.8 : 0.45) : 0;
+        slices.appendChild(svg('circle', { cx: CX, cy: CY, r: R, fill: 'none',
+          stroke: 'url(#donut-grad-' + index + ')', 'stroke-width': 13, pathLength: 100,
+          'data-share': Math.round(share * 1000) / 1000,
+          'stroke-dasharray': (share - gap) + ' ' + (100 - share + gap), 'stroke-dashoffset': -(offset + gap / 2),
+          transform: 'rotate(-90 60 60)', class: 'dashboard-donut-segment' }));
+      }
+      offset += share;
+    });
+    ring.appendChild(slices);
+    return ring;
   }
   function percentText(value) {
     return value === null || value === undefined || !isFinite(Number(value)) ? '未知' : Number(value).toFixed(1) + '%';
@@ -139,7 +192,7 @@
       summaryHost.innerHTML = '';
       var totalHit = reliability.cacheHitRate;
       summaryHost.appendChild(h('div', { class: 'dashboard-grid' },
-        metric('账户余额', money(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }, 'dashboard-balance-value'),
+        metric('账户余额', balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }, 'dashboard-balance-value'),
         metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); }),
         metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
         metric('今日费用', money(stats.today_actual_cost), ['今日标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost), '累计标准 ' + money(stats.total_cost)], 'card'),
@@ -343,20 +396,16 @@
         return;
       }
       models.sort(function (a, b) { return number(b.total_tokens) - number(a.total_tokens); });
-      var colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+      var colors = DONUT_COLORS;
       var total = models.reduce(function (sum, model) { return sum + Math.max(0, number(model.total_tokens)); }, 0);
-      var ring = svg('svg', { viewBox: '0 0 120 120', class: 'dashboard-donut', role: 'img',
-        'aria-label': '模型分布，总计 ' + U.num(total) + ' Tokens' });
-      ring.appendChild(svg('circle', { cx: 60, cy: 60, r: 43, fill: 'none', stroke: 'var(--surface-2)', 'stroke-width': 19 }));
-      var offset = 0;
-      models.forEach(function (model, index) {
-        var share = total ? Math.max(0, number(model.total_tokens)) / total * 100 : 0;
-        if (share > 0) ring.appendChild(svg('circle', { cx: 60, cy: 60, r: 43, fill: 'none',
-          stroke: colors[index % colors.length], 'stroke-width': 19, pathLength: 100,
-          'stroke-dasharray': share + ' ' + (100 - share), 'stroke-dashoffset': -offset,
-          transform: 'rotate(-90 60 60)', class: 'dashboard-donut-segment' }));
-        offset += share;
-      });
+      var shares = models.map(function (model) { return total ? Math.max(0, number(model.total_tokens)) / total * 100 : 0; });
+      var ring = donut(models, total);
+      var legend = h('div', { class: 'dashboard-donut-legend' }, models.slice(0, 4).map(function (model, index) {
+        return h('div', { class: 'dashboard-donut-legend-row' },
+          h('i', { style: { background: colors[index % colors.length] } }),
+          h('span', { class: 'dashboard-donut-legend-name' }, model.model || '未知模型'),
+          h('b', null, shares[index] >= 10 ? shares[index].toFixed(0) + '%' : shares[index] >= 0.1 ? shares[index].toFixed(1) + '%' : '<0.1%'));
+      }).concat(models.length > 4 ? [h('div', { class: 'dashboard-donut-legend-more' }, '另有 ' + (models.length - 4) + ' 个模型')] : []));
       var head = h('thead', null, h('tr', null, ['模型', '请求', 'Token', '实际', '标准'].map(function (name) { return h('th', { scope: 'col' }, name); })));
       var body = h('tbody', null, models.map(function (model, index) {
         return h('tr', null,
@@ -368,8 +417,10 @@
           h('td', { 'data-label': '标准' }, money(pick(model, 'cost', 'total_cost'))));
       }));
       modelHost.appendChild(section('模型分布', null, null, h('div', { class: 'dashboard-models' },
-        h('div', { class: 'dashboard-donut-wrap' }, ring,
-          h('div', { class: 'dashboard-donut-center', 'aria-hidden': 'true' }, h('strong', null, token(total)), h('span', null, '总 Tokens'))),
+        h('div', { class: 'dashboard-donut-block' },
+          h('div', { class: 'dashboard-donut-wrap' }, ring,
+            h('div', { class: 'dashboard-donut-center', 'aria-hidden': 'true' }, h('strong', null, token(total)), h('span', null, '总 Tokens'))),
+          legend),
         h('div', { class: 'dashboard-model-table-scroll' },
           h('table', { class: 'dashboard-model-table', 'aria-label': '模型调用明细' }, head, body))
       )));
@@ -449,7 +500,7 @@
     function userUpdated() {
       if (!current()) return;
       var balanceValue = summaryHost.querySelector('.dashboard-balance-value');
-      if (balanceValue) balanceValue.textContent = money(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
+      if (balanceValue) balanceValue.textContent = balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
       else if (lastSummary) renderSummary(lastSummary);
     }
     global.addEventListener('pp:user-updated', userUpdated);
