@@ -72,6 +72,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
             if let on = body["on"] as? Bool {
                 DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = on }
             }
+        case "updateCheck", "updateDownload", "updateInstall", "updateResume", "updateCancel":
+            let action = action
+            DispatchQueue.main.async { self.viewController?.handleUpdate(action) }
         default: break
         }
     }

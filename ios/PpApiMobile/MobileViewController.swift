@@ -3,6 +3,7 @@ import WebKit
 
 final class MobileViewController: UIViewController, WKNavigationDelegate {
     private let bridge = NativeBridge()
+    private let updater = UpdateManager()
     private var webView: WKWebView!
     private var statusBarStyle: UIStatusBarStyle = .darkContent
     private let statusBarGlass = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
@@ -19,6 +20,9 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 14 / 255, green: 17 / 255, blue: 19 / 255, alpha: 1)
         bridge.viewController = self
+        updater.onStatus = { [weak self] status, payload in self?.pushUpdate(status, payload) }
+        updater.onTick = { [weak self] payload in self?.pushUpdateTick(payload) }
+        updater.onExport = { [weak self] url in self?.presentUpdateFile(url) }
 
         let controller = WKUserContentController()
         controller.add(bridge, name: "ppNative")
@@ -103,6 +107,51 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
     func refreshSecureScripts() {
         guard let controller = webView?.configuration.userContentController else { return }
         configureUserScripts(controller)
+    }
+
+    // MARK: - In-app updater
+
+    func handleUpdate(_ action: String) {
+        switch action {
+        case "updateCheck": updater.check()
+        case "updateDownload": updater.startDownload()
+        case "updateInstall": updater.install()
+        case "updateResume": updater.resume()
+        case "updateCancel": updater.cancel()
+        default: break
+        }
+    }
+
+    private func pushUpdate(_ status: String, _ payload: [String: Any]) {
+        guard let raw = Self.jsonString(payload), let stateArg = Self.jsonString(status) else { return }
+        updaterSnapshot = updater.snapshot()
+        run("window.__ppUpdateSnapshot = \(updaterSnapshot); window.__nativeUpdate && window.__nativeUpdate(\(stateArg), \(raw));")
+    }
+
+    private func pushUpdateTick(_ payload: [String: Any]) {
+        guard let raw = Self.jsonString(payload) else { return }
+        updaterSnapshot = updater.snapshot()
+        run("window.__ppUpdateSnapshot = \(updaterSnapshot); window.__ppUpdateTick && window.__ppUpdateTick(\(raw));")
+    }
+
+    private var updaterSnapshot = "{}"
+
+    private func presentUpdateFile(_ url: URL) {
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 60, width: 1, height: 1)
+        }
+        present(sheet, animated: true)
+    }
+
+    private func run(_ script: String) {
+        DispatchQueue.main.async { [weak self] in self?.webView?.evaluateJavaScript(script) }
+    }
+
+    private static func jsonString(_ value: Any) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private func configureUserScripts(_ controller: WKUserContentController) {
@@ -234,6 +283,14 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         device: () => JSON.stringify({ model: 'iPhone', brand: 'Apple', release: navigator.userAgent, app: window.__ppVersion, platform: 'ios' }),
         statusBar: (color, darkIcons) => send({ action: 'statusBar', color, darkIcons }),
         keepAwake: on => send({ action: 'keepAwake', on }),
+          updateCheck: () => send({ action: 'updateCheck' }),
+          updateDownload: () => send({ action: 'updateDownload' }),
+          updateInstall: () => send({ action: 'updateInstall' }),
+          updateResume: () => send({ action: 'updateResume' }),
+          updateCancel: () => send({ action: 'updateCancel' }),
+          updateProgress: () => window.__ppUpdateSnapshot || '{}',
+          updateNotificationState: () => 'disabled',
+          updateEnableNotifications: () => {},
         secureMode: () => 'async',
         secureGet: () => { const value = window.__ppSecureInitial; delete window.__ppSecureInitial; return value; },
         secureSet: (id, value) => send({ action: 'secureSet', id, value })

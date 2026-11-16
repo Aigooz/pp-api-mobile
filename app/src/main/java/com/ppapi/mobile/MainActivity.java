@@ -2,17 +2,13 @@ package com.ppapi.mobile;
 
 import android.app.Activity;
 import android.Manifest;
-import android.app.DownloadManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -79,14 +75,6 @@ public class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private long lastBackPress = 0L;
     private boolean openUpdatesOnLoad;
-    private boolean updateReceiverRegistered;
-    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context context, Intent intent) {
-            if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) return;
-            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-            if (id == getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1)) handleDownloadedUpdate(id);
-        }
-    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -181,10 +169,6 @@ public class MainActivity extends Activity {
         web.loadUrl(START_URL);
 
         setContentView(web);
-        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(updateReceiver, filter, Context.RECEIVER_EXPORTED);
-        else registerReceiver(updateReceiver, filter);
-        updateReceiverRegistered = true;
         UpdateJobService.schedule(this);
     }
 
@@ -300,7 +284,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (updateReceiverRegistered) unregisterReceiver(updateReceiver);
         pool.shutdownNow();
         for (HttpURLConnection c : active.values()) {
             try { c.disconnect(); } catch (Exception ignored) {}
@@ -309,12 +292,21 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    private File updateFile() {
-        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+    static File updateFile(Context context) {
+        File dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         return dir == null ? null : new File(dir, UpdateClient.ASSET_NAME);
     }
 
     private void updateCallback(String state, JSONObject data) {
+        if ("downloading".equals(state) && data != null && !data.has("version")) {
+            // Progress snapshots only carry numbers; merge in the release the page needs.
+            try {
+                JSONObject release = savedRelease(UpdateClient.DOWNLOAD_RELEASE_KEY);
+                for (String key : new String[]{"version", "tag", "notes", "url", "size"}) {
+                    if (release.has(key)) data.put(key, release.get(key));
+                }
+            } catch (Exception ignored) {}
+        }
         callJs("window.__nativeUpdate && window.__nativeUpdate(" + jsStr(state) + "," + jsStr(data == null ? "{}" : data.toString()) + ")");
     }
 
@@ -325,7 +317,7 @@ public class MainActivity extends Activity {
     }
 
     private JSONObject savedRelease(String key) throws Exception {
-        String raw = getPreferences(MODE_PRIVATE).getString(key, "");
+        String raw = UpdateClient.prefs(MainActivity.this).getString(key, "");
         JSONObject release = new JSONObject(raw);
         UpdateClient.validateRelease(release);
         return release;
@@ -338,12 +330,12 @@ public class MainActivity extends Activity {
                 try {
                     JSONObject release = UpdateClient.fetchLatest();
                     if (release != null && UpdateClient.compareVersions(release.getString("version"), UpdateClient.currentVersion(MainActivity.this)) > 0) {
-                        if (!getPreferences(MODE_PRIVATE).edit().putString(UpdateClient.RELEASE_KEY, release.toString()).commit()) {
+                        if (!UpdateClient.prefs(MainActivity.this).edit().putString(UpdateClient.RELEASE_KEY, release.toString()).commit()) {
                             throw new IllegalStateException("无法保存更新信息");
                         }
                         updateCallback("available", release);
                     } else {
-                        getPreferences(MODE_PRIVATE).edit().remove(UpdateClient.RELEASE_KEY).apply();
+                        UpdateClient.prefs(MainActivity.this).edit().remove(UpdateClient.RELEASE_KEY).apply();
                         updateCallback("current", null);
                     }
                 } catch (Exception e) { updateError(e.getMessage() == null ? "检查更新失败" : e.getMessage()); }
@@ -351,58 +343,55 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void downloadUpdate() {
-        try {
-            JSONObject release = savedRelease(UpdateClient.RELEASE_KEY);
-            if (UpdateClient.compareVersions(release.getString("version"), UpdateClient.currentVersion(this)) <= 0) throw new IllegalStateException("当前已是最新版本");
-            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            if (manager == null) throw new IllegalStateException("系统下载服务不可用");
-            long previous = getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1);
-            if (previous >= 0) manager.remove(previous);
-            File target = updateFile();
-            if (target == null) throw new IllegalStateException("下载目录不可用");
-            if (target.exists() && !target.delete()) throw new IllegalStateException("无法清理旧安装包");
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(release.getString("url")))
-                    .setTitle("Pp API " + release.getString("version"))
-                    .setDescription("正在下载更新")
-                    .setMimeType("application/vnd.android.package-archive")
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, UpdateClient.ASSET_NAME);
-            long id = manager.enqueue(request);
-            if (!getPreferences(MODE_PRIVATE).edit().putLong(UpdateClient.DOWNLOAD_KEY, id)
-                    .putString(UpdateClient.DOWNLOAD_RELEASE_KEY, release.toString()).commit()) {
-                manager.remove(id);
-                throw new IllegalStateException("无法保存下载任务");
-            }
-            updateCallback("downloading", release);
-        } catch (Exception e) { updateError(e.getMessage() == null ? "下载失败" : e.getMessage()); }
-    }
-
-    private void handleDownloadedUpdate(final long id) {
-        pool.execute(new Runnable() {
+    static void notifyDownloadFinished(Context context, JSONObject release, String message) {
+        ((MainActivity) context).ui.post(new Runnable() {
             @Override public void run() {
-                DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                if (manager == null) { updateError("系统下载服务不可用"); return; }
-                try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id))) {
-                    if (id != getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1)) return;
-                    if (cursor == null || !cursor.moveToFirst()) return;
-                    int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                    if (status == DownloadManager.STATUS_FAILED) { updateError("下载失败，请重试"); return; }
-                    JSONObject release = savedRelease(UpdateClient.DOWNLOAD_RELEASE_KEY);
-                    if (status != DownloadManager.STATUS_SUCCESSFUL) { updateCallback("downloading", release); return; }
-                    File file = updateFile();
-                    if (file == null) throw new IllegalStateException("下载目录不可用");
-                    UpdateClient.verifyApk(MainActivity.this, file, release);
-                    if (id != getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1)) return;
-                    updateCallback("ready", release);
-                } catch (Exception e) { updateError(e.getMessage() == null ? "安装包校验失败" : e.getMessage()); }
+                if (release != null) ((MainActivity) context).updateCallback("ready", release);
+                else ((MainActivity) context).updateError(message == null ? "下载失败" : message);
             }
         });
     }
 
+    static void notifyDownloadCancelled(Context context) { ((MainActivity) context).updateError("已取消下载"); }
+
+    private void downloadUpdate() {
+        try {
+            JSONObject release = savedRelease(UpdateClient.RELEASE_KEY);
+            if (UpdateClient.compareVersions(release.getString("version"), UpdateClient.currentVersion(this)) <= 0) throw new IllegalStateException("当前已是最新版本");
+            File target = updateFile(this);
+            if (target == null) throw new IllegalStateException("下载目录不可用");
+            if (target.exists() && !target.delete()) throw new IllegalStateException("无法清理旧安装包");
+            File part = UpdateDownloader.partFile(target);
+            if (part.isFile() && part.length() > release.getLong("size") && !part.delete()) throw new IllegalStateException("无法清理临时文件");
+            if (!UpdateClient.prefs(MainActivity.this).edit().putString(UpdateClient.DOWNLOAD_RELEASE_KEY, release.toString()).commit()) {
+                throw new IllegalStateException("无法保存下载任务");
+            }
+            Intent service = new Intent(this, UpdateService.class)
+                    .setAction(UpdateService.ACTION_START)
+                    .putExtra(UpdateService.EXTRA_RELEASE, release.toString());
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            updateCallback("downloading", release);
+        } catch (Exception e) { updateError(e.getMessage() == null ? "下载失败" : e.getMessage()); }
+    }
+
+    /** Live progress snapshot for the WebView; polled while the update page is open. */
+    private JSONObject progressSnapshot() {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("downloaded", UpdateService.dlDone);
+            data.put("total", UpdateService.dlTotal);
+            data.put("speed", UpdateService.dlSpeed);
+            data.put("attempt", UpdateService.dlAttempt);
+            data.put("state", UpdateService.dlState);
+            data.put("message", UpdateService.dlMessage);
+            data.put("running", UpdateService.running());
+        } catch (Exception ignored) {}
+        return data;
+    }
+
     private void installUpdate() {
-        final long id = getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1);
-        if (id < 0) { updateError("请先下载更新"); return; }
+        File file = updateFile(this);
+        if (file == null || !file.isFile()) { updateError("请先下载更新"); return; }
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
             try {
                 startActivityForResult(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -413,12 +402,12 @@ public class MainActivity extends Activity {
         pool.execute(new Runnable() {
             @Override public void run() {
                 try {
-                    UpdateClient.verifyApk(MainActivity.this, updateFile(), savedRelease(UpdateClient.DOWNLOAD_RELEASE_KEY));
-                    DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                    Uri uri = manager == null ? null : manager.getUriForDownloadedFile(id);
-                    if (uri == null || !"content".equals(uri.getScheme())) throw new IllegalStateException("无法打开安装包，请重新下载");
+                    UpdateClient.verifyApk(MainActivity.this, updateFile(MainActivity.this), savedRelease(UpdateClient.DOWNLOAD_RELEASE_KEY));
+                    Uri uri = UpdateFileProvider.uriFor(MainActivity.this);
                     Intent install = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    grantUriPermission("com.android.packageinstaller", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    grantUriPermission("com.google.android.packageinstaller", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     ui.post(new Runnable() { @Override public void run() {
                         try { startActivity(install); }
                         catch (Exception e) { updateError("无法打开系统安装器"); }
@@ -640,19 +629,39 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void updateResume() {
-            long id = getPreferences(MODE_PRIVATE).getLong(UpdateClient.DOWNLOAD_KEY, -1);
-            if (id < 0) return;
+            if (UpdateService.running()) { updateCallback("downloading", progressSnapshot()); return; }
             try {
                 JSONObject release = savedRelease(UpdateClient.DOWNLOAD_RELEASE_KEY);
                 if (UpdateClient.compareVersions(release.getString("version"), UpdateClient.currentVersion(MainActivity.this)) <= 0) {
-                    DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                    if (manager != null) manager.remove(id);
-                    getPreferences(MODE_PRIVATE).edit().remove(UpdateClient.DOWNLOAD_KEY).remove(UpdateClient.DOWNLOAD_RELEASE_KEY).apply();
+                    UpdateClient.prefs(MainActivity.this).edit().remove(UpdateClient.DOWNLOAD_RELEASE_KEY)
+                            .remove(UpdateClient.READY_VERSION_KEY).apply();
                     return;
                 }
-                handleDownloadedUpdate(id);
+                File file = updateFile(MainActivity.this);
+                if (file != null && file.isFile() && release.getString("version").equals(
+                        UpdateClient.prefs(MainActivity.this).getString(UpdateClient.READY_VERSION_KEY, ""))) {
+                    pool.execute(new Runnable() {
+                        @Override public void run() {
+                            try {
+                                UpdateClient.verifyApk(MainActivity.this, file, release);
+                                updateCallback("ready", release);
+                            } catch (Exception e) { updateError(e.getMessage() == null ? "安装包校验失败" : e.getMessage()); }
+                        }
+                    });
+                    return;
+                }
+                File part = file == null ? null : UpdateDownloader.partFile(file);
+                if (part != null && part.isFile() && part.length() > 0) {
+                    updateCallback("downloading", progressSnapshot());
+                }
             } catch (Exception e) { updateError("更新下载记录无效，请重新检查更新"); }
         }
+
+        @JavascriptInterface
+        public String updateProgress() { return progressSnapshot().toString(); }
+
+        @JavascriptInterface
+        public void updateCancel() { UpdateService.requestCancel(); }
 
         @JavascriptInterface
         public String updateNotificationState() {
@@ -670,8 +679,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void updateEnableNotifications() {
             if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-                    !getPreferences(MODE_PRIVATE).getBoolean("notification_asked", false)) {
-                getPreferences(MODE_PRIVATE).edit().putBoolean("notification_asked", true).apply();
+                    !UpdateClient.prefs(MainActivity.this).getBoolean("notification_asked", false)) {
+                UpdateClient.prefs(MainActivity.this).edit().putBoolean("notification_asked", true).apply();
                 ui.post(new Runnable() { @Override public void run() { requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION); } });
             } else {
                 ui.post(new Runnable() { @Override public void run() {
