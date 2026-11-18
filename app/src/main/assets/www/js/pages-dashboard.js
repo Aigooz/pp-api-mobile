@@ -210,7 +210,7 @@
         if (item.url) C.open(item.url);
         else App.go(item.path);
       } },
-        h('i', { html: U.ic(item.icon, 18) }), h('span', null, item.label));
+        h('i', { html: U.ic(item.icon, 18) }), h('span', { class: 'quick-label' }, item.label));
     }))));
 
     function renderSummary(stats) {
@@ -230,7 +230,7 @@
         ? (todayErrors == null ? '今日出错未提供' : '今日出错 ' + U.num(todayErrors)) +
           (reliability.successRate == null ? '' : ' · 累计 ' + percentText(reliability.successRate))
         : '累计 ' + (reliability.errors == null ? '请求结果未提供' : '出错 ' + U.num(reliability.errors));
-      var concurrencyText = totalConcurrency == null ? '—' : U.num(totalConcurrency) + ' 路';
+      var concurrencyText = totalConcurrency == null ? '—' : U.num(totalConcurrency);
       var requestDetail = ['累计 ' + U.num(number(stats.total_requests))];
       if (todaySuccess != null) requestDetail.push('今日成功率 ' + percentText(todaySuccess));
       if (todayErrors != null) requestDetail.push('今日出错 ' + U.num(todayErrors));
@@ -238,25 +238,27 @@
       if (reliability.errors != null) requestDetail.push('累计出错 ' + U.num(reliability.errors));
       summaryHost.innerHTML = '';
       var totalHit = reliability.cacheHitRate;
+      var balanceValue = balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
       var balanceCard = h('button', {
         class: 'card dashboard-metric dashboard-balance-block', type: 'button',
         onclick: function () { App.go('#/purchase'); }
       },
         h('span', { class: 'dashboard-metric-label' }, h('i', { html: U.ic('card', 16) }), '账户余额'),
-        h('strong', { class: 'dashboard-balance-value' }, balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}))),
+        h('strong', { class: 'dashboard-balance-value' }, balanceValue),
         h('span', { class: 'dashboard-balance-hint' }, '可用余额 · 点击充值'));
       summaryHost.appendChild(h('div', { class: 'dashboard-overview' },
         h('section', { class: 'card dashboard-hero-card' },
           h('div', { class: 'dashboard-hero-top' },
             h('div', { class: 'dashboard-balance-wrap' }, h('div', { class: 'dashboard-eyebrow' }, '账户概览'), balanceCard),
             h('div', { class: 'dashboard-hero-secondary' },
-              metric('今日费用', money(stats.today_actual_cost), ['今日标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost), '累计标准 ' + money(stats.total_cost)], 'card'),
+              metric('今日费用', money(stats.today_actual_cost), ['实际 ' + money(stats.today_actual_cost), '标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost)], 'card'),
               metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'))),
           h('div', { class: 'dashboard-live-strip' },
             h('span', { class: 'dashboard-live-mark' }, h('i'), '实时'),
             h('strong', null, U.num(number(stats.rpm)) + ' RPM'),
             h('span', null, U.num(number(stats.tpm)) + ' TPM · 平均响应 ' +
-              (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms') + ' · 当前并发 ' + concurrencyText),
+              (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms') +
+              ' · 当前并发 ' + concurrencyText + ' 路 · 累计 ' + token(stats.total_tokens)),
             h('time', { class: 'dashboard-updated', datetime: new Date(refreshedAt).toISOString() }, '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
         h('section', { class: 'card dashboard-quality' },
           h('div', { class: 'dashboard-quality-head' },
@@ -396,7 +398,7 @@
         var leftLabel = svg('text', { x: left - 5, y: y + 4, 'text-anchor': 'end', class: 'dashboard-chart-label' });
         leftLabel.textContent = token(max * tick / 4);
         chart.appendChild(leftLabel);
-        var rightLabel = svg('text', { x: right + 5, y: y + 4, class: 'dashboard-chart-percent' });
+        var rightLabel = svg('text', { x: right - 2, y: y + 4, 'text-anchor': 'end', class: 'dashboard-chart-percent' });
         rightLabel.textContent = tick * 25 + '%';
         chart.appendChild(rightLabel);
       }

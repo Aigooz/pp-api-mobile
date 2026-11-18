@@ -455,6 +455,8 @@
     var onlyStatus = '';
     var onlySubscriptions = false;
     var onlyFavorites = false;
+    var sortMode = U.store.get('plaza_sort_mode', 'recommended');
+    if (['recommended', 'price', 'context'].indexOf(sortMode) < 0) sortMode = 'recommended';
     var accountKey = 'shared';
     try {
       accountKey = Api.AUTH && Api.AUTH.currentId ? String(Api.AUTH.currentId() || 'shared') : 'shared';
@@ -480,6 +482,8 @@
     var listHost = h('div', { class: 'plaza-groups' });
     var statusByModel = Object.create(null), statusTimer = null, statusPending = false, statusUpdated = 0;
     var description = h('div', { class: 'plaza-description' });
+    var overview = h('div', { class: 'plaza-overview' });
+    var sortRow = h('div', { class: 'plaza-sort-row', role: 'group', 'aria-label': '模型排序' });
     var activeFilters = h('div', { class: 'plaza-active-filters' });
     var filterSheet = h('div', { class: 'plaza-filter-sheet' });
     var filterCount = h('span', { class: 'plaza-filter-count', hidden: true });
@@ -555,6 +559,60 @@
     function groupRate(group) {
       var value = pick(group, 'user_rate_multiplier', 'rate_multiplier', 'standard_rate_multiplier');
       return value === undefined || !isFinite(Number(value)) ? 1 : Number(value);
+    }
+
+    function paintOverview(all) {
+      var groups = (plaza && plaza.groups) || [];
+      var platforms = [];
+      groups.forEach(function (group) {
+        var label = platformKey(group.platform).t;
+        if (label && platforms.indexOf(label) < 0) platforms.push(label);
+      });
+      var priced = all.filter(function (model) { return model.mode === 'token' && model.input !== null && isFinite(model.input); });
+      priced.sort(function (a, b) { return a.input - b.input; });
+      var best = priced[0];
+      var totalModels = groups.reduce(function (sum, group) { return sum + ((group.models || []).length); }, 0);
+      overview.innerHTML = '';
+      overview.appendChild(h('div', { class: 'plaza-overview-copy' },
+        h('span', { class: 'plaza-overview-eyebrow' }, 'LIVE MODEL CATALOG'),
+        h('strong', null, totalModels + ' 个模型，一处接入'),
+        h('span', null, platforms.length ? platforms.slice(0, 4).join(' · ') : '模型与价格跟随网站实时同步')));
+      var stats = h('div', { class: 'plaza-overview-stats' },
+        h('div', null, h('b', null, String(groups.length)), h('span', null, '分组')),
+        h('div', null, h('b', null, String(platforms.length || totalModels ? platforms.length : 0)), h('span', null, '厂商')),
+        h('div', null, h('b', null, best ? priceText(best.input) : '—'), h('span', null, '最低输入')));
+      overview.appendChild(stats);
+    }
+
+    function comparator(a, b) {
+      if (sortMode === 'price') {
+        var ap = a.mode === 'token' && a.input != null ? a.input : Number.MAX_SAFE_INTEGER;
+        var bp = b.mode === 'token' && b.input != null ? b.input : Number.MAX_SAFE_INTEGER;
+        return ap - bp || String(a.name).localeCompare(String(b.name));
+      }
+      if (sortMode === 'context') {
+        return Number(b.context || 0) - Number(a.context || 0) || String(a.name).localeCompare(String(b.name));
+      }
+      return String(a.name).localeCompare(String(b.name));
+    }
+
+    function paintSort() {
+      sortRow.innerHTML = '';
+      [
+        { key: 'recommended', label: '综合' },
+        { key: 'price', label: '价格' },
+        { key: 'context', label: '上下文' }
+      ].forEach(function (item) {
+        sortRow.appendChild(h('button', {
+          type: 'button', class: item.key === sortMode ? 'active' : '', 'aria-pressed': item.key === sortMode ? 'true' : 'false',
+          onclick: function () {
+            sortMode = item.key;
+            U.store.set('plaza_sort_mode', sortMode);
+            paintSort();
+            paint();
+          }
+        }, item.label, item.key === 'price' ? h('span', { class: 'plaza-sort-mark' }, '↑') : item.key === 'context' ? h('span', { class: 'plaza-sort-mark' }, '↓') : null));
+      });
     }
 
     function chip(row, label, active, action) {
@@ -646,6 +704,7 @@
       });
 
       var all = plazaModels(plaza);
+      paintOverview(all);
       var filtered = groups.filter(function (g) {
         return (!gid || String(gid) === String(g.id)) && (!platform || g.platform === platform) && (rate === '' || groupRate(g) === rate) &&
           (!onlySubscriptions || g.subscription_type === 'subscription');
@@ -656,9 +715,21 @@
           if (!onlyStatus) return true;
           var state = modelStatus(m.name, m.group).kind;
           return onlyStatus === 'abnormal' ? state === 'warning' || state === 'error' : state === onlyStatus;
-        }) };
+        }).sort(comparator) };
       }).filter(function (item) { return item.models.length > 0; });
-      filtered.sort(function (a, b) { return groupRate(a.group) - groupRate(b.group) || String(a.group.name).localeCompare(String(b.group.name)); });
+      filtered.sort(function (a, b) {
+        if (sortMode === 'price') {
+          var ac = a.models[0] && a.models[0].input != null ? a.models[0].input : Number.MAX_SAFE_INTEGER;
+          var bc = b.models[0] && b.models[0].input != null ? b.models[0].input : Number.MAX_SAFE_INTEGER;
+          return ac - bc || groupRate(a.group) - groupRate(b.group);
+        }
+        if (sortMode === 'context') {
+          var ax = Math.max.apply(null, a.models.map(function (m) { return Number(m.context || 0); }).concat([0]));
+          var bx = Math.max.apply(null, b.models.map(function (m) { return Number(m.context || 0); }).concat([0]));
+          return bx - ax || groupRate(a.group) - groupRate(b.group);
+        }
+        return groupRate(a.group) - groupRate(b.group) || String(a.group.name).localeCompare(String(b.group.name));
+      });
       listHost.innerHTML = '';
       paintActiveFilters();
       if (!plaza) {
@@ -718,9 +789,13 @@
                       U.copy(m.name);
                     }, html: U.ic('copy', 17) }))),
               h('div', { class: 'plaza-model-summary' },
-                h('span', { class: 'plaza-price-pill' }, m.mode === 'token'
-                  ? '输入 ' + priceText(m.input) + ' · 输出 ' + priceText(m.output)
-                  : priceLabel(m)), detailToggle),
+                m.mode === 'token' ? h('span', { class: 'plaza-price-pill plaza-price-pair' },
+                  h('span', null, h('small', null, '输入'), h('b', null, priceText(m.input))),
+                  h('i'),
+                  h('span', null, h('small', null, '输出'), h('b', null, priceText(m.output)))) :
+                  h('span', { class: 'plaza-price-pill' }, priceLabel(m)),
+                m.cacheRead != null ? h('span', { class: 'plaza-cache-price' }, '缓存读 ' + priceText(m.cacheRead)) : null,
+                detailToggle),
               details
             );
           }));
@@ -752,6 +827,8 @@
 
     host.appendChild(description);
     host.appendChild(h('div', { class: 'plaza-search-row' }, h('div', { class: 'plaza-search-wrap' }, h('span', { class: 'plaza-search-icon', html: U.ic('search', 18) }), searchInput), filterButton));
+    host.appendChild(sortRow);
+    host.appendChild(overview);
     host.appendChild(recentRow);
     host.appendChild(activeFilters);
     host.appendChild(listHost);
@@ -759,6 +836,7 @@
       plaza = S2.plaza;
       description.textContent = plaza && plaza.description || '';
       description.hidden = !description.textContent;
+      paintOverview(plazaModels(plaza));
       recentRow.innerHTML = '';
       if (recent.length) {
         recentRow.appendChild(h('div', { class: 'plaza-recent-head' }, h('strong', null, '最近使用'), h('span', null, '快速继续')));
@@ -787,6 +865,7 @@
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(statusTimer); });
     host.addEventListener('pp:page-dispose', function () { clearTimeout(statusTimer); });
     updatePlaza();
+    paintSort();
     return host;
   }
 

@@ -30,7 +30,10 @@ try {
   await page.getByText('最近调用').waitFor({ timeout: 30000 });
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.locator('.plaza-group').first().waitFor({ timeout: 30000 });
-  await page.getByText('官方价').first().waitFor();
+  const pricingToggle = page.locator('.plaza-model-detail-toggle').first();
+  await pricingToggle.waitFor();
+  await pricingToggle.click();
+  await page.locator('.model-pricing').first().waitFor();
   await page.getByText('缓存读取').first().waitFor();
   await page.getByRole('button', { name: '渠道状态', exact: true }).click();
   await page.locator('.channel-item').first().waitFor({ timeout: 30000 });
@@ -73,7 +76,7 @@ try {
   }
   await page.goto(base + '/#/purchase');
   await page.getByText('选择商品').waitFor({ timeout: 30000 });
-  await page.getByText('最近订单').waitFor({ timeout: 30000 });
+  await page.getByText('订单加载失败').or(page.getByRole('tab', { name: '订单' })).first().waitFor({ timeout: 30000 });
   assert.equal(await page.getByText('订单加载失败').count(), 0);
   const daycard = await page.evaluate(() => Api.daycardInfo());
   assert.ok(daycard.plan && daycard.user && Number.isFinite(Number(daycard.user.balance)));

@@ -30,8 +30,8 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/public/channel-status') {
     if (statusFail) return route.fulfill(fail);
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ updatedAt: new Date().toISOString(), items: [
-      { model: 'green', group: '第一分组', status: 'operational', availability: 99 },
-      { model: 'yellow', group: '第一分组', status: 'operational', availability: 94 },
+      { model: 'green', group: '第一分组', status: 'operational', availability: 0.997 },
+      { model: 'yellow', group: '第一分组', status: 'operational', availability: 94.7 },
       { model: 'red', group: '第一分组', status: 'failed' },
       { model: 'shared', group: 'Codex 测试分组', status: 'operational', availability: 99 },
       ...Array.from({ length: 3 }, () => ({ model: 'duplicate', group: '第一分组', status: 'operational', availability: 99 }))
@@ -91,6 +91,12 @@ try {
   await page.getByRole('searchbox', { name: '搜索模型' }).fill('yellow');
   assert.equal(await page.locator('.plaza-model').count(), 1);
   assert.match(await page.locator('.plaza-status').getAttribute('aria-label'), /波动/);
+  await page.getByRole('searchbox', { name: '搜索模型' }).fill('');
+  await page.getByRole('button', { name: '渠道状态', exact: true }).click();
+  const channelCard = model => page.locator('.channel-item').filter({ has: page.locator('.channel-item-title strong', { hasText: new RegExp(`^${model}$`) }) });
+  await channelCard('green').getByText('99.7%').waitFor();
+  await channelCard('yellow').getByText('94.7%').waitFor();
+  await page.getByRole('button', { name: '模型广场', exact: true }).click();
 
   await page.goto(base + '/#/login');
   await page.locator('input[type=email]').fill('a@example.test');

@@ -253,7 +253,19 @@
     context: authContext,
     matches: contextMatches,
     accounts: function () {
-      return vault.accounts.map(function (a) { return { id: a.id, email: a.email, active: a.id === vault.activeId, expired: !!a.expired || !a.token }; });
+      return vault.accounts.map(function (a) {
+        var user = a.user && typeof a.user === 'object' ? a.user : {};
+        return {
+          id: a.id,
+          email: a.email,
+          active: a.id === vault.activeId,
+          expired: !!a.expired || !a.token,
+          name: user.name || user.display_name || user.nickname || '',
+          username: user.username || '',
+          rememberPassword: !!a.rememberPassword,
+          hasPassword: a.rememberPassword && typeof a.savedPassword === 'string'
+        };
+      });
     },
     remembered: function (email) {
       var id = accountId(String(email || '').trim());

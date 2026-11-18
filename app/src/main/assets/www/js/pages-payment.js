@@ -15,13 +15,14 @@
     } catch (e) { return ''; }
   }
   function money(value) { return Number(value).toFixed(2); }
-  function renderPurchase() {
+  function renderPurchase(initialView) {
     if (!Api.AUTH.isLogged()) return global.PagesUser.needLogin();
     var page = h('div', { class: 'page payment-page' });
     var balance = h('strong', null, '$' + U.usd(C.balanceOf(global.S.user || Api.AUTH.user() || {})));
     var formHost = h('div'), orderHost = h('div'), subscriptionHost = h('div');
     var info, config, selectedPlan = null, method = '', checking = false, ordersReady = false, formDirty = false;
-    var view = 'products';
+    var requestedView = ['products', 'orders', 'subscriptions'].indexOf(initialView) >= 0 ? initialView : 'products';
+    var view = requestedView;
     var productHost = h('div'), activeHost = h('div'), historyHost = h('div'), subscriptionsHost = h('div');
     // Balance-paid subscriptions are per model group, so everything is keyed by group id and
     // driven by what the site currently sells. Nothing about a specific plan is hardcoded.
@@ -49,6 +50,23 @@
       h('section', { class: 'payment-view-panel', 'data-view': 'subscriptions', hidden: true }, subscriptionsHost)));
 
     function current() { return Api.AUTH.matches(account); }
+    function routeView() {
+      var match = String(global.location.hash || '').match(/^#\/(purchase|orders|subscriptions)(?:\/|$)/);
+      return !match || match[1] === 'purchase' ? 'products' : match[1];
+    }
+    function syncRouteView() {
+      if (!page.isConnected) return;
+      var next = routeView();
+      if (next === view) return;
+      view = next;
+      paintViews();
+      if (view === 'orders') loadOrders(true);
+      if (view === 'subscriptions') loadSubscriptions();
+    }
+    function activate() {
+      syncRouteView();
+      paintViews();
+    }
     function paintViews() {
       var defs = [
         { key: 'products', label: '商品' },
@@ -61,6 +79,10 @@
           type: 'button', role: 'tab', 'aria-selected': view === def.key ? 'true' : 'false',
           class: view === def.key ? 'active' : '', onclick: function () {
             view = def.key;
+            var nextPath = view === 'products' ? '#/purchase' : view === 'orders' ? '#/orders' : '#/subscriptions';
+            if (global.location.hash !== nextPath) {
+              global.history.replaceState(null, '', nextPath);
+            }
             paintViews();
             if (view === 'orders') loadOrders(true);
             if (view === 'subscriptions') loadSubscriptions();
@@ -314,16 +336,27 @@
       });
       formHost.appendChild(section('选择商品', null, null, choices));
       productHost.innerHTML = '';
-      productHost.appendChild(section('充值服务中心', null, null, h('div', { class: 'payment-product-summary' },
-        h('div', null, h('strong', null, '账户余额'), h('span', null, '自定义金额充值')),
-        h('div', null, h('strong', null, '订阅商品'), h('span', null, list.length ? list.length + ' 个在售' : '暂未上架')),
-        h('div', null, h('strong', null, '实时同步'), h('span', null, '跟随站内上下架')))));
+      productHost.appendChild(h('div', { class: 'payment-service-strip' },
+        h('span', { class: 'payment-service-icon', html: U.ic('refresh', 17) }),
+        h('div', null, h('strong', null, '站内商品实时同步'),
+          h('span', null, list.length ? '余额充值与 ' + list.length + ' 个订阅商品可用' : '余额充值可用，订阅商品暂未上架')),
+        h('span', { class: 'badge ok' }, '实时')));
       if (selectedPlan) {
         formHost.appendChild(h('div', { class: 'payment-plan-detail' },
           selectedPlan.description ? h('div', null, selectedPlan.description) : null,
           Array.isArray(selectedPlan.features) ? selectedPlan.features.map(function (feature) { return h('div', null, '· ' + feature); }) : null));
       } else {
         formHost.appendChild(section('充值金额（元）', null, null, h('div', null, amount,
+          h('div', { class: 'payment-amount-presets' }, amountPresets().map(function (value) {
+            return h('button', {
+              type: 'button', class: amountPresetClass(value),
+              onclick: function () {
+                amount.value = String(value);
+                updateTotal();
+                paintAmountPresets();
+              }
+            }, '¥' + value);
+          })),
           h('div', { class: 'tiny muted payment-limit' }, (Number(config.min_amount) > 0 ? '单笔最低 ¥' + money(config.min_amount) : '') +
             (Number(config.max_amount) > 0 ? ' · 最高 ¥' + money(config.max_amount) : '') +
             (Number(config.daily_limit) > 0 ? ' · 每日上限 ¥' + money(config.daily_limit) : '')))));
@@ -349,7 +382,32 @@
       if (info.help_text || config.help_text) formHost.appendChild(h('div', { class: 'payment-help' }, info.help_text || config.help_text));
       paintMethods(); updateTotal(); updateSubmit();
     }
+    function amountPresets() {
+      var min = Math.max(0.01, Number(config && config.min_amount) || 0.01);
+      var max = Number(config && config.max_amount);
+      var values = [];
+      var tiers = info && Array.isArray(info.recharge_bonus_tiers) ? info.recharge_bonus_tiers : [];
+      tiers.forEach(function (tier) {
+        var value = Number(pick(tier, 'amount', 'threshold', 'min_amount', 'min_recharge', 'recharge_amount'));
+        if (isFinite(value) && value > 0 && values.indexOf(value) < 0) values.push(value);
+      });
+      [20, 50, 100, 200].forEach(function (value) {
+        if (values.length < 4 && values.indexOf(value) < 0) values.push(value);
+      });
+      return values.filter(function (value) {
+        return value >= min && (!isFinite(max) || max <= 0 || value <= max);
+      }).sort(function (a, b) { return a - b; }).slice(0, 4);
+    }
+    function amountPresetClass(value) {
+      return Number(amount.value) === value ? 'active' : '';
+    }
+    function paintAmountPresets() {
+      Array.prototype.forEach.call(formHost.querySelectorAll('.payment-amount-presets button'), function (button) {
+        button.classList.toggle('active', Number(amount.value) === Number(String(button.textContent).replace(/[^\d.]/g, '')));
+      });
+    }
     amount.addEventListener('input', updateTotal);
+    amount.addEventListener('input', paintAmountPresets);
 
     function validation() {
       var value = orderAmount(), selectedMethod = info.methods && info.methods[method] || {};
@@ -677,8 +735,13 @@
     }
     document.addEventListener('visibilitychange', onVisible);
     global.addEventListener('pp:payment-changed', onOrderChange);
+    global.addEventListener('hashchange', syncRouteView);
     if (activeOrder) setTimeout(function () { if (page.isConnected && current()) paintActiveOrder(); }, 0);
-    paintViews();
+    activate();
+    page.addEventListener('pp:page-activate', activate);
+    page.addEventListener('pp:page-dispose', function () {
+      global.removeEventListener('hashchange', syncRouteView);
+    });
     loadConfig(); loadOrders(true); loadSubscriptions();
     return page;
   }

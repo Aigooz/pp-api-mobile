@@ -658,58 +658,74 @@
     var page = h('div', { class: 'page' });
     var u = global.S.user || Api.AUTH.user() || {};
     var email = pick(u, 'email', 'username') || '—';
+    var displayName = pick(u, 'name', 'display_name', 'nickname') || String(email).split('@')[0] || 'Pp 用户';
     var role = pick(u, 'role', 'user_role') || '';
     var roleText = /admin/.test(String(role)) ? '管理员' : (/observer/.test(String(role)) ? '观察者' : '用户');
+    var savedAccounts = Api.AUTH.accounts();
 
     var balanceBadge = h('span', { class: 'badge teal' }, '$' + U.usd(balanceOf(u)));
-    page.appendChild(h('div', { class: 'card pad' },
-      h('div', { class: 'row' },
-        h('div', {
-          style: {
-            width: '46px', height: '46px', borderRadius: '15px', background: 'var(--teal)',
-            color: '#fff', display: 'grid', placeItems: 'center', fontSize: '19px', fontWeight: '700'
-          }
-        }, String(email).slice(0, 1).toUpperCase()),
-        h('div', { style: { flex: '1', minWidth: '0' } },
-          h('div', { style: { fontWeight: '700' }, class: 'nowrap' }, email),
-          h('div', { class: 'tiny muted' }, 'ID ' + (pick(u, 'id', 'user_id') || '—') + ' · ' + roleText)
-        ),
-        balanceBadge
-      )
-    ));
+    var profileCard = h('section', { class: 'me-profile-card' },
+      h('button', { class: 'me-profile-main', type: 'button', onclick: function () { App.go('#/profile'); } },
+        h('span', { class: 'me-avatar' }, String(displayName || email).slice(0, 1).toUpperCase()),
+        h('span', { class: 'me-profile-copy' },
+          h('strong', { class: 'nowrap' }, displayName),
+          h('span', { class: 'nowrap' }, email),
+          h('small', null, 'ID ' + (pick(u, 'id', 'user_id') || '—') + ' · ' + roleText + (savedAccounts.length > 1 ? ' · ' + savedAccounts.length + ' 个账号' : ''))),
+        h('span', { class: 'me-profile-chevron', html: U.ic('chevron', 17) })),
+      h('div', { class: 'me-wallet-row' },
+        h('button', { class: 'me-wallet-main', type: 'button', onclick: function () { App.go('#/purchase'); } },
+          h('span', null, '可用余额'), balanceBadge),
+        h('button', { class: 'me-account-switch', type: 'button', onclick: function () {
+          App.go(savedAccounts.length > 1 ? '#/accounts' : '#/profile');
+        } },
+          h('span', { html: U.ic(savedAccounts.length > 1 ? 'users' : 'user', 16) }),
+          savedAccounts.length > 1 ? '切换账号' : '个人资料'))
+    );
+    page.appendChild(profileCard);
 
-    page.appendChild(section(null, null, null, h('div', { class: 'grid-2' },
-      h('button', { class: 'quick', style: { padding: '14px 6px' }, onclick: function () { App.go('#/purchase'); } },
-        h('i', { html: U.ic('card', 18) }), h('span', null, '充值余额')),
-      h('button', { class: 'quick', style: { padding: '14px 6px' }, onclick: function () { App.go('#/redeem'); } },
-        h('i', { html: U.ic('gift', 18) }), h('span', null, '兑换码'))
-    )));
+    page.appendChild(h('div', { class: 'me-action-grid' }, [
+      { icon: 'card', label: '充值', sub: '余额与套餐', path: '#/purchase' },
+      { icon: 'gift', label: '兑换', sub: '兑换码', path: '#/redeem' },
+      { icon: 'chart', label: '订阅', sub: '生效中的套餐', path: '#/subscriptions' },
+      { icon: 'doc', label: '订单', sub: '支付记录', path: '#/orders' }
+    ].map(function (item) {
+      return h('button', { class: 'me-action', type: 'button', onclick: function () { App.go(item.path); } },
+      h('span', { class: 'me-action-icon', html: U.ic(item.icon, 18) }),
+      h('span', { class: 'me-action-copy' }, h('strong', null, item.label), h('small', null, item.sub)));
+    })));
 
-    page.appendChild(h('div', { class: 'section' }, h('div', { class: 'list' },
-      listItem('key', '我的令牌', '创建与管理 API 令牌', null, function () { App.go('#/keys'); }),
-      listItem('chart', '用量明细', '调用记录与消耗趋势', null, function () { App.go('#/usage'); }),
-      listItem('card', '充值中心', '余额与订阅套餐', null, function () { App.go('#/purchase'); }),
-      listItem('users', '邀请返利', '邀请好友获得返利', null, function () { App.go('#/affiliate'); })
-    )));
+    page.appendChild(h('div', { class: 'section me-section' },
+      h('div', { class: 'me-section-label' }, '账户服务'),
+      h('div', { class: 'list' },
+        listItem('key', '我的令牌', '创建、并发与用量', null, function () { App.go('#/keys'); }),
+        listItem('chart', '用量明细', '调用记录与消耗趋势', null, function () { App.go('#/usage'); }),
+        listItem('card', '订阅与订单', savedAccounts.length > 1 ? '管理套餐、充值与多账号' : '管理套餐与充值记录', null, function () { App.go('#/purchase'); }),
+        listItem('users', '邀请返利', '邀请好友获得返利', null, function () { App.go('#/affiliate'); })
+      )));
 
-    page.appendChild(h('div', { class: 'section' }, h('div', { class: 'list' },
-      listItem('users', '账号管理', '切换或添加账号', null, function () { App.go('#/accounts'); }),
-      listItem('sparkle', '主题外观', '浅色、深色与多种配色', null, function () { global.AppTheme.open(); }),
-      listItem('lock', '修改密码', '定期更换更安全', null, function () { openPasswordSheet(); }),
-      listItem('refresh', '清除本地缓存', '重新拉取模型与公告', null, function () {
-        Api.clearCache();
-        U.toast('已清除', 'ok');
-      })
-    )));
+    page.appendChild(h('div', { class: 'section me-section' },
+      h('div', { class: 'me-section-label' }, '账户与应用'),
+      h('div', { class: 'list' },
+        listItem('users', '账号管理', savedAccounts.length > 1 ? savedAccounts.length + ' 个账号可快速切换' : '添加账号、记住密码', null, function () { App.go('#/accounts'); }),
+        listItem('user', '个人资料', '昵称、邮箱与账户信息', null, function () { App.go('#/profile'); }),
+        listItem('sparkle', '主题外观', '11 种主题与明暗模式', null, function () { global.AppTheme.open(); }),
+        listItem('lock', '修改密码', '定期更换更安全', null, function () { openPasswordSheet(); }),
+        listItem('refresh', '软件更新', '检查新版本与更新通知', null, function () { App.go('#/updates'); })
+      )));
 
-    page.appendChild(h('div', { class: 'section' }, h('div', { class: 'list' },
-          listItem('refresh', '立即刷新', '同步余额、模型、令牌与实时状态', null, function () { manualRefresh(); }),
-          listItem('refresh', '软件更新', '检查新版本与更新通知', null, function () { App.go('#/updates'); }),
-      listItem('doc', '关于 Pp API', '版本、条款与联系方式', null, function () { App.go('#/about'); }),
-      listItem('external', '访问官网（浏览器）', Api.ORIGIN, null, function () { C.open(Api.ORIGIN); })
-    )));
+    page.appendChild(h('div', { class: 'section me-section' },
+      h('div', { class: 'me-section-label' }, '更多'),
+      h('div', { class: 'list' },
+        listItem('refresh', '立即刷新', '同步余额、模型、令牌与实时状态', null, function () { manualRefresh(); }),
+        listItem('refresh', '清除本地缓存', '重新拉取模型与公告', null, function () {
+          Api.clearCache();
+          U.toast('已清除', 'ok');
+        }),
+        listItem('doc', '关于 Pp API', '版本、条款与联系方式', null, function () { App.go('#/about'); }),
+        listItem('external', '访问官网', '在浏览器中打开 ipkey.vip', null, function () { C.open(Api.ORIGIN); })
+      )));
 
-    page.appendChild(h('div', { class: 'section' },
+    page.appendChild(h('div', { class: 'section me-logout' },
       h('button', {
         class: 'btn btn-block btn-danger',
         onclick: function () {
@@ -728,7 +744,16 @@
 
     page.appendChild(h('div', { class: 'footer-note' }, 'Pp API ' + (global.Updates ? global.Updates.version() : '1.0.0')));
     function updateUser() {
-      if (App.isPageRetained(page)) balanceBadge.textContent = '$' + U.usd(balanceOf(global.S.user || Api.AUTH.user() || {}));
+      if (App.isPageRetained(page)) {
+        balanceBadge.textContent = '$' + U.usd(balanceOf(global.S.user || Api.AUTH.user() || {}));
+        var next = global.S.user || Api.AUTH.user() || {};
+        var nextEmail = pick(next, 'email', 'username') || '—';
+        var nextName = pick(next, 'name', 'display_name', 'nickname') || String(nextEmail).split('@')[0] || 'Pp 用户';
+        var heading = profileCard.querySelector('.me-profile-copy strong');
+        var address = profileCard.querySelector('.me-profile-copy > span');
+        if (heading) heading.textContent = nextName;
+        if (address) address.textContent = nextEmail;
+      }
     }
     global.addEventListener('pp:user-updated', updateUser);
     page.addEventListener('pp:page-dispose', function () { global.removeEventListener('pp:user-updated', updateUser); });
@@ -760,10 +785,11 @@
     if (!accounts.length) {
       page.appendChild(emptyState('还没有保存的账号', '登录后可在此切换账号', 'users'));
     } else {
-      var list = h('div', { class: 'list account-list' });
+      var list = h('div', { class: 'account-list' });
       accounts.forEach(function (item) {
+        var initials = String(item.name || item.email || 'P').replace(/[^a-z0-9\u4e00-\u9fff]/gi, '').slice(0, 1).toUpperCase() || 'P';
         var select = h('button', {
-          class: 'account-select', type: 'button',
+          class: 'account-select', type: 'button', role: 'button',
           'aria-label': item.active ? item.email + '，当前账号' : (item.expired ? '重新登录 ' : '切换到 ') + item.email,
           onclick: function () {
             if (item.active) return;
@@ -778,12 +804,18 @@
             }).catch(function (e) { U.toast(e.message, 'err'); });
           }
         },
-          h('span', { class: 'account-avatar', html: U.ic('user', 18) }),
+          h('span', { class: 'account-avatar' }, initials),
           h('span', { class: 'account-body' },
-            h('span', { class: 'account-email' }, item.email),
-            h('span', { class: 'account-status' }, item.active ? '当前账号' : item.expired ? '登录已过期，点击重新登录' : '点击切换')
+            h('span', { class: 'account-name nowrap' }, item.name || item.email.split('@')[0] || item.email),
+            h('span', { class: 'account-email nowrap' }, item.email),
+            h('span', { class: 'account-meta' },
+              item.active ? h('span', { class: 'badge teal' }, '当前账号') : null,
+              item.expired ? h('span', { class: 'badge warn' }, '需要重新登录') : h('span', { class: 'account-ready' }, '会话有效'),
+              item.rememberPassword ? h('span', { class: 'account-memory' }, h('i', { html: U.ic('lock', 11) }), '已记住密码') : h('span', { class: 'account-memory' }, '未记住密码'))
           ),
-          item.active ? h('span', { class: 'badge teal' }, '当前') : h('span', { class: 'account-chevron', html: U.ic('chevron', 16) })
+          h('span', { class: 'account-switch', 'aria-hidden': 'true' },
+            item.active ? h('span', null, '当前') : h('span', null, item.expired ? '再次登录' : '切换'),
+            item.active ? null : h('i', { html: U.ic('chevron', 15) }))
         );
         var remove = h('button', {
           class: 'icon-btn account-remove', type: 'button', title: '移除账号', 'aria-label': '移除账号 ' + item.email,
@@ -802,7 +834,7 @@
             });
           }
         });
-        list.appendChild(h('div', { class: 'account-row' }, select, remove));
+        list.appendChild(h('article', { class: 'account-card' + (item.active ? ' active' : '') }, select, remove));
       });
       page.appendChild(list);
     }
@@ -811,6 +843,108 @@
       onclick: function () { App.loginEmail = ''; App.go('#/login'); }
     }, h('span', { html: U.ic('plus', 16) }), '添加账号'));
     return page;
+  }
+
+  function renderProfile() {
+    if (!Api.AUTH.isLogged()) return needLogin();
+    var page = h('div', { class: 'page profile-page' });
+    var account = Api.AUTH.context();
+    var user = global.S.user || Api.AUTH.user() || {};
+    var email = pick(user, 'email') || '—';
+    var username = String(pick(user, 'username', 'name', 'display_name', 'nickname') || '');
+    var role = String(pick(user, 'role', 'user_role') || 'user');
+    var roleText = /admin/.test(role) ? '管理员' : (/observer/.test(role) ? '观察者' : '普通用户');
+    var createdAt = pick(user, 'created_at', 'createdAt');
+    var lastActive = pick(user, 'last_active_at', 'lastActiveAt');
+    var saved = Api.AUTH.accounts().filter(function (item) { return item.id === account.id; })[0] || {};
+
+    page.appendChild(h('div', { class: 'profile-hero' },
+      h('span', { class: 'profile-avatar' }, String(username || email).slice(0, 1).toUpperCase()),
+      h('div', { class: 'profile-identity' },
+        h('strong', null, username || String(email).split('@')[0] || 'Pp 用户'),
+        h('span', null, email),
+        h('div', { class: 'profile-badges' },
+          h('span', { class: 'badge teal' }, roleText),
+          h('span', { class: 'badge ' + (saved.rememberPassword ? 'ok' : '') }, saved.rememberPassword ? '已记住密码' : '密码未保存'))),
+      h('button', { class: 'btn btn-sm profile-switch', type: 'button', onclick: function () { App.go('#/accounts'); } }, '切换账号')));
+
+    var usernameInput = h('input', { class: 'input', maxlength: '48', value: username, placeholder: '设置显示名称', autocomplete: 'nickname' });
+    var emailInput = h('input', { class: 'input', type: 'email', value: email, readonly: true, 'aria-readonly': 'true' });
+    var save = h('button', { class: 'btn btn-primary btn-block', type: 'button' }, '保存个人资料');
+    var usernames = [];
+    ['username', 'name', 'display_name', 'nickname'].forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(user, key)) usernames.push(key);
+    });
+    if (!usernames.length) usernames.push('username');
+    if (!usernameInput.value.trim()) usernameInput.value = String(email).split('@')[0] || '';
+
+    save.addEventListener('click', function () {
+      var value = usernameInput.value.trim();
+      if (!value) { U.toast('请输入显示名称', 'err'); return; }
+      if (value === username) { U.toast('个人资料没有变化'); return; }
+      var payload = {};
+      usernames.forEach(function (key) { payload[key] = value; });
+      save.disabled = true;
+      save.textContent = '保存中…';
+      Api.profileUpdate(payload).then(function () {
+        return Api.me();
+      }).then(function (latest) {
+        if (!Api.AUTH.matches(account)) return;
+        global.S.user = latest || Object.assign({}, user, payload);
+        global.dispatchEvent(new CustomEvent('pp:user-updated'));
+        username = value;
+        page.querySelector('.profile-identity > strong').textContent = value;
+        page.querySelector('.profile-avatar').textContent = value.slice(0, 1).toUpperCase();
+        U.toast('个人资料已更新', 'ok');
+      }).catch(function (error) {
+        U.toast(error.message || '保存失败', 'err');
+      }).then(function () {
+        save.disabled = false;
+        save.textContent = '保存个人资料';
+      });
+    });
+
+    page.appendChild(h('div', { class: 'section' },
+      h('div', { class: 'me-section-label' }, '基本资料'),
+      h('div', { class: 'card profile-form-card' },
+        h('div', { class: 'field' }, h('label', null, '显示名称'), usernameInput,
+          h('div', { class: 'profile-field-hint' }, '保存后会同步到网站个人资料')),
+        h('div', { class: 'field' }, h('label', null, '登录邮箱'), emailInput,
+          h('div', { class: 'profile-field-hint' }, '主邮箱由网站账户安全设置管理')),
+        h('button', { class: 'btn btn-block', type: 'button', onclick: function () { openPasswordSheet(); } },
+          h('span', { html: U.ic('lock', 16) }), '修改登录密码'),
+        save)));
+
+    page.appendChild(h('div', { class: 'section' },
+      h('div', { class: 'me-section-label' }, '账户信息'),
+      h('div', { class: 'profile-details' },
+        profileDetail('账户 ID', String(pick(user, 'id', 'user_id') || '—')),
+        profileDetail('账户角色', roleText),
+        profileDetail('并发上限', Number(pick(user, 'concurrency', 'concurrency_limit') || 0) > 0 ? U.num(pick(user, 'concurrency', 'concurrency_limit')) + ' 路' : '跟随账户'),
+        profileDetail('注册时间', createdAt ? U.datetime(createdAt) : '—'),
+        profileDetail('最近活跃', lastActive ? U.datetime(lastActive) : '—'),
+        profileDetail('安全存储', Api.AUTH.secureAvailable() ? '已启用' : '不可用'))));
+
+    page.appendChild(h('div', { class: 'section' },
+      h('div', { class: 'me-section-label' }, '账号安全'),
+      h('div', { class: 'list' },
+        listItem('users', '账号管理', saved.rememberPassword ? '当前账号已记住密码，可快速恢复登录' : '添加或切换其他账号', null, function () { App.go('#/accounts'); }),
+        listItem('lock', '修改密码', '更新安全存储中的已记住密码', null, function () { openPasswordSheet(); }),
+        listItem('warning', '退出当前账号', '其他已保存账号不受影响', null, function () {
+          U.confirm('退出当前账号', '退出后此账号需要重新登录，其他账号不受影响。', '退出', true).then(function (ok) {
+            if (!ok) return;
+            var pending = Api.logout();
+            App.refreshPublic();
+            App.go('#/accounts', true);
+            pending.then(function () { U.toast('已退出当前账号', 'ok'); });
+          });
+        }))));
+
+    return page;
+  }
+
+  function profileDetail(label, value) {
+    return h('div', { class: 'profile-detail' }, h('span', null, label), h('strong', null, value));
   }
 
   function openPasswordSheet() {
@@ -991,7 +1125,7 @@
   }
 
   global.PagesUser = {
-    renderKeys: renderKeys, renderUsage: renderUsage, renderMe: renderMe, renderAccounts: renderAccounts,
+    renderKeys: renderKeys, renderUsage: renderUsage, renderMe: renderMe, renderAccounts: renderAccounts, renderProfile: renderProfile,
     renderRedeem: renderRedeem, renderAffiliate: renderAffiliate,
     needLogin: needLogin
   };

@@ -137,8 +137,17 @@ try {
   assert.equal(metrics.failedText, true);
 
   ordersFail = true;
-  await page.goto(base + '/#/purchase');
+  await page.goto(base + '/#/orders');
   await page.getByText('订单加载失败').waitFor();
+  await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent === '订单');
+  assert.equal(await page.getByRole('tab', { name: '订单', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.goto(base + '/#/purchase');
+  await page.evaluate(() => location.hash = '#/subscriptions');
+  await page.getByRole('tab', { name: '订阅', exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent === '订阅');
+  assert.equal(await page.getByRole('tab', { name: '订阅', exact: true }).getAttribute('aria-selected'), 'true');
+  await page.evaluate(() => location.hash = '#/orders');
+  await page.waitForFunction(() => document.querySelector('[role=tab][aria-selected=true]')?.textContent === '订单');
   assert.equal(await page.getByRole('tab', { name: '订单', exact: true }).getAttribute('aria-selected'), 'true');
   ordersFail = false;
   await page.getByRole('button', { name: '重试' }).click();
