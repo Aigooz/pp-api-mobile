@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium, webkit } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 

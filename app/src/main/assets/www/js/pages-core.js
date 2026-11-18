@@ -338,6 +338,16 @@
   }
 
   function showModelDetail(m) {
+    var accountKey = 'shared';
+    try { accountKey = Api.AUTH && Api.AUTH.currentId ? String(Api.AUTH.currentId() || 'shared') : 'shared'; } catch (e) {}
+    var recentStoreKey = 'plaza_recent:' + accountKey;
+    var recent = U.store.get(recentStoreKey, []);
+    if (!Array.isArray(recent)) recent = [];
+    recent = recent.filter(function (item) {
+      return !(item && item.model === m.name && String(item.group) === String(m.group));
+    });
+    recent.unshift({ model: m.name, group: String(m.group), groupName: m.group, at: Date.now() });
+    U.store.set(recentStoreKey, recent.slice(0, 12));
     var pl = platformKey(m.platform);
     var body = h('div', null,
       h('div', { class: 'row', style: { marginBottom: '12px' } },
@@ -442,6 +452,19 @@
     var gid = S2.plazaGroup || 0;
     var platform = '';
     var rate = '';
+    var onlyStatus = '';
+    var onlySubscriptions = false;
+    var onlyFavorites = false;
+    var accountKey = 'shared';
+    try {
+      accountKey = Api.AUTH && Api.AUTH.currentId ? String(Api.AUTH.currentId() || 'shared') : 'shared';
+    } catch (e) {}
+    var favoriteStoreKey = 'plaza_favorites:' + accountKey;
+    var recentStoreKey = 'plaza_recent:' + accountKey;
+    var favorites = U.store.get(favoriteStoreKey, []);
+    if (!Array.isArray(favorites)) favorites = [];
+    var recent = U.store.get(recentStoreKey, []);
+    if (!Array.isArray(recent)) recent = [];
     var host = h('div', { class: 'page plaza-page' });
     host.appendChild(modelTabs('plaza'));
 
@@ -453,11 +476,45 @@
     var platformRow = h('div', { class: 'chips' });
     var groupsRow = h('div', { class: 'chips' });
     var rateRow = h('div', { class: 'chips' });
+    var recentRow = h('div', { class: 'plaza-recent' });
     var listHost = h('div', { class: 'plaza-groups' });
     var statusByModel = Object.create(null), statusTimer = null, statusPending = false, statusUpdated = 0;
     var description = h('div', { class: 'plaza-description' });
+    var activeFilters = h('div', { class: 'plaza-active-filters' });
+    var filterSheet = h('div', { class: 'plaza-filter-sheet' });
+    var filterCount = h('span', { class: 'plaza-filter-count', hidden: true });
+    var filterButton = h('button', {
+      class: 'plaza-filter-button', type: 'button', 'aria-label': '筛选模型', title: '筛选模型',
+      onclick: function () { openFilters(); }
+    }, h('span', { html: U.ic('filter', 17) }), '筛选', filterCount);
+    var expandedGroups = Object.create(null);
 
     function statusKey(model, group) { return JSON.stringify([String(model), String(group)]); }
+    function favoriteKey(model, group) { return JSON.stringify([String(group), String(model)]); }
+    function isFavorite(model, group) { return favorites.indexOf(favoriteKey(model, group)) >= 0; }
+    function groupName(group) {
+      var found = ((plaza && plaza.groups) || []).filter(function (item) { return String(item.name) === String(group); })[0];
+      return found ? found.name : String(group || '模型');
+    }
+    function savePlazaStore() {
+      U.store.set(favoriteStoreKey, favorites);
+      U.store.set(recentStoreKey, recent.slice(0, 12));
+    }
+    function toggleFavorite(model, group) {
+      var key = favoriteKey(model, group);
+      var index = favorites.indexOf(key);
+      if (index >= 0) favorites.splice(index, 1);
+      else favorites.unshift(key);
+      savePlazaStore();
+      paint();
+      U.toast(index >= 0 ? '已取消收藏' : '已收藏模型', 'ok');
+    }
+    function markRecent(model, group) {
+      var key = favoriteKey(model, group);
+      recent = recent.filter(function (item) { return favoriteKey(item.model || '', item.group || '') !== key; });
+      recent.unshift({ model: model, group: group, groupName: groupName(group), at: Date.now() });
+      savePlazaStore();
+    }
     function modelStatus(model, group) {
       var item = statusByModel[statusKey(model, group)];
       return item ? global.PagesChannel.statusInfo(item.status, item.availability) : { kind: 'unknown', label: '未知' };
@@ -466,6 +523,7 @@
       Array.prototype.forEach.call(listHost.querySelectorAll('.plaza-status'), function (dot) {
         var state = modelStatus(dot.getAttribute('data-model'), dot.getAttribute('data-group'));
         dot.className = 'plaza-status ' + state.kind;
+        dot.setAttribute('data-status', state.kind);
         dot.setAttribute('title', '渠道状态：' + state.label);
         dot.setAttribute('aria-label', '渠道状态：' + state.label);
       });
@@ -483,6 +541,7 @@
         });
         statusUpdated = Date.now();
         updateStatusDots();
+        if (onlyStatus || search) paint();
       }).catch(function () {
         if (!App.isPageRetained(host)) return;
         if (!statusUpdated) { statusByModel = Object.create(null); updateStatusDots(); }
@@ -500,6 +559,65 @@
 
     function chip(row, label, active, action) {
       row.appendChild(h('button', { class: 'chip' + (active ? ' active' : ''), onclick: action }, label));
+    }
+
+    function selectedFilterCount() {
+      return (platform ? 1 : 0) + (gid ? 1 : 0) + (rate !== '' ? 1 : 0) +
+        (onlyStatus ? 1 : 0) + (onlySubscriptions ? 1 : 0) + (onlyFavorites ? 1 : 0);
+    }
+
+    function paintActiveFilters() {
+      activeFilters.innerHTML = '';
+      var items = [];
+      if (platform) items.push({ label: platform, clear: function () { platform = ''; } });
+      if (gid) {
+        var selectedGroup = ((plaza && plaza.groups) || []).filter(function (group) { return String(group.id) === String(gid); })[0];
+        items.push({ label: selectedGroup ? selectedGroup.name : '分组 ' + gid, clear: function () { gid = 0; global.S.plazaGroup = 0; } });
+      }
+      if (rate !== '') items.push({ label: rate + 'x', clear: function () { rate = ''; } });
+      if (onlyStatus) items.push({ label: onlyStatus === 'abnormal' ? '仅看异常' : onlyStatus === 'ok' ? '仅看正常' : '仅看未知', clear: function () { onlyStatus = ''; } });
+      if (onlySubscriptions) items.push({ label: '仅看订阅', clear: function () { onlySubscriptions = false; } });
+      if (onlyFavorites) items.push({ label: '仅看收藏', clear: function () { onlyFavorites = false; } });
+      if (items.length) {
+        activeFilters.appendChild(h('span', { class: 'tiny muted' }, '已筛选'));
+        items.forEach(function (item) {
+          activeFilters.appendChild(h('button', { class: 'plaza-active-filter', onclick: function () { item.clear(); paint(); } },
+            item.label, h('span', { html: U.ic('close', 12), 'aria-hidden': 'true' })));
+        });
+      }
+      var count = selectedFilterCount();
+      filterCount.textContent = count ? String(count) : '';
+      filterCount.hidden = !count;
+      filterButton.classList.toggle('has-filters', !!count);
+      filterButton.setAttribute('aria-label', count ? '筛选模型，已选择 ' + count + ' 项' : '筛选模型');
+    }
+
+    function filterPanel() {
+      filterSheet.innerHTML = '';
+      filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '平台'), platformRow));
+      filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '分组'), groupsRow));
+      filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '倍率'), rateRow));
+      filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '状态'),
+        h('div', { class: 'chips' }, [
+          { k: '', t: '全部' }, { k: 'ok', t: '正常' }, { k: 'abnormal', t: '异常' }, { k: 'unknown', t: '未知' }
+        ].map(function (item) { return h('button', { class: 'chip' + (onlyStatus === item.k ? ' active' : ''),
+          onclick: function () { onlyStatus = item.k; paint(); filterPanel(); } }, item.t); }))));
+      filterSheet.appendChild(h('label', { class: 'plaza-check-row' },
+        h('input', { type: 'checkbox', checked: onlySubscriptions, onchange: function (event) { onlySubscriptions = event.target.checked; paint(); filterPanel(); } }),
+        h('span', null, '仅显示订阅分组')));
+      filterSheet.appendChild(h('label', { class: 'plaza-check-row' },
+        h('input', { type: 'checkbox', checked: onlyFavorites, onchange: function (event) { onlyFavorites = event.target.checked; paint(); filterPanel(); } }),
+        h('span', null, '仅显示收藏模型')));
+      filterSheet.appendChild(h('div', { class: 'plaza-filter-actions' },
+        h('button', { class: 'btn btn-sm', onclick: function () {
+          platform = ''; gid = 0; global.S.plazaGroup = 0; rate = ''; onlyStatus = ''; onlySubscriptions = false; onlyFavorites = false;
+          paint(); filterPanel();
+        } }, '重置'),
+        h('button', { class: 'btn btn-primary btn-sm', onclick: function () { U.closeOverlay(); } }, '查看结果')));
+    }
+    function openFilters() {
+      filterPanel();
+      U.sheet({ title: '筛选模型', body: filterSheet, actions: [{ label: '完成', kind: 'primary' }] });
     }
 
     function paint() {
@@ -529,14 +647,20 @@
 
       var all = plazaModels(plaza);
       var filtered = groups.filter(function (g) {
-        return (!gid || String(gid) === String(g.id)) && (!platform || g.platform === platform) && (rate === '' || groupRate(g) === rate);
+        return (!gid || String(gid) === String(g.id)) && (!platform || g.platform === platform) && (rate === '' || groupRate(g) === rate) &&
+          (!onlySubscriptions || g.subscription_type === 'subscription');
       }).map(function (g) {
         return { group: g, models: all.filter(function (m) {
-          return String(m.groupId) === String(g.id) && (!search || (m.name + ' ' + m.group + ' ' + (m.platform || '')).toLowerCase().indexOf(search) >= 0);
+          if (String(m.groupId) !== String(g.id) || (search && (m.name + ' ' + m.group + ' ' + (m.platform || '')).toLowerCase().indexOf(search) < 0)) return false;
+          if (onlyFavorites && !isFavorite(m.name, m.group)) return false;
+          if (!onlyStatus) return true;
+          var state = modelStatus(m.name, m.group).kind;
+          return onlyStatus === 'abnormal' ? state === 'warning' || state === 'error' : state === onlyStatus;
         }) };
       }).filter(function (item) { return item.models.length > 0; });
       filtered.sort(function (a, b) { return groupRate(a.group) - groupRate(b.group) || String(a.group.name).localeCompare(String(b.group.name)); });
       listHost.innerHTML = '';
+      paintActiveFilters();
       if (!plaza) {
         listHost.appendChild(S2.plazaLoading ? h('div', { class: 'dashboard-loading' }, '正在加载模型广场…') : emptyState('模型广场加载失败', '请点击右上角刷新重试', 'alert'));
         return;
@@ -549,52 +673,108 @@
       listHost.appendChild(h('div', { class: 'plaza-count' }, '共 ' + filtered.length + ' 个分组 · ' + count + ' 个模型'));
       filtered.forEach(function (item) {
         var group = item.group;
-        listHost.appendChild(h('section', { class: 'plaza-group' },
+        var groupKey = String(group.id);
+        var isExpanded = !!expandedGroups[groupKey] || Object.keys(expandedGroups).length === 0 && listHost.childElementCount <= 1;
+        var groupBody = h('div', { class: 'plaza-group-body', hidden: !isExpanded },
+          h('div', { class: 'plaza-group-description' },
+            group.description ? h('p', null, group.description) : null,
+            group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
+            group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
+            group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null),
+          item.models.map(function (m) {
+            var details = h('div', { class: 'plaza-model-details', hidden: true },
+              m.desc ? h('p', { class: 'plaza-model-description' }, m.desc) : null,
+              m.mode === 'token' ? modelPricing(m) : perCallPricing(m));
+            var detailToggle = h('button', { class: 'plaza-model-detail-toggle', type: 'button', 'aria-expanded': 'false',
+              onclick: function () {
+                details.hidden = !details.hidden;
+                detailToggle.setAttribute('aria-expanded', details.hidden ? 'false' : 'true');
+                detailToggle.textContent = details.hidden ? '价格明细' : '收起价格';
+              } }, '价格明细');
+            return h('div', { class: 'plaza-model' },
+              h('div', { class: 'plaza-model-top' },
+                h('div', { class: 'plaza-model-heading' },
+                  h('span', { class: 'plaza-model-name' },
+                    h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
+                      title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
+                    h('button', { class: 'plaza-model-title', type: 'button', onclick: function () {
+                      markRecent(m.name, m.group);
+                      showModelDetail(m);
+                      paint();
+                    } }, m.name)),
+                  h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
+                h('div', { class: 'plaza-model-actions' },
+                  h('button', { class: 'plaza-model-favorite' + (isFavorite(m.name, m.group) ? ' active' : ''), type: 'button',
+                    title: isFavorite(m.name, m.group) ? '取消收藏' : '收藏模型',
+                    'aria-label': (isFavorite(m.name, m.group) ? '取消收藏 ' : '收藏 ') + m.name,
+                    onclick: function (event) {
+                      event.stopPropagation();
+                      toggleFavorite(m.name, m.group);
+                    }, html: U.ic('star', 15) }),
+                  h('button', { class: 'plaza-model-copy', type: 'button', title: '复制模型名称', 'aria-label': '复制模型名称 ' + m.name,
+                    onclick: function (event) {
+                      event.stopPropagation();
+                      markRecent(m.name, m.group);
+                      U.copy(m.name);
+                    }, html: U.ic('copy', 17) }))),
+              h('div', { class: 'plaza-model-summary' },
+                h('span', { class: 'plaza-price-pill' }, m.mode === 'token'
+                  ? '输入 ' + priceText(m.input) + ' · 输出 ' + priceText(m.output)
+                  : priceLabel(m)), detailToggle),
+              details
+            );
+          }));
+        var toggle = h('button', { class: 'plaza-group-toggle', type: 'button', 'aria-expanded': isExpanded ? 'true' : 'false',
+          onclick: function () {
+            expandedGroups[groupKey] = groupBody.hidden;
+            groupBody.hidden = !groupBody.hidden;
+            toggle.setAttribute('aria-expanded', groupBody.hidden ? 'false' : 'true');
+            toggle.classList.toggle('expanded', !groupBody.hidden);
+          } });
+        listHost.appendChild(h('section', { class: 'plaza-group' + (isExpanded ? ' expanded' : '') },
           h('div', { class: 'plaza-group-head' },
             h('div', { class: 'row between' }, h('h2', null, group.name || '未命名分组'),
-              h('span', { class: 'badge teal' }, groupRate(group) + 'x')),
+              h('div', { class: 'plaza-group-actions' }, h('span', { class: 'badge teal' }, groupRate(group) + 'x'), toggle)),
             h('div', { class: 'plaza-group-meta' },
               group.platform ? h('span', null, group.platform) : null,
               group.subscription_type === 'subscription' ? h('span', { class: 'badge warn' }, '订阅') : null,
               group.is_exclusive ? h('span', { class: 'badge' }, '专属') : null,
-              h('span', null, item.models.length + ' 个模型')),
-            group.description ? h('p', null, group.description) : null,
-            group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
-            group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
-            group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null
-          ),
-          item.models.map(function (m) {
-            return h('div', { class: 'plaza-model' },
-              h('div', { class: 'plaza-model-top' },
-                h('button', { class: 'plaza-model-heading', onclick: function () { showModelDetail(m); } },
-                  h('span', { class: 'plaza-model-name' },
-                    h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
-                      title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
-                    h('span', { class: 'plaza-model-title' }, m.name)),
-                  h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
-                h('button', { class: 'plaza-model-copy', type: 'button', title: '复制模型名称', 'aria-label': '复制模型名称 ' + m.name,
-                  onclick: function (event) {
-                    event.stopPropagation();
-                    U.copy(m.name);
-                  }, html: U.ic('copy', 17) })),
-              m.mode === 'token' ? modelPricing(m) : perCallPricing(m)
-            );
-          })
+              h('span', null, item.models.length + ' 个模型'))),
+          group.description ? h('p', null, group.description) : null,
+          group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
+          group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
+          group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null,
+          groupBody
         ));
       });
       updateStatusDots();
     }
 
     host.appendChild(description);
-    host.appendChild(searchInput);
-    host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '平台'), platformRow));
-    host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '分组'), groupsRow));
-    host.appendChild(h('div', { class: 'plaza-filter' }, h('span', null, '倍率'), rateRow));
+    host.appendChild(h('div', { class: 'plaza-search-row' }, h('div', { class: 'plaza-search-wrap' }, h('span', { class: 'plaza-search-icon', html: U.ic('search', 18) }), searchInput), filterButton));
+    host.appendChild(recentRow);
+    host.appendChild(activeFilters);
     host.appendChild(listHost);
     function updatePlaza() {
       plaza = S2.plaza;
       description.textContent = plaza && plaza.description || '';
       description.hidden = !description.textContent;
+      recentRow.innerHTML = '';
+      if (recent.length) {
+        recentRow.appendChild(h('div', { class: 'plaza-recent-head' }, h('strong', null, '最近使用'), h('span', null, '快速继续')));
+        recentRow.appendChild(h('div', { class: 'plaza-recent-list' }, recent.slice(0, 5).map(function (item) {
+          return h('button', { class: 'plaza-recent-chip', type: 'button', title: '查看 ' + item.model,
+            onclick: function () {
+              var model = plazaModels(plaza).filter(function (m) {
+                return m.name === item.model && (String(m.groupId) === String(item.group) || String(m.group) === String(item.group));
+              })[0];
+              markRecent(item.model, item.group);
+              if (model) showModelDetail(model);
+              paint();
+            } }, h('span', { class: 'plaza-recent-model' }, item.model), h('small', null, item.groupName || '模型'));
+        })));
+      }
+      recentRow.hidden = !recent.length;
       paint();
     }
     host.addEventListener('pp:page-plaza-updated', updatePlaza);

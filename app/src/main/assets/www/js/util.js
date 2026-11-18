@@ -277,6 +277,11 @@
     star: '<path d="m12 3 2.7 5.8 6.3.8-4.6 4.4 1.2 6.3L12 17.4 6.4 20.3l1.2-6.3L3 9.6l6.3-.8L12 3Z"/>',
     grid: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>',
     filter: '<path d="M3 5h18l-7 8v6l-4-2v-4L3 5Z"/>',
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+    play: '<path d="m8 5 11 7-11 7V5Z"/>',
+    branch: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 7h5a5 5 0 0 1 5 5v-4"/>',
+    pin: '<path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6Z"/><path d="M12 15v5"/>',
     users: '<circle cx="9" cy="8" r="3.4"/><path d="M2.8 20c.7-3.4 3.1-5 6.2-5s5.5 1.6 6.2 5"/><path d="M16 5.2a3.2 3.2 0 0 1 0 6.1M18 15.2c2 .6 3.2 2.1 3.7 4.8"/>'
   };
   function ic(name, size) {
@@ -287,15 +292,20 @@
   }
 
   // ---------- toast ----------
+  var toastTimer = 0;
   function toast(msg, type) {
     var host = $('.toast-host');
     if (!host) {
       host = el('div', { class: 'toast-host' });
       document.body.appendChild(host);
     }
+    Array.prototype.forEach.call(host.children, function (old) {
+      if (old.parentNode) old.parentNode.removeChild(old);
+    });
+    clearTimeout(toastTimer);
     var t = el('div', { class: 'toast ' + (type || ''), text: String(msg) });
     host.appendChild(t);
-    setTimeout(function () {
+    toastTimer = setTimeout(function () {
       t.style.transition = 'opacity .25s, transform .25s';
       t.style.opacity = '0';
       t.style.transform = 'translateY(6px)';

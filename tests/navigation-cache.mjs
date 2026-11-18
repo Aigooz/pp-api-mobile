@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -105,6 +105,7 @@ try {
 
   const initialTrend = calls.trend;
   const appliedTrendQuery = trendQueries.at(-1);
+  await page.getByRole('button', { name: '更多时间设置' }).click();
   await page.getByLabel('开始时间', { exact: true }).fill('10:15');
   await page.evaluate(() => {
     const now = Date.now;
@@ -122,7 +123,7 @@ try {
     const icon = item.querySelector('svg').getBoundingClientRect();
     return { width: rect.width, height: rect.height, iconWidth: icon.width, iconHeight: icon.height };
   }));
-  assert.ok(buttons.length >= 2);
+  assert.ok(buttons.length >= 1);
   assert.ok(buttons.every(item => item.width >= 44 && item.height >= 44 && item.iconWidth >= 22 && item.iconHeight >= 22));
   assert.deepEqual(errors, []);
   console.log('Navigation cache: preload, DOM reuse, scroll and draft retention, request reuse and header hit targets passed');

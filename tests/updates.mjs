@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -30,8 +30,11 @@ try {
   await page.goto(base);
   await page.waitForFunction(() => window.updateCalls.checks.length === 1);
   assert.deepEqual(await page.evaluate(() => updateCalls.checks), [false]);
-  await page.evaluate(() => __nativeUpdate('available', JSON.stringify({ version: '1.1.0', notes: '恢复仪表盘\n新增更新通知' })));
-  await page.getByRole('button', { name: '查看软件更新' }).click();
+  await page.evaluate(() => {
+    __nativeUpdate('available', JSON.stringify({ version: '1.1.0', notes: '恢复仪表盘\n新增更新通知' }));
+    App.go('#/updates');
+  });
+  await page.getByText('软件更新', { exact: true }).click();
   await page.getByText('发现新版本 1.1.0', { exact: true }).waitFor();
   await page.getByText('恢复仪表盘').waitFor();
   await page.getByRole('button', { name: '开启通知' }).click();

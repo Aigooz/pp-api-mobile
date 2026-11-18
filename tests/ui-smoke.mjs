@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -104,17 +104,18 @@ try {
   await plaza.getByRole('button', { name: '复制模型名称 demo-model' }).click();
   assert.equal(await page.evaluate(() => window.copiedModel), 'demo-model');
   assert.equal(await page.locator('.sheet').count(), 0);
-  assert.match(await plaza.innerText(), /缓存读取/);
+  await plaza.getByRole('button', { name: '价格明细' }).click();
   assert.match(await plaza.innerText(), /\$0\.01/);
-  assert.match(await plaza.innerText(), /\$0\.50/);
   assert.match(await plaza.innerText(), /订阅/);
-  await plaza.locator('.plaza-filter').filter({ hasText: '倍率' }).getByRole('button', { name: '0.5x' }).click();
+  await plaza.getByRole('button', { name: '筛选模型' }).click();
+  await page.locator('.plaza-filter-group').filter({ hasText: '倍率' }).getByRole('button', { name: '0.5x' }).click();
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
   assert.match(await plaza.innerText(), /demo-image/);
-  await plaza.locator('.plaza-filter').filter({ hasText: '倍率' }).getByRole('button', { name: '全部' }).click();
+  await page.locator('.plaza-filter-group').filter({ hasText: '倍率' }).getByRole('button', { name: '全部' }).click();
+  await page.getByRole('button', { name: '完成', exact: true }).click();
   await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('demo-model');
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
-  await plaza.getByRole('button', { name: /渠道状态：未知 demo-model/ }).click();
+  await plaza.getByRole('button', { name: 'demo-model', exact: true }).click();
   assert.match(await page.locator('.sheet').innerText(), /官方价/);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('button', { name: '我的', exact: true }).click();
@@ -176,24 +177,27 @@ try {
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('账户余额').waitFor();
   await page.getByText('今日缓存命中率').waitFor();
-  assert.equal(await page.locator('.dashboard-metric').count(), 8);
+  assert.equal(await page.locator('.dashboard-metric').count(), 7);
   assert.match(await page.locator('.dashboard').innerText(), /80\.0%/);
   assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
   assert.match(await page.locator('.dashboard').innerText(), /今日出错 1/);
   assert.match(await page.locator('.dashboard').innerText(), /当前并发 5 路/);
   const metricDetails = page.locator('.dashboard-metric-detail');
-  assert.equal(await metricDetails.nth(3).locator(':scope > div').count(), 3);
-  assert.equal(await metricDetails.nth(4).locator(':scope > div').count(), 3);
-  assert.equal(await metricDetails.nth(5).locator(':scope > div').count(), 3);
-  assert.equal(await metricDetails.nth(6).locator(':scope > div').count(), 3);
-  assert.equal(await metricDetails.nth(7).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(0).locator(':scope > div').count(), 3);
+  assert.equal(await metricDetails.nth(1).locator(':scope > div').count(), 3);
+  assert.equal(await page.locator('.dashboard-quality-item .dashboard-metric-detail').nth(0).locator(':scope > div').count(), 3);
+  assert.equal(await page.locator('.dashboard-quality-item .dashboard-metric-detail').nth(1).locator(':scope > div').count(), 3);
   noReliability = true;
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:live-refreshed')));
-  await page.waitForFunction(() => !document.querySelector('.dashboard-grid').textContent.includes('今日成功率'));
-  assert.doesNotMatch(await page.locator('.dashboard-grid').innerText(), /成功率|出错|未知/);
+  await page.evaluate(async () => {
+    Api.clearCache();
+    const data = await Api.usageDashboard();
+    window.dispatchEvent(new CustomEvent('pp:live-refreshed', { detail: { value: data, reason: 'test' } }));
+  });
+  await page.waitForFunction(() => !document.querySelector('.dashboard-quality-grid').textContent.includes('今日成功率'));
+  assert.doesNotMatch(await page.locator('.dashboard-quality-grid').innerText(), /成功率|出错|未知/);
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 });
-    assert.equal(await page.locator('.dashboard-metric').count(), 8);
+    assert.equal(await page.locator('.dashboard-metric').count(), 6);
     assert.equal(await page.evaluate(() => document.querySelector('#view').scrollWidth), await page.evaluate(() => document.querySelector('#view').clientWidth));
     assert.equal(await page.locator('.dashboard-metric-detail').evaluateAll(elements => elements.every(el => el.scrollWidth <= el.clientWidth)), true);
   }
@@ -225,6 +229,7 @@ try {
   await page.getByRole('button', { name: '按小时' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.dashboard-trend-point').length === 3);
   assert.equal(trendQueries.at(-1).get('granularity'), 'hour');
+  await page.getByRole('button', { name: '更多时间设置' }).click();
   await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
   await page.getByLabel('结束日期', { exact: true }).fill('2026-01-03');
   await page.getByRole('button', { name: '应用日期' }).click();
@@ -289,11 +294,14 @@ try {
   await page.getByRole('button', { name: '我的', exact: true }).click();
   await page.getByText('test@example.test').waitFor();
   await page.getByText('用量明细').click();
-  await page.getByText('20', { exact: true }).waitFor();
+  await page.getByText('20', { exact: true }).first().waitFor();
   await page.getByText('demo-model').first().waitFor();
   await page.getByRole('button', { name: '令牌', exact: true }).click();
+  await page.locator('.keycard').first().waitFor();
   emptyKeys = true;
-  await page.getByRole('button', { name: '刷新' }).click();
+  await page.evaluate(() => Api.clearCache());
+  await page.evaluate(() => App.go('#/me', true));
+  await page.getByRole('button', { name: '令牌', exact: true }).click();
   await page.getByText('还没有令牌').waitFor();
   await page.getByRole('button', { name: '新建' }).click();
   await page.getByRole('button', { name: '选择分组' }).getByText('请选择分组').waitFor();

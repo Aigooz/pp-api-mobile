@@ -100,7 +100,7 @@
   }
 
   function metric(label, value, detail, icon, action, valueClass) {
-    return h(action ? 'button' : 'div', { class: 'card dashboard-metric', onclick: action || null },
+    return h(action ? 'button' : 'div', { class: 'card dashboard-metric dashboard-quality-item', onclick: action || null },
       h('div', { class: 'dashboard-metric-label' }, h('i', { html: U.ic(icon, 16) }), label),
       h('strong', valueClass ? { class: valueClass } : null, value),
       h('div', { class: 'dashboard-metric-detail' }, (Array.isArray(detail) ? detail : [detail]).map(function (line) {
@@ -111,6 +111,7 @@
 
   function renderDashboard() {
     if (!Api.AUTH.isLogged()) return global.PagesUser.needLogin();
+    var account = Api.AUTH.context();
     var page = h('div', { class: 'page dashboard' });
     var summaryHost = h('div', { class: 'dashboard-summary' }, h('div', { class: 'dashboard-loading' }, '正在加载账户统计…'));
     var platformHost = h('div');
@@ -124,16 +125,19 @@
     var endInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(end), label: '结束日期' });
     var startTime = U.dateTimeField({ kind: 'time', compact: true, value: '00:00', label: '开始时间' });
     var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
-    var granularity = 'day';
+    var granularity = U.store.get('dashboard_granularity:' + encodeURIComponent(account.id), 'day');
+    if (granularity !== 'hour') granularity = 'day';
+    var rangeMode = U.store.get('dashboard_range_mode:' + encodeURIComponent(account.id), '7d');
+    if (['today', '7d', '30d', 'custom'].indexOf(rangeMode) < 0) rangeMode = '7d';
     var requestVersion = 0, summaryVersion = 0, lastSummary = null, appliedQuery = null, refreshedAt = Date.now(), refreshTimer = null;
     var totalConcurrency = null;
-    var account = Api.AUTH.context();
     function current() { return Api.AUTH.matches(account) && App.isPageRetained(page); }
 
     var granularityControl = h('div', { class: 'seg dashboard-granularity', 'aria-label': '统计粒度' },
       ['day', 'hour'].map(function (value) {
         return h('button', { class: value === granularity ? 'active' : '', onclick: function () {
           granularity = value;
+          U.store.set('dashboard_granularity:' + encodeURIComponent(account.id), granularity);
           Array.prototype.forEach.call(granularityControl.children, function (button, index) {
             button.className = index === (value === 'day' ? 0 : 1) ? 'active' : '';
           });
@@ -142,15 +146,52 @@
       })
     );
 
-    var dateControls = h('div', { class: 'dashboard-controls' },
+    var advanced = h('div', { class: 'dashboard-controls dashboard-advanced' + (rangeMode === 'custom' ? '' : ' is-collapsed') },
       h('div', { class: 'dashboard-date-row' },
         h('label', null, '开始日期', startInput), h('label', null, '结束日期', endInput)),
       h('div', { class: 'dashboard-date-row dashboard-time-row' },
         h('label', null, '开始时间', startTime), h('label', null, '结束时间', endTime)),
-      h('div', { class: 'tiny muted dashboard-range-note' }, '按设备本地时间统计，包含结束分钟'),
-      h('div', { class: 'dashboard-control-row' }, granularityControl,
-        h('button', { class: 'btn btn-sm', onclick: loadCharts }, '应用日期'))
-    );
+      h('div', { class: 'dashboard-control-row' },
+        h('span', { class: 'tiny muted dashboard-range-note' }, '按设备本地时间统计，包含结束分钟'),
+        h('button', { class: 'btn btn-sm', onclick: loadCharts }, '应用日期')));
+    var rangeControl = h('div', { class: 'seg dashboard-range-presets', 'aria-label': '统计时段' },
+      [{ k: 'today', t: '今日' }, { k: '7d', t: '近 7 天' }, { k: '30d', t: '近 30 天' }, { k: 'custom', t: '自定义' }].map(function (item) {
+        return h('button', { class: item.k === rangeMode ? 'active' : '', onclick: function () { applyPreset(item.k); } }, item.t);
+      }));
+    function applyPreset(mode) {
+      rangeMode = mode;
+      U.store.set('dashboard_range_mode:' + encodeURIComponent(account.id), mode);
+      var last = new Date(), first = new Date();
+      first.setDate(last.getDate() - (mode === '7d' ? 6 : mode === '30d' ? 29 : 0));
+      startInput.value = U.ymd(first);
+      endInput.value = U.ymd(last);
+      startTime.value = '00:00';
+      endTime.value = '23:59';
+      Array.prototype.forEach.call(rangeControl.children, function (button) {
+        button.className = button.textContent === ({ today: '今日', '7d': '近 7 天', '30d': '近 30 天', custom: '自定义' })[mode] ? 'active' : '';
+      });
+      advanced.classList.toggle('is-collapsed', mode !== 'custom');
+      if (mode !== 'custom') loadCharts();
+    }
+    if (rangeMode !== 'custom') {
+      var presetStart = new Date(), presetEnd = new Date();
+      presetStart.setDate(presetEnd.getDate() - (rangeMode === '30d' ? 29 : rangeMode === '7d' ? 6 : 0));
+      startInput.value = U.ymd(presetStart);
+      endInput.value = U.ymd(presetEnd);
+    }
+    var dateControls = h('div', { class: 'dashboard-range-panel' },
+      h('div', { class: 'dashboard-range-head' }, rangeControl,
+        h('button', { class: 'icon-btn dashboard-more-range', title: '更多时间设置', 'aria-label': '更多时间设置', html: U.ic('calendar', 18), onclick: function () {
+          if (rangeMode !== 'custom') {
+            rangeMode = 'custom';
+            Array.prototype.forEach.call(rangeControl.children, function (button) {
+              button.className = button.textContent === '自定义' ? 'active' : '';
+            });
+          }
+          advanced.classList.remove('is-collapsed');
+          advanced.setAttribute('aria-hidden', 'false');
+        } })),
+      advanced);
 
     page.appendChild(summaryHost);
     page.appendChild(platformHost);
@@ -183,6 +224,12 @@
         error_count: stats.today_error_count, errors: stats.today_errors, status_known: stats.today_status_known }).errors;
       var todaySuccess = global.UsageAnalysis.values({ total_requests: number(stats.today_requests), success_rate: stats.today_success_rate,
         success_requests: stats.today_success_requests, total_errors: todayErrors, status_known: stats.today_status_known }).successRate;
+      var successValue = todaySuccess != null ? todaySuccess : reliability.successRate;
+      var successLabel = todaySuccess != null ? '今日成功率' : '请求成功率';
+      var successDetail = todaySuccess != null
+        ? (todayErrors == null ? '今日出错未提供' : '今日出错 ' + U.num(todayErrors)) +
+          (reliability.successRate == null ? '' : ' · 累计 ' + percentText(reliability.successRate))
+        : '累计 ' + (reliability.errors == null ? '请求结果未提供' : '出错 ' + U.num(reliability.errors));
       var concurrencyText = totalConcurrency == null ? '—' : U.num(totalConcurrency) + ' 路';
       var requestDetail = ['累计 ' + U.num(number(stats.total_requests))];
       if (todaySuccess != null) requestDetail.push('今日成功率 ' + percentText(todaySuccess));
@@ -191,16 +238,39 @@
       if (reliability.errors != null) requestDetail.push('累计出错 ' + U.num(reliability.errors));
       summaryHost.innerHTML = '';
       var totalHit = reliability.cacheHitRate;
-      summaryHost.appendChild(h('div', { class: 'dashboard-grid' },
-        metric('账户余额', balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {})), '可用余额', 'card', function () { App.go('#/purchase'); }, 'dashboard-balance-value'),
-        metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); }),
-        metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
-        metric('今日费用', money(stats.today_actual_cost), ['今日标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost), '累计标准 ' + money(stats.total_cost)], 'card'),
-        metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'),
-        metric('累计 Tokens', token(stats.total_tokens), ['输入 ' + token(stats.total_input_tokens), '输出 ' + token(stats.total_output_tokens), '缓存 ' + token(totalCache)], 'chart'),
-        metric('今日缓存命中率', percentText(todayHit), ['累计命中率 ' + percentText(totalHit), '今日缓存读 ' + token(stats.today_cache_read_tokens), '累计缓存读 ' + token(stats.total_cache_read_tokens)], 'bolt'),
-        metric('实时性能', U.num(number(stats.rpm)) + ' RPM', [U.num(number(stats.tpm)) + ' TPM', '平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms'), '当前并发 ' + concurrencyText], 'clock')
-      ));
+      var balanceCard = h('button', {
+        class: 'card dashboard-metric dashboard-balance-block', type: 'button',
+        onclick: function () { App.go('#/purchase'); }
+      },
+        h('span', { class: 'dashboard-metric-label' }, h('i', { html: U.ic('card', 16) }), '账户余额'),
+        h('strong', { class: 'dashboard-balance-value' }, balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}))),
+        h('span', { class: 'dashboard-balance-hint' }, '可用余额 · 点击充值'));
+      summaryHost.appendChild(h('div', { class: 'dashboard-overview' },
+        h('section', { class: 'card dashboard-hero-card' },
+          h('div', { class: 'dashboard-hero-top' },
+            h('div', { class: 'dashboard-balance-wrap' }, h('div', { class: 'dashboard-eyebrow' }, '账户概览'), balanceCard),
+            h('div', { class: 'dashboard-hero-secondary' },
+              metric('今日费用', money(stats.today_actual_cost), ['今日标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost), '累计标准 ' + money(stats.total_cost)], 'card'),
+              metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'))),
+          h('div', { class: 'dashboard-live-strip' },
+            h('span', { class: 'dashboard-live-mark' }, h('i'), '实时'),
+            h('strong', null, U.num(number(stats.rpm)) + ' RPM'),
+            h('span', null, U.num(number(stats.tpm)) + ' TPM · 平均响应 ' +
+              (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms') + ' · 当前并发 ' + concurrencyText),
+            h('time', { class: 'dashboard-updated', datetime: new Date(refreshedAt).toISOString() }, '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
+        h('section', { class: 'card dashboard-quality' },
+          h('div', { class: 'dashboard-quality-head' },
+            h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与令牌状态')),
+            h('button', { class: 'dashboard-inline-action', onclick: function () { App.go('#/usage'); } }, '查看用量 ›')),
+          h('div', { class: 'dashboard-quality-grid' },
+            metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
+            successValue == null ? null : metric(successLabel, percentText(successValue), successDetail, 'shield'),
+            metric('今日缓存命中率', percentText(todayHit), '累计 ' + percentText(totalHit) + ' · 缓存读 ' + token(stats.total_cache_read_tokens), 'bolt'),
+            metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); })))));
+      summaryHost.appendChild(h('div', { class: 'dashboard-overview-actions' },
+        h('button', { class: 'btn', onclick: function () { App.go('#/keys'); } }, h('span', { html: U.ic('key', 16) }), '管理令牌'),
+        h('button', { class: 'btn', onclick: function () { App.go('#/usage'); } }, h('span', { html: U.ic('chart', 16) }), '用量明细'),
+        h('button', { class: 'btn', onclick: App.refreshPublic }, h('span', { html: U.ic('refresh', 16) }), '同步模型')));
     }
 
     function loadConcurrency() {
@@ -273,7 +343,7 @@
     function loadSummary(silent) {
       var version = ++summaryVersion;
       if (silent !== true || !lastSummary) loading(summaryHost);
-      Api.usageDashboard().then(function (stats) {
+      return Api.usageDashboard().then(function (stats) {
         if (!current() || version !== summaryVersion) return;
         stats = stats || {};
         lastSummary = stats;
@@ -297,13 +367,13 @@
         trendHost.appendChild(section('Token 使用趋势', null, null, h('div', { class: 'dashboard-empty' }, '所选时段暂无用量')));
         return;
       }
-      var series = [
+      var tokenSeries = [
         { key: 'input_tokens', label: '输入', color: '#3b82f6' },
         { key: 'output_tokens', label: '输出', color: '#10b981' },
         { key: 'cache_creation_tokens', label: '缓存写入', color: '#f59e0b' },
-        { key: 'cache_read_tokens', label: '缓存读取', color: '#06b6d4' },
-        { key: 'cache_hit_rate', label: '缓存命中率', color: '#8b5cf6', percent: true }
+        { key: 'cache_read_tokens', label: '缓存读取', color: '#06b6d4' }
       ];
+      var series = tokenSeries.concat([{ key: 'cache_hit_rate', label: '缓存命中率', color: '#8b5cf6', percent: true }]);
       var rows = trend;
       var max = 0;
       rows.forEach(function (row) {
@@ -340,14 +410,20 @@
         label.textContent = chartDate(row.date);
         chart.appendChild(label);
       });
-      series.forEach(function (item) {
+      tokenSeries.forEach(function (item) {
         var path = rows.map(function (row, index) {
           return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(item, row).toFixed(2);
         }).join(' ');
         chart.appendChild(svg('path', { d: path, fill: 'none', stroke: item.color, 'stroke-width': 2.5,
-          'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-dasharray': item.percent ? '5 5' : '',
+          'stroke-linejoin': 'round', 'stroke-linecap': 'round',
           class: 'dashboard-trend-line', 'data-series': item.key }));
       });
+      var hitPath = rows.map(function (row, index) {
+        return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(series[series.length - 1], row).toFixed(2);
+      }).join(' ');
+      chart.appendChild(svg('path', { d: hitPath, fill: 'none', stroke: '#8b5cf6', 'stroke-width': 1.8,
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'stroke-dasharray': '5 5',
+        class: 'dashboard-trend-line dashboard-trend-rate', 'data-series': 'cache_hit_rate' }));
       var indicator = svg('g', { 'pointer-events': 'none' });
       chart.appendChild(indicator);
       var detail = h('div', { class: 'dashboard-chart-detail', 'aria-live': 'polite' });
@@ -362,10 +438,12 @@
         ].map(function (item) { return h('span', null, item[0] + ' ', h('b', null, item[1])); })));
         while (indicator.firstChild) indicator.removeChild(indicator.firstChild);
         indicator.appendChild(svg('line', { x1: xAt(index), y1: top, x2: xAt(index), y2: bottom, class: 'dashboard-chart-indicator' }));
-        series.forEach(function (item) {
+        tokenSeries.forEach(function (item) {
           indicator.appendChild(svg('circle', { cx: xAt(index), cy: yAt(item, row), r: 3.5,
             fill: item.color, stroke: 'var(--surface)', 'stroke-width': 1.5 }));
         });
+        indicator.appendChild(svg('circle', { cx: xAt(index), cy: yAt(series[series.length - 1], row), r: 3,
+          fill: '#8b5cf6', stroke: 'var(--surface)', 'stroke-width': 1.5 }));
       }
       rows.forEach(function (row, index) {
         var start = index ? (xAt(index - 1) + xAt(index)) / 2 : left;
@@ -380,6 +458,8 @@
       });
       selectRow(rows[rows.length - 1], rows.length - 1);
       trendHost.appendChild(section('Token 使用趋势', null, null, h('div', { class: 'dashboard-chart' },
+        h('div', { class: 'dashboard-chart-head' }, h('strong', null, 'Token 用量'),
+          h('div', { class: 'dashboard-granularity-inline' }, granularityControl)),
         h('div', { class: 'dashboard-legend' }, series.map(function (item) {
           return h('span', null, h('i', { style: { background: item.color } }), item.label);
         })),
@@ -503,8 +583,15 @@
       if (balanceValue) balanceValue.textContent = balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
       else if (lastSummary) renderSummary(lastSummary);
     }
+    function manualUpdated() {
+      if (!current()) return;
+      refreshedAt = Date.now();
+      loadSummary(true);
+      loadCharts(true);
+    }
     global.addEventListener('pp:user-updated', userUpdated);
     global.addEventListener('pp:live-refreshed', liveUpdated);
+    global.addEventListener('pp:manual-refreshed', manualUpdated);
     page.addEventListener('pp:page-activate', function () {
       clearTimeout(refreshTimer);
       refreshVisible();
@@ -515,6 +602,7 @@
       clearTimeout(refreshTimer);
       global.removeEventListener('pp:user-updated', userUpdated);
       global.removeEventListener('pp:live-refreshed', liveUpdated);
+      global.removeEventListener('pp:manual-refreshed', manualUpdated);
     });
     loadSummary();
     loadCharts();

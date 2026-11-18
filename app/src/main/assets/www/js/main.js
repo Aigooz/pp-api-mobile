@@ -21,6 +21,7 @@
   var currentPath = '';
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
+  var refreshInFlight = null;
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
   var LIVE_REFRESH_MS = 60000;
   var BALANCE_REFRESH_MS = 10000;
@@ -102,14 +103,6 @@
     app.appendChild(fade);
     app.appendChild(tabbar);
 
-    var updateBtn = U.el('button', { class: 'icon-btn update-indicator', html: U.ic('refresh', 19), title: '查看软件更新', 'aria-label': '查看软件更新' });
-    function updateIndicator() {
-      var status = global.Updates && global.Updates.state.status;
-      updateBtn.style.display = ['available', 'downloading', 'ready'].indexOf(status) >= 0 ? 'inline-flex' : 'none';
-    }
-    updateBtn.addEventListener('click', function () { App.go('#/updates'); });
-    global.addEventListener('pp:updates-changed', updateIndicator);
-    updateIndicator();
     var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('moon', 22), title: '切换明暗', 'aria-label': '切换明暗', 'data-theme-toggle': 'true' });
     function paintThemeButton() {
       var dark = /(^|-)dark$/.test(document.documentElement.getAttribute('data-theme') || '');
@@ -119,15 +112,7 @@
     }
     themeBtn.addEventListener('click', function () { toggleLightDark(); paintThemeButton(); });
     global.addEventListener('pp:theme-changed', paintThemeButton);
-    var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 22), title: '刷新', 'aria-label': '刷新' });
-    refreshBtn.addEventListener('click', function () {
-      Api.clearCache();
-      U.toast('正在刷新…');
-      boot(true);
-    });
-    actionsEl.appendChild(updateBtn);
     actionsEl.appendChild(themeBtn);
-    actionsEl.appendChild(refreshBtn);
     paintThemeButton();
 
     if (global.requestAnimationFrame) requestAnimationFrame(syncSpace); else setTimeout(syncSpace, 16);
@@ -146,6 +131,7 @@
         document.body.classList.toggle('scrolled', scrolled);
       });
     }, { passive: true });
+
   }
 
   function activeTabIndex() {
@@ -477,6 +463,22 @@
         }
         return null;
       });
+    },
+    refreshCurrent: function () {
+      if (refreshInFlight) return refreshInFlight;
+      var path = currentPath;
+      var publicTask = loadPublic();
+      var userTask = Api.AUTH.isLogged() ? App.refreshUser() : Promise.resolve(null);
+      var activeTask = Promise.resolve();
+      if (path === '/home' || path === '/dashboard') activeTask = global.__ppLiveRefresh ? global.__ppLiveRefresh('manual') : Promise.resolve();
+      refreshInFlight = Promise.all([publicTask, userTask, activeTask]).catch(function () {
+        return null;
+      }).then(function () {
+        refreshInFlight = null;
+        global.dispatchEvent(new CustomEvent('pp:manual-refreshed', { detail: { at: Date.now(), path: path } }));
+        return true;
+      });
+      return refreshInFlight;
     }
   };
 

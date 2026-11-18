@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'Asia/Shanghai' });
@@ -97,6 +97,7 @@ try {
   await page.locator('input[type=password]').fill('password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('用量分析').waitFor();
+  await page.getByRole('button', { name: '更多时间设置' }).click();
   await page.getByLabel('开始日期', { exact: true }).fill('2028-02-28');
   await page.getByRole('button', { name: '选择开始日期' }).click();
   await page.getByRole('button', { name: '2028-02-29' }).click();
@@ -138,7 +139,8 @@ try {
   assert.equal(keyGets, beforeRefresh + 1);
 
   groupFail = true;
-  await first.getByRole('button', { name: '编辑' }).click();
+  await first.getByRole('button', { name: /更多操作 A 令牌/ }).click();
+  await first.getByRole('button', { name: '编辑令牌', exact: true }).click();
   await page.getByText('加载失败，点击重试').waitFor();
   groupFail = false;
   await page.getByRole('button', { name: '选择分组' }).click();

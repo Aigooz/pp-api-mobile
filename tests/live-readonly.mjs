@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const email = process.env.PP_TEST_EMAIL;
 const password = process.env.PP_TEST_PASSWORD;
 if (!email || !password) throw new Error('Set PP_TEST_EMAIL and PP_TEST_PASSWORD before running.');
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });

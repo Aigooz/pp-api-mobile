@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'Asia/Shanghai' });
@@ -79,6 +79,7 @@ try {
   await page.locator('input[type=password]').fill('password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('用量分析').waitFor();
+  await page.getByRole('button', { name: '更多时间设置' }).click();
   await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
   await page.getByLabel('结束日期', { exact: true }).fill('2026-01-01');
   await page.getByLabel('开始时间', { exact: true }).fill('10:15');
@@ -107,6 +108,7 @@ try {
   await page.getByText('输入 tokens').waitFor();
   assert.ok(lastTrend.get('start_date') && lastTrend.get('end_date'));
   assert.equal(lastTrend.has('period'), false);
+  await page.getByRole('button', { name: '自定义时间', exact: true }).click();
   await page.getByLabel('开始日期', { exact: true }).fill('2026-01-01');
   await page.getByLabel('结束日期', { exact: true }).fill('2026-01-01');
   await page.getByLabel('开始时间', { exact: true }).fill('10:15');
@@ -116,9 +118,10 @@ try {
   await page.getByText('inside-a', { exact: true }).first().waitFor();
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
-  assert.match(await page.locator('#view').innerText(), /100\.0%\s*成功率/);
-  assert.match(await page.locator('#view').innerText(), /10\.0%\s*缓存命中率/);
-  assert.match(await page.locator('#view').innerText(), /0\s*出错数/);
+  const usageView = await page.locator('#view').innerText();
+  assert.match(usageView, /成功率\s*100\.0%/);
+  assert.match(usageView, /缓存命中率\s*10\.0%/);
+  assert.match(usageView, /0 个异常/);
   const metrics = await page.evaluate(() => ({
     backend: UsageAnalysis.values({ total_requests: 10, total_errors: 2, status_known: 10,
       total_input_tokens: 80, total_cache_creation_tokens: 20, total_cache_read_tokens: 20 }),
@@ -135,11 +138,12 @@ try {
 
   ordersFail = true;
   await page.goto(base + '/#/purchase');
-  await page.getByText('充值金额（元）').waitFor();
   await page.getByText('订单加载失败').waitFor();
-  assert.equal(await page.getByRole('button', { name: '正在检查订单…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('tab', { name: '订单', exact: true }).getAttribute('aria-selected'), 'true');
   ordersFail = false;
   await page.getByRole('button', { name: '重试' }).click();
+  await page.getByRole('tab', { name: '商品', exact: true }).click();
+  await page.getByText('充值金额（元）').waitFor();
   await page.getByRole('button', { name: '确认订单' }).waitFor();
   await page.getByLabel('充值金额（元）').fill('10');
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-payment-form-390.png', animations: 'disabled' });
@@ -152,7 +156,9 @@ try {
   assert.deepEqual(createCalls[0], { amount: 10, payment_type: 'alipay', order_type: 'balance', is_mobile: true, payment_source: 'hosted_redirect', return_url: 'https://ipkey.vip/payment/result' });
   assert.equal(await page.locator('.payment-qr').count(), 1);
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-payment-order-390.png', animations: 'disabled' });
+  await page.getByRole('tab', { name: '商品', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '请先处理当前订单' }).isDisabled(), true);
+  await page.getByRole('tab', { name: '订单', exact: true }).click();
   await page.getByRole('button', { name: '打开支付页面' }).click();
   assert.match(await page.locator('.sheet').innerText(), /pay\.example\.test/);
   await page.getByRole('button', { name: '取消', exact: true }).click();
@@ -160,7 +166,8 @@ try {
   await page.getByRole('button', { name: '刷新支付状态' }).click();
   await page.locator('.payment-active').getByText('已完成', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.getByText('测试日卡', { exact: true }).click();
+  await page.getByRole('tab', { name: '商品', exact: true }).click();
+  await page.locator('.payment-plan-choice').click();
   await page.getByText('余额支付', { exact: true }).waitFor();
   await page.getByText('微信支付', { exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();
@@ -177,13 +184,14 @@ try {
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   order = null;
   createMode = 'fail';
+  await page.getByRole('tab', { name: '商品', exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();
   await page.getByRole('button', { name: '创建订单' }).click();
   await page.getByRole('button', { name: '已检查订单，继续下单' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '请先检查订单记录' }).isDisabled(), true);
   assert.equal(createCalls.length, 3);
   await page.getByRole('button', { name: '已检查订单，继续下单' }).click();
   await page.getByRole('button', { name: '已检查', exact: true }).click();
+  await page.getByRole('tab', { name: '商品', exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).waitFor();
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
