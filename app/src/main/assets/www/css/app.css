@@ -437,6 +437,10 @@ main::-webkit-scrollbar { width: 0; }
 }
 .input-group { display: flex; gap: 8px; }
 .input-group .input { flex: 1; }
+.remember-password { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 2px 8px; margin: 2px 2px 12px; color: var(--ink-2); font-size: 12.5px; }
+.remember-password input { grid-row: span 2; width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--teal); }
+.remember-password input:disabled { opacity: .55; }
+.remember-password small { color: var(--muted); font-size: 11px; }
 
 /* ---------- chips & badges ---------- */
 .chips { display: flex; gap: 7px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
@@ -980,6 +984,7 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .eye-btn.on { color: var(--teal); }
 .eye-btn svg { width: 19px; height: 19px; }
 .field-pw { position: relative; }
+.plaza-model-copy > svg { display: block; width: 17px; height: 17px; }
 
 /* ---------- chat toolbar / suggestions / message actions ---------- */
 .chat-toolbar {

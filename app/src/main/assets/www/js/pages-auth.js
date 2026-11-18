@@ -47,7 +47,16 @@
     var email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', autocomplete: 'username', inputmode: 'email', value: App.loginEmail || '' });
     App.loginEmail = '';
     var pass = h('input', { class: 'input', type: 'password', placeholder: '输入密码', autocomplete: 'current-password' });
+    var remembered = Api.AUTH.remembered(email.value.trim());
+    var remember = h('input', { type: 'checkbox', checked: remembered.enabled, disabled: !Api.AUTH.secureAvailable(), 'aria-label': '记住密码，失效后自动登录' });
+    if (remembered.enabled) pass.value = remembered.password;
     var btn = h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '6px', height: '48px' } }, '登录');
+
+    email.addEventListener('change', function () {
+      var saved = Api.AUTH.remembered(email.value.trim());
+      remember.checked = saved.enabled;
+      pass.value = saved.password;
+    });
 
     function completeLogin(result, message) {
       pass.value = '';
@@ -62,15 +71,17 @@
     }
 
     function submit() {
+      if (btn.disabled) return;
       if (!email.value.trim() || !pass.value) { U.toast('请填写邮箱和密码', 'err'); return; }
+      var credentials = { email: email.value.trim(), password: pass.value, remember: remember.checked };
       btn.disabled = true;
       btn.textContent = '登录中…';
-      Api.login(email.value.trim(), pass.value).then(function (result) {
+      Api.login(credentials.email, credentials.password, null, credentials.remember).then(function (result) {
         completeLogin(result, '登录成功');
       }).catch(function (e) {
         var msg = e.message || '登录失败';
         if (/2fa|two.factor|两步|验证码/i.test(msg)) {
-          open2fa();
+          open2fa(credentials);
         } else {
           U.toast(msg, 'err');
         }
@@ -80,9 +91,10 @@
       });
     }
 
-    function open2fa() {
+    function open2fa(credentials) {
       var code = h('input', { class: 'input', placeholder: '6 位动态验证码', inputmode: 'numeric' });
       var verifying = false;
+      var secondFactorPayload = { email: credentials.email, password: credentials.password, code: '', totp_code: '' };
       U.sheet({
         title: '两步验证',
         body: h('div', null, h('p', { class: 'small muted' }, '该账号开启了两步验证，请输入验证器中的 6 位验证码。'), code),
@@ -93,7 +105,9 @@
               if (verifying) return false;
               if (!code.value.trim()) { U.toast('请输入动态验证码', 'err'); return false; }
               verifying = true;
-              Api.login2fa({ email: email.value.trim(), password: pass.value, code: code.value.trim(), totp_code: code.value.trim() })
+              secondFactorPayload.code = code.value.trim();
+              secondFactorPayload.totp_code = code.value.trim();
+              Api.login2fa(secondFactorPayload, credentials.remember)
                 .then(function (result) { completeLogin(result, '登录成功'); })
                 .catch(function (e) { U.toast(e.message, 'err'); })
                 .then(function () { verifying = false; });
@@ -110,6 +124,11 @@
     var body = h('div', null,
       field('邮箱', email),
       pwField('密码', pass),
+      h('label', { class: 'remember-password' },
+        remember,
+        h('span', null, '记住密码，失效后自动登录'),
+        h('small', null, Api.AUTH.secureAvailable() ? '仅保存在此设备的安全存储中' : '当前环境不支持安全保存密码')
+      ),
       btn,
       h('div', { class: 'row between', style: { marginTop: '12px' } },
         h('a', { href: '#/forgot', class: 'small' }, '忘记密码？'),

@@ -98,6 +98,8 @@ try {
   const plaza = page.locator('.plaza-page');
   assert.equal(await plaza.locator('.plaza-group').count(), 2);
   assert.equal(await plaza.locator('.plaza-model-copy').count(), 2);
+  assert.equal(await plaza.locator('.plaza-model-copy svg').count(), 2);
+  assert.equal(await plaza.locator('.plaza-model-copy').first().textContent(), '');
   await page.evaluate(() => { window.copiedModel = ''; window.Native = { copy: text => { window.copiedModel = text; } }; });
   await plaza.getByRole('button', { name: '复制模型名称 demo-model' }).click();
   assert.equal(await page.evaluate(() => window.copiedModel), 'demo-model');

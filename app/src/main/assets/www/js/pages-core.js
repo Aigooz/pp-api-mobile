@@ -576,7 +576,7 @@
                   onclick: function (event) {
                     event.stopPropagation();
                     U.copy(m.name);
-                  } }, U.ic('copy', 17))),
+                  }, html: U.ic('copy', 17) })),
               m.mode === 'token' ? modelPricing(m) : perCallPricing(m)
             );
           })

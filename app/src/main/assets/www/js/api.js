@@ -127,6 +127,8 @@
   var persistQueue = Promise.resolve();
   var vault = { version: 1, activeId: '', accounts: [] };
   var authGeneration = 0;
+  var sessionRevision = 0;
+  var passwordRevision = -1;
   var lastPersistOk = null;
   try {
     if (global.Native && global.Native.secureMode) secureMode = global.Native.secureMode();
@@ -222,6 +224,7 @@
 
   function applySession(item, data) {
     if (!data) return;
+    sessionRevision++;
     if (data.access_token) item.token = String(data.access_token);
     if (data.refresh_token) item.refresh = String(data.refresh_token);
     if (data.expires_in != null) {
@@ -242,6 +245,12 @@
     accounts: function () {
       return vault.accounts.map(function (a) { return { id: a.id, email: a.email, active: a.id === vault.activeId, expired: !!a.expired || !a.token }; });
     },
+    remembered: function (email) {
+      var id = accountId(String(email || '').trim());
+      var item = id && account(id);
+      return item && item.rememberPassword && typeof item.savedPassword === 'string'
+        ? { enabled: true, password: item.savedPassword } : { enabled: false, password: '' };
+    },
     secureAvailable: function () { return secureMode === 'sync' || secureMode === 'async'; },
     storageWarning: function () {
       if (!AUTH.secureAvailable()) return '设备安全存储不可用，关闭应用后账号无法保留。';
@@ -249,7 +258,7 @@
       return '';
     },
     isLogged: function () { return !!AUTH.token(); },
-    commit: function (data, email) {
+    commit: function (data, email, credentials) {
       var user = data && data.user || null;
       var address = String(email || user && user.email || '').trim();
       var id = accountId(address, user);
@@ -264,6 +273,13 @@
       existing.refresh = '';
       existing.expiresAt = 0;
       applySession(existing, data);
+      if (AUTH.secureAvailable() && credentials && credentials.rememberPassword && credentials.password) {
+        existing.rememberPassword = true;
+        existing.savedPassword = String(credentials.password);
+      } else {
+        existing.rememberPassword = false;
+        delete existing.savedPassword;
+      }
       vault.activeId = id;
       authChanged('commit');
       return persistVault();
@@ -277,7 +293,7 @@
       if (JSON.stringify(current.user || null) === previous) return Promise.resolve(true);
       return persistVault();
     },
-    expire: function (id, reason) {
+    expire: function (id, reason, forgetPassword) {
       var item = account(id);
       if (!item) return Promise.resolve(false);
       item.token = '';
@@ -285,6 +301,10 @@
       item.expiresAt = 0;
       item.user = null;
       item.expired = true;
+      if (reason === 'logout' || forgetPassword) {
+        item.rememberPassword = false;
+        delete item.savedPassword;
+      }
       if (vault.activeId === id) { vault.activeId = ''; authChanged(reason || 'expired'); }
       return persistVault();
     },
@@ -300,6 +320,13 @@
       var wasActive = vault.activeId === id;
       vault.accounts = vault.accounts.filter(function (item) { return item.id !== id; });
       if (wasActive) { vault.activeId = ''; authChanged('remove'); }
+      return persistVault();
+    },
+    updateRememberedPassword: function (password, context) {
+      if (!contextMatches(context)) return Promise.reject(switchedError());
+      var item = activeAccount();
+      if (!item || !item.rememberPassword) return Promise.resolve(true);
+      item.savedPassword = String(password || '');
       return persistVault();
     },
     clear: function () { return AUTH.expire(vault.activeId); }
@@ -322,6 +349,49 @@
   ['token', 'refresh', 'user', 'expires_at'].forEach(function (key) { U.store.del(key); });
 
   var refreshing = {};
+  var passwordRelogins = {};
+  var recovering = {};
+  function reloginWithSavedPassword(context) {
+    if (!contextMatches(context)) return Promise.reject(switchedError());
+    var key = context.id + ':' + context.generation;
+    if (passwordRelogins[key]) return passwordRelogins[key];
+    var item = account(context.id);
+    if (!item || !item.rememberPassword || !item.savedPassword) {
+      return AUTH.expire(context.id).then(function () { throw expiredError(); });
+    }
+    var email = item.email;
+    var password = item.savedPassword;
+    passwordRelogins[key] = request('POST', API + '/auth/login', {
+      'Content-Type': 'application/json', 'Accept': 'application/json',
+      'Accept-Language': 'zh', 'X-User-UI-Request': '1'
+    }, JSON.stringify({ email: email, password: password })).then(function (res) {
+      if (!contextMatches(context)) throw switchedError();
+      if (res.status === 0) throw mkErr(0, 'NETWORK', '网络连接失败');
+      if (res.status === 429 || res.status >= 500) throw mkErr(res.status, 'SERVER', '服务暂不可用，请稍后再试');
+      var data = handle(res, parse(res));
+      if (!data || !data.access_token) {
+        return AUTH.expire(context.id).then(function () { throw expiredError(); });
+      }
+      // Renew the same account in place: do not reset pages or invalidate in-flight reads.
+      item.token = '';
+      item.refresh = '';
+      item.expiresAt = 0;
+      applySession(item, data);
+      passwordRevision = sessionRevision;
+      return persistVault().then(function () { return { password: true }; });
+    }).then(function (result) {
+      delete passwordRelogins[key];
+      return result;
+    }, function (error) {
+      delete passwordRelogins[key];
+      if (contextMatches(context) && (error.status === 400 || error.status === 401 || error.status === 403)) {
+        var badPassword = /invalid (email or password|credentials)|邮箱或密码错误/i.test(error.message || '');
+        return AUTH.expire(context.id, 'expired', badPassword).then(function () { throw expiredError(); });
+      }
+      throw error;
+    });
+    return passwordRelogins[key];
+  }
   function refreshToken(context) {
     if (!contextMatches(context)) return Promise.reject(switchedError());
     var key = context.id + ':' + context.generation;
@@ -347,6 +417,29 @@
       return persistVault().then(function () { return refreshed; });
     }).then(function (d) { delete refreshing[key]; return d; }, function (e) { delete refreshing[key]; throw e; });
     return refreshing[key];
+  }
+
+  function recoverSession(context, revision, passwordOnly) {
+    if (!contextMatches(context)) return Promise.reject(switchedError());
+    var key = context.id + ':' + context.generation;
+    if (recovering[key]) return recovering[key];
+    // A late 401 may belong to the token that another request already renewed.
+    if (revision !== sessionRevision) return Promise.resolve({ password: passwordRevision === sessionRevision });
+    var operation = passwordOnly ? reloginWithSavedPassword(context) : refreshToken(context).then(function () {
+      return { password: false };
+    }).catch(function (error) {
+      if (!contextMatches(context)) throw switchedError();
+      if (error.code !== 'UNAUTHORIZED') throw error;
+      return reloginWithSavedPassword(context);
+    });
+    recovering[key] = operation.then(function (value) {
+      delete recovering[key];
+      return value;
+    }, function (error) {
+      delete recovering[key];
+      throw error;
+    });
+    return recovering[key];
   }
 
   function parse(res) {
@@ -384,8 +477,11 @@
     }
     if (opts.headers) Object.assign(headers, opts.headers);
 
-    function attempt(isRetry) {
-      return request(method, url, headers, body).then(function (res) {
+    function attempt(retries, passwordAttempted) {
+      var revision = sessionRevision;
+      var attemptHeaders = Object.assign({}, headers);
+      if (retries) attemptHeaders.Authorization = 'Bearer ' + AUTH.token();
+      return request(method, url, attemptHeaders, body).then(function (res) {
         if (tracked && !contextMatches(context)) throw switchedError();
         var j = parse(res);
         if (res.status === 0) {
@@ -393,27 +489,20 @@
           try { var errHeaders = JSON.parse(res.headers || '{}'); if (errHeaders.error) message = errHeaders.error; } catch (e) {}
           throw mkErr(0, 'NETWORK', message);
         }
-        if (res.status === 401 && !isRetry && opts.auth !== false && context.id) {
-          if (!AUTH.refresh()) return AUTH.expire(context.id).then(function () { throw expiredError(); });
-          return refreshToken(context).then(function () {
+        if (res.status === 401 && opts.auth !== false && context.id) {
+          if (retries >= 2 || passwordAttempted) {
+            if (revision !== sessionRevision) throw expiredError();
+            return AUTH.expire(context.id).then(function () { throw expiredError(); });
+          }
+          return recoverSession(context, revision, retries > 0).then(function (recovery) {
             if (!contextMatches(context)) throw switchedError();
-            var h2 = Object.assign({}, headers, { 'Authorization': 'Bearer ' + AUTH.token() });
-            return request(method, url, h2, body).then(function (r2) {
-              if (!contextMatches(context)) throw switchedError();
-              if (r2.status === 401) return AUTH.expire(context.id).then(function () { throw expiredError(); });
-              if (r2.status === 0) throw mkErr(0, 'NETWORK', '网络连接失败');
-              return opts.daycard ? handleDaycard(r2, parse(r2)) : handle(r2, parse(r2));
-            });
-          }, function (error) {
-            if (!contextMatches(context)) throw switchedError();
-            if (error.code !== 'UNAUTHORIZED') throw error;
-            return AUTH.expire(context.id).then(function () { throw error; });
+            return attempt(retries + 1, recovery.password);
           });
         }
         return opts.daycard ? handleDaycard(res, j) : handle(res, j);
       });
     }
-    return attempt(false);
+    return attempt(0);
   }
 
   function handle(res, j) {
@@ -494,22 +583,23 @@
     },
     locale: function () { return api('/locale/default', { auth: false }).catch(function () { return { locale: 'zh' }; }); },
 
-    login: function (email, password, extra) {
+    login: function (email, password, extra, rememberPassword) {
       var body = Object.assign({ email: email, password: password }, extra || {});
       var context = authContext();
       return api('/auth/login', { method: 'POST', body: body, auth: false, trackAuth: false }).then(function (d) {
         if (!contextMatches(context)) throw switchedError();
-        return AUTH.commit(d, email).then(function (saved) { return { data: d, saved: saved }; });
+        return AUTH.commit(d, email, { rememberPassword: !!rememberPassword, password: password }).then(function (saved) { return { data: d, saved: saved }; });
       }).then(function (result) {
         clearCache();
         return result;
       });
     },
-    login2fa: function (payload) {
+    login2fa: function (payload, rememberPassword) {
       var context = authContext();
       return api('/auth/login/2fa', { method: 'POST', body: payload, auth: false, trackAuth: false }).then(function (d) {
         if (!contextMatches(context)) throw switchedError();
-        return AUTH.commit(d, payload.email).then(function (saved) { clearCache(); return { data: d, saved: saved }; });
+        return AUTH.commit(d, payload.email, { rememberPassword: !!rememberPassword, password: payload.password })
+          .then(function (saved) { clearCache(); return { data: d, saved: saved }; });
       });
     },
     register: function (payload) {
@@ -564,7 +654,10 @@
 
     profileUpdate: function (payload) { return api('/user', { method: 'PUT', body: payload }); },
     changePassword: function (oldP, newP) {
-      return api('/user/password', { method: 'PUT', body: { old_password: oldP, new_password: newP } });
+      var context = authContext();
+      return api('/user/password', { method: 'PUT', body: { old_password: oldP, new_password: newP } }).then(function (result) {
+        return AUTH.updateRememberedPassword(newP, context).then(function () { return result; });
+      });
     },
     aff: function () { return api('/user/aff'); },
     affTransfer: function () { return api('/user/aff/transfer', { method: 'POST' }); },
