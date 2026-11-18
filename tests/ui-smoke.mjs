@@ -71,7 +71,15 @@ await page.route('**/__proxy/**', async route => {
   }
   if (p === '/api/v1/user/platform-quotas') return route.fulfill(ok({ platform_quotas: [{ platform: 'openai', daily_limit_usd: 10, daily_usage_usd: 2 }] }));
   if (p === '/api/v1/usage') return route.fulfill(ok({ items: [{ model: 'demo-model', created_at: '2026-01-01T10:00:00Z', input_tokens: 20, output_tokens: 30, actual_cost: 0.4, total_cost: 0.8 }] }));
-  if (p === '/api/v1/subscriptions/active' || p === '/api/v1/announcements' || p === '/api/v1/redeem/history') return route.fulfill(ok([]));
+  if (p === '/api/v1/subscriptions/active' || p === '/api/v1/redeem/history') return route.fulfill(ok([]));
+  if (p === '/api/v1/announcements') return route.fulfill(ok([{
+    id: 7, title: '模型恢复完毕', created_at: '2026-11-18T10:00:00Z',
+    content: '<p style="font-size:15px;line-height:1.9;color:#e83e8c">各分组模型已<span style="font-weight:700">逐步恢复</span></p>' +
+      '<h3 style="border-left:3px solid #e83e8c;padding-left:10px">当前状态</h3>' +
+      '<p>补偿范围：<strong>11 月 17 日 12:00</strong></p>' +
+      '<script>window.badAnnouncementScript = true</script><img src="javascript:alert(1)" onerror="window.badAnnouncementImage=true">' +
+      '<a href="javascript:alert(1)">危险链接</a>'
+  }]));
   return route.fulfill(ok({}));
 });
 try {
@@ -89,6 +97,11 @@ try {
   assert.equal(await page.locator('.tab.active').getAttribute('data-tab'), 'plaza');
   const plaza = page.locator('.plaza-page');
   assert.equal(await plaza.locator('.plaza-group').count(), 2);
+  assert.equal(await plaza.locator('.plaza-model-copy').count(), 2);
+  await page.evaluate(() => { window.copiedModel = ''; window.Native = { copy: text => { window.copiedModel = text; } }; });
+  await plaza.getByRole('button', { name: '复制模型名称 demo-model' }).click();
+  assert.equal(await page.evaluate(() => window.copiedModel), 'demo-model');
+  assert.equal(await page.locator('.sheet').count(), 0);
   assert.match(await plaza.innerText(), /缓存读取/);
   assert.match(await plaza.innerText(), /\$0\.01/);
   assert.match(await plaza.innerText(), /\$0\.50/);
@@ -99,9 +112,26 @@ try {
   await plaza.locator('.plaza-filter').filter({ hasText: '倍率' }).getByRole('button', { name: '全部' }).click();
   await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('demo-model');
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
-  await plaza.getByRole('button', { name: /demo-model/ }).click();
+  await plaza.getByRole('button', { name: /渠道状态：未知 demo-model/ }).click();
   assert.match(await page.locator('.sheet').innerText(), /官方价/);
   await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('button', { name: '我的', exact: true }).click();
+  await page.getByRole('button', { name: '去登录' }).click();
+  await page.locator('input[type=email]').fill('test@example.test');
+  await page.locator('input[type=password]').fill('password');
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.waitForFunction(() => !!window.Api.AUTH.isLogged());
+  await page.goto(base + '/#/announcements/7');
+  const announcement = page.locator('.announcement-body');
+  await announcement.getByText('逐步恢复', { exact: true }).waitFor();
+  assert.equal(await announcement.locator('span').first().evaluate(node => getComputedStyle(node).fontWeight), '700');
+  assert.equal(await announcement.locator('p').first().evaluate(node => getComputedStyle(node).fontSize), '15px');
+  assert.equal(await announcement.locator('script').count(), 0);
+  assert.equal(await announcement.locator('img').count(), 0);
+  assert.equal(await announcement.locator('a').count(), 0);
+  assert.equal(await page.evaluate(() => window.badAnnouncementScript || window.badAnnouncementImage || false), false);
+  await page.goto(base + '/#/plaza');
+  await page.locator('.plaza-group').first().waitFor();
   await plaza.getByRole('button', { name: '渠道状态', exact: true }).click();
   await page.getByText('渠道状态加载失败').waitFor();
   failStatus = false;
@@ -134,7 +164,11 @@ try {
   await page.getByRole('button', { name: '模型广场' }).click();
   await page.locator('.plaza-group').first().waitFor();
   await page.getByRole('button', { name: '我的', exact: true }).click();
-  await page.getByRole('button', { name: '去登录' }).click();
+  if (await page.getByRole('button', { name: '去登录' }).count()) {
+    await page.getByRole('button', { name: '去登录' }).click();
+  } else {
+    await page.goto(base + '/#/login');
+  }
   await page.locator('input[type=email]').fill('test@example.test');
   await page.locator('input[type=password]').fill('fake-password');
   await page.getByRole('button', { name: '登录', exact: true }).click();

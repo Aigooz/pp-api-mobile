@@ -565,12 +565,18 @@
           ),
           item.models.map(function (m) {
             return h('div', { class: 'plaza-model' },
-              h('button', { class: 'plaza-model-heading', onclick: function () { showModelDetail(m); } },
-                h('span', { class: 'plaza-model-name' },
-                  h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
-                    title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
-                  h('span', { class: 'plaza-model-title' }, m.name)),
-                h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
+              h('div', { class: 'plaza-model-top' },
+                h('button', { class: 'plaza-model-heading', onclick: function () { showModelDetail(m); } },
+                  h('span', { class: 'plaza-model-name' },
+                    h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
+                      title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
+                    h('span', { class: 'plaza-model-title' }, m.name)),
+                  h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
+                h('button', { class: 'plaza-model-copy', type: 'button', title: '复制模型名称', 'aria-label': '复制模型名称 ' + m.name,
+                  onclick: function (event) {
+                    event.stopPropagation();
+                    U.copy(m.name);
+                  } }, U.ic('copy', 17))),
               m.mode === 'token' ? modelPricing(m) : perCallPricing(m)
             );
           })
@@ -615,7 +621,7 @@
         page.appendChild(h('div', { class: 'card pad' },
           h('h2', { style: { margin: '0 0 4px', fontSize: '18px' } }, pick(item, 'title', 'name') || '公告'),
           h('div', { class: 'tiny muted', style: { marginBottom: '12px' } }, U.date(pick(item, 'created_at', 'published_at'))),
-          h('div', { class: 'small', style: { whiteSpace: 'pre-wrap', lineHeight: '1.7' } }, String(pick(item, 'content', 'body', 'summary') || ''))
+          h('div', { class: 'announcement-body', html: U.cleanHtml(pick(item, 'content', 'body', 'summary') || '') })
         ));
         return;
       }

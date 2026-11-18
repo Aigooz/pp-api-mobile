@@ -35,6 +35,121 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // Announcements are authored as rich HTML by the site. Render that markup,
+  // but strip active content and restrict URLs so a compromised post cannot
+  // run script inside the WebView.
+  var SAFE_TAGS = {
+    A: 1, B: 1, BLOCKQUOTE: 1, BR: 1, CODE: 1, DEL: 1, DIV: 1, EM: 1,
+    H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1, HR: 1, I: 1, IMG: 1, LI: 1,
+    OL: 1, P: 1, PRE: 1, S: 1, SECTION: 1, SMALL: 1, SPAN: 1, STRONG: 1,
+    SUB: 1, SUP: 1, TABLE: 1, TBODY: 1, TD: 1, TH: 1, THEAD: 1, TR: 1, U: 1, UL: 1
+  };
+  var SAFE_STYLES = {
+    'background-color': 1, 'border-left': 1, 'border-radius': 1, color: 1,
+    'font-size': 1, 'font-style': 1, 'font-weight': 1, 'letter-spacing': 1,
+    'line-height': 1, margin: 1, 'margin-bottom': 1, 'margin-left': 1,
+    'margin-right': 1, 'margin-top': 1, 'padding-left': 1, 'text-align': 1,
+    'text-decoration': 1, 'white-space': 1
+  };
+  function safeStyle(raw) {
+    var out = [];
+    String(raw || '').split(';').forEach(function (part) {
+      var at = part.indexOf(':');
+      if (at < 0) return;
+      var name = part.slice(0, at).trim().toLowerCase();
+      var value = part.slice(at + 1).trim();
+      if (!SAFE_STYLES[name] || !value || /url\s*\(|expression\s*\(|javascript:|@import/i.test(value)) return;
+      // Only plain colours, lengths and keywords are needed by announcements.
+      if (!/^[#(),.%\-\w\s]+$/.test(value)) return;
+      out.push(name + ':' + value);
+    });
+    return out.join(';');
+  }
+  function safeUrl(raw, image) {
+    try {
+      var url = new URL(String(raw || ''), 'https://ipkey.vip/');
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+      if (image && url.protocol !== 'https:') return '';
+      return url.href;
+    } catch (e) { return ''; }
+  }
+  function cleanHtml(raw) {
+    var source = String(raw || '');
+    if (!source) return '';
+    if (!global.DOMParser) return esc(source).replace(/\n/g, '<br>');
+    var doc = new DOMParser().parseFromString('<div id="pp-safe-root">' + source + '</div>', 'text/html');
+    var root = doc.getElementById('pp-safe-root');
+    if (!root) return '';
+    function walk(node) {
+      Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+        if (child.nodeType === 3) return;
+        if (child.nodeType !== 1) { child.remove(); return; }
+        var tag = child.tagName;
+        if (!SAFE_TAGS[tag]) {
+          // Keep the readable contents of wrappers such as <font> or <article>.
+          Array.prototype.slice.call(child.childNodes).forEach(function (grand) { node.insertBefore(grand, child); });
+          child.remove();
+          walk(node);
+          return;
+        }
+        Array.prototype.slice.call(child.attributes).forEach(function (attr) {
+          var name = attr.name.toLowerCase();
+          if (name === 'style') {
+            var style = safeStyle(attr.value);
+            if (style) child.setAttribute('style', style); else child.removeAttribute('style');
+          } else if ((name === 'href' || name === 'src') && (tag === 'A' || tag === 'IMG')) {
+            var url = safeUrl(attr.value, tag === 'IMG');
+            if (url) child.setAttribute(name, url); else child.removeAttribute(name);
+          } else if (name === 'alt' || name === 'title' || name === 'width' || name === 'height') {
+            // These are display-only attributes; keep them without event handlers.
+          } else if (name === 'colspan' || name === 'rowspan') {
+            // Table layout attributes are safe.
+          } else {
+            child.removeAttribute(attr.name);
+          }
+        });
+        if (tag === 'IMG' && !child.getAttribute('src')) {
+          child.remove();
+          return;
+        }
+        if (tag === 'A' && !child.getAttribute('href')) {
+          Array.prototype.slice.call(child.childNodes).forEach(function (grand) { node.insertBefore(grand, child); });
+          child.remove();
+          return;
+        }
+        if (tag === 'A' && child.getAttribute('href')) {
+          child.setAttribute('target', '_blank');
+          child.setAttribute('rel', 'noopener noreferrer');
+        }
+        if (tag === 'IMG') {
+          child.setAttribute('loading', 'lazy');
+          child.setAttribute('referrerpolicy', 'no-referrer');
+        }
+        walk(child);
+      });
+    }
+    walk(root);
+    // The site editor often uses full-width spaces as bullet indentation. On a
+    // phone that reads as ragged lines, so turn lists into real list markup.
+    Array.prototype.slice.call(root.querySelectorAll('p')).forEach(function (paragraph) {
+      var html = paragraph.innerHTML;
+      if (html.indexOf('·') < 0 || html.indexOf('<br>') < 0 || html.indexOf('　　　　') < 0) return;
+      var list = doc.createElement('div');
+      list.className = 'announcement-list';
+      html.split(/<br\s*\/?>/i).forEach(function (line) {
+        var item = doc.createElement('div');
+        var text = line.trim().replace(/^(?:&nbsp;|\s|　)+/, '');
+        if (!text) return;
+        text = text.replace(/^<span[^>]*>\s*·\s*<\/span>\s*/i, '');
+        if (text.charAt(0) === '·') text = text.slice(1).replace(/^(?:&nbsp;|\s|　)+/, '');
+        item.innerHTML = text;
+        list.appendChild(item);
+      });
+      paragraph.parentNode.replaceChild(list, paragraph);
+    });
+    return root.innerHTML;
+  }
+
   // ---------- format ----------
   function num(v, digits) {
     var n = Number(v);
@@ -388,7 +503,7 @@
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
   global.U = {
-    el: el, $: $, esc: esc, ic: ic, toast: toast, sheet: sheet, confirm: confirm, picker: picker, dateTimeField: dateTimeField,
+    el: el, $: $, esc: esc, cleanHtml: cleanHtml, ic: ic, toast: toast, sheet: sheet, confirm: confirm, picker: picker, dateTimeField: dateTimeField,
     closeOverlay: closeOverlay, copy: copy, haptic: haptic, sleep: sleep,
     num: num, credits: credits, usd: usd, tokens: tokens, price: price, date: date, datetime: datetime,
     ago: ago, maskKey: maskKey, ymd: ymd, pad: pad, store: store
