@@ -87,6 +87,7 @@
       messages: [],
       model: model || '',
       keyId: keyId || 0,
+      pinned: false,
       settings: { systemPrompt: '', temperature: null, maxTokens: null },
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -118,6 +119,7 @@
     }
     st.sessions = st.sessions.filter(function (s) { return s && Array.isArray(s.messages); });
     st.sessions.forEach(function (s) {
+      if (s.pinned === undefined) s.pinned = false;
       s.settings = s.settings || { systemPrompt: '', temperature: null, maxTokens: null };
       s.settings.systemPrompt = s.settings.systemPrompt || '';
       if (s.settings.temperature === undefined) s.settings.temperature = null;
@@ -176,7 +178,9 @@
 
     function save() {
       session.updatedAt = Date.now();
-      state.sessions.sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      state.sessions.sort(function (a, b) {
+        return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
       state.sessions = state.sessions.slice(0, MAX_SESSIONS);
       U.store.set(storeKey, state);
     }
@@ -221,6 +225,15 @@
       }
       if (session.settings.systemPrompt) {
         info.appendChild(h('span', { class: 'badge teal' }, '系统提示词'));
+      }
+      var usage = estimate();
+      if (usage.limit && !usage.image) {
+        var ratio = Math.min(100, usage.total / usage.limit * 100);
+        info.appendChild(h('span', {
+          class: 'context-meter' + (ratio >= 90 ? ' danger' : ratio >= 70 ? ' warn' : ''),
+          title: '上下文估算 ' + U.num(usage.total) + ' / ' + U.num(usage.limit),
+          'aria-label': '上下文使用 ' + ratio.toFixed(0) + '%'
+        }, h('i', { style: { width: ratio + '%' } })));
       }
       paintEstimate();
     }
@@ -366,6 +379,45 @@
       row.appendChild(body);
       return row;
     }
+    function editMessage(index) {
+      if (streaming) return;
+      var msg = session.messages[index];
+      if (!msg || msg.role !== 'user') return;
+      var draft = h('textarea', { class: 'textarea chat-edit-input', rows: '5', 'aria-label': '编辑消息' });
+      draft.value = msg.content;
+      U.sheet({
+        title: '编辑并重新发送',
+        body: h('div', null, draft, h('p', { class: 'tiny muted' }, '这条消息之后的内容会被移除，并从编辑后的内容继续对话。')),
+        actions: [
+          { label: '取消' },
+          { label: '重新发送', kind: 'primary', onClick: function () {
+            var text = draft.value.trim();
+            if (!text) { U.toast('消息不能为空', 'err'); return false; }
+            session.messages = session.messages.slice(0, index + 1);
+            session.messages[index].content = text;
+            session.messages[index].error = '';
+            persistAndPaint();
+            runCompletion();
+            return true;
+          } }
+        ]
+      });
+    }
+    function branchFrom(index) {
+      var source = session.messages.slice(0, index + 1);
+      if (!source.length) return;
+      var copy = makeSession(session.model, session.keyId);
+      copy.messages = JSON.parse(JSON.stringify(source));
+      copy.title = titleOf(copy.messages);
+      copy.settings = JSON.parse(JSON.stringify(session.settings));
+      copy.createdAt = Date.now();
+      copy.updatedAt = Date.now();
+      state.sessions.unshift(copy);
+      state.activeId = copy.id;
+      save();
+      U.toast('已创建分支对话', 'ok');
+      App.go('#/chat', true);
+    }
 
     function paint() {
       msgsHost.innerHTML = '';
@@ -393,6 +445,12 @@
         if (!m.pending && (m.content || (m.role !== 'user' && last && !streaming))) {
           var actions = [];
           if (m.content) actions.push(h('button', { 'aria-label': '复制消息', title: '复制消息', html: U.ic('copy', 15), onclick: function () { U.copy(m.content); } }));
+          if (m.role === 'user' && !streaming) {
+            actions.push(h('button', { 'aria-label': '编辑并重新发送', title: '编辑并重新发送', html: U.ic('edit', 15), onclick: function () { editMessage(i); } }));
+          }
+          if (m.content && !m.pending && !streaming) {
+            actions.push(h('button', { 'aria-label': '从这里创建分支', title: '从这里创建分支', html: U.ic('branch', 15), onclick: function () { branchFrom(i); } }));
+          }
           if (m.role !== 'user' && last && !streaming && m.error) {
             actions.push(h('button', { onclick: regenerate }, '重试'));
             actions.push(h('button', { onclick: regenerateStreaming }, '非流式重试'));
@@ -871,7 +929,9 @@
 
     // ---------- history ----------
     function openHistory() {
-      var list = state.sessions.slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      var list = state.sessions.slice().sort(function (a, b) {
+        return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
       var host = h('div', null);
       host.appendChild(h('button', {
         class: 'btn btn-primary btn-block', style: { marginBottom: '12px' },
@@ -888,10 +948,28 @@
       if (!list.length) {
         host.appendChild(emptyState('还没有历史对话', '发起第一轮对话后会出现在这里', 'chat'));
       }
-      list.forEach(function (s) {
+      var search = h('input', { class: 'input chat-history-search', type: 'search', placeholder: '搜索历史对话', 'aria-label': '搜索历史对话' });
+      var rows = h('div', { class: 'chat-history-list' });
+      host.appendChild(search);
+      host.appendChild(rows);
+      function paintList() {
+        var query = search.value.trim().toLowerCase();
+        rows.innerHTML = '';
+        var visible = list.filter(function (s) {
+          if (!query) return true;
+          return String(s.title || '新对话').toLowerCase().indexOf(query) >= 0 ||
+            (s.messages || []).some(function (message) { return String(message.content || '').toLowerCase().indexOf(query) >= 0; });
+        });
+        if (!visible.length) {
+          rows.appendChild(emptyState(query ? '没有找到相关对话' : '还没有历史对话', query ? '换个关键词试试' : '发起第一轮对话后会出现在这里', 'chat'));
+          return;
+        }
+        visible.forEach(function (s) { rows.appendChild(historyRow(s)); });
+      }
+      function historyRow(s) {
         var active = s.id === session.id;
         var item = h('div', {
-          class: 'list-item',
+          class: 'list-item' + (s.pinned ? ' pinned' : ''),
           onclick: function () {
             state.activeId = s.id;
             save();
@@ -901,10 +979,46 @@
         },
           h('span', { class: 'li-icon', html: U.ic(active ? 'chat' : 'doc', 16) }),
           h('div', { class: 'li-body' },
-            h('div', { class: 'li-title nowrap' }, s.title || '新对话'),
+            h('div', { class: 'li-title nowrap' }, (s.pinned ? '置顶 · ' : '') + (s.title || '新对话')),
             h('div', { class: 'li-sub' }, s.messages.length + ' 条 · ' + U.ago(s.updatedAt))),
           active ? h('span', { class: 'badge teal' }, '当前') : null
         );
+        var pin = h('button', {
+          class: 'icon-btn', style: { width: '32px', height: '32px' }, title: s.pinned ? '取消置顶' : '置顶对话',
+          'aria-label': (s.pinned ? '取消置顶 ' : '置顶 ') + (s.title || '新对话'),
+          html: U.ic('pin', 16),
+          onclick: function (event) {
+            event.stopPropagation();
+            s.pinned = !s.pinned;
+            list.sort(function (a, b) {
+              return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+            });
+            save();
+            paintList();
+          }
+        });
+        var rename = h('button', {
+          class: 'icon-btn', style: { width: '32px', height: '32px' }, title: '重命名对话',
+          'aria-label': '重命名 ' + (s.title || '新对话'), html: U.ic('edit', 16),
+          onclick: function (event) {
+            event.stopPropagation();
+            var field = h('input', { class: 'input', value: s.title || '新对话', maxlength: '60', 'aria-label': '对话名称' });
+            U.sheet({ title: '重命名对话', body: field, actions: [{ label: '取消' }, {
+              label: '保存', kind: 'primary', onClick: function () {
+                var value = field.value.trim();
+                if (!value) { U.toast('名称不能为空', 'err'); return false; }
+                s.title = value;
+                s.updatedAt = Date.now();
+                save();
+                list.sort(function (a, b) {
+                  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+                });
+                paintList();
+                return true;
+              }
+            }] });
+          }
+        });
         var del = h('button', {
           class: 'icon-btn', style: { width: '32px', height: '32px' },
           html: U.ic('trash', 16),
@@ -916,13 +1030,15 @@
               if (state.activeId === s.id) state.activeId = (state.sessions[0] || {}).id || '';
               save();
               U.closeOverlay();
-              App.go('#/chat');
+              App.go('#/chat', true);
             });
           }
         });
-        item.appendChild(h('div', { class: 'li-tail' }, del));
-        host.appendChild(item);
-      });
+        item.appendChild(h('div', { class: 'li-tail' }, pin, rename, del));
+        return item;
+      }
+      search.addEventListener('input', paintList);
+      paintList();
 
       U.sheet({ title: '历史对话', body: host });
     }

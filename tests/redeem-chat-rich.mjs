@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium, webkit } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 const reply = [
@@ -105,6 +105,8 @@ try {
       await page.waitForFunction(() => document.querySelector('.token-estimate-btn'));
       let values = await tokenRows(page);
       assert.equal(values['上下文消息数'], '0');
+      // /v1/models and the plaza catalog both advertise this model; the richer live
+      // value wins while the catalog remains the fallback for uncatalogued models.
       assert.equal(values['模型限制'], '16,384');
       await page.getByRole('button', { name: '对话设置' }).click();
       await page.locator('.sheet textarea').fill('system prompt');

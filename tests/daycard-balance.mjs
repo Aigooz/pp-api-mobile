@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -58,7 +58,8 @@ await page.route('**/__proxy/**', async route => {
 async function purchasePage() {
   await page.goto(base + '/#/me');
   await page.goto(base + '/#/purchase');
-  await page.getByText('日卡', { exact: true }).click();
+  await page.getByRole('tab', { name: '商品', exact: true }).waitFor();
+  await page.locator('.payment-plan-choice').filter({ hasText: '日卡' }).first().click();
   await page.getByText('余额支付', { exact: true }).waitFor();
 }
 async function chooseBalance() {
@@ -81,12 +82,12 @@ try {
   await chooseBalance();
   assert.equal(await page.getByRole('button', { name: '账户余额不足' }).isDisabled(), true);
   assert.match(await page.locator('.payment-balance-note').innerText(), /账户余额 ¥2\.00/);
-  await page.getByText('渠道直充', { exact: true }).click();
+  await page.locator('.payment-plan-choice').filter({ hasText: '渠道直充' }).click();
   assert.equal(await page.getByText('余额支付', { exact: true }).count(), 0);
   assert.equal(await page.getByText('支付宝', { exact: true }).count(), 1);
   // A plan whose group the site does not really sell must not offer balance payment,
   // even though the endpoint echoes the 日卡 plan back for any group id.
-  await page.getByText('Claude 周卡', { exact: true }).click();
+  await page.locator('.payment-plan-choice').filter({ hasText: 'Claude 周卡' }).click();
   await page.getByText('余额支付', { exact: true }).waitFor();
   assert.match(await page.locator('.payment-balance-note').innerText(), /订阅价格 ¥18\.88/);
 
@@ -101,7 +102,7 @@ try {
   infoError = true;
   await page.goto(base + '/#/me');
   await page.goto(base + '/#/purchase');
-  await page.getByText('日卡', { exact: true }).click();
+  await page.locator('.payment-plan-choice').filter({ hasText: '日卡' }).first().click();
   await page.getByText(/日卡服务故障/).waitFor();
   assert.equal(await page.getByText('余额支付', { exact: true }).count(), 0);
   infoError = false;

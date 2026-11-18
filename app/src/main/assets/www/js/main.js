@@ -17,11 +17,15 @@
   };
 
     var view, appbar, titleEl, subEl, actionsEl, tabbar, glassSurface;
+  var announcementBtn, accountBtn, themeBtn;
   var tabIndicator, tabButtons = [], tabDrag = null;
   var currentPath = '';
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
+  var refreshInFlight = null;
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
+  var AUTH_ROUTES = ['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/accounts', '/profile',
+    '/redeem', '/purchase', '/orders', '/subscriptions', '/affiliate'];
   var LIVE_REFRESH_MS = 60000;
   var BALANCE_REFRESH_MS = 10000;
   var liveTimer = null, balanceTimer = null, livePending = false, balancePending = false, liveLastAt = 0;
@@ -50,8 +54,11 @@
     '/usage': { title: '用量明细', tab: 'me', render: function () { return global.PagesUser.renderUsage(); } },
     '/me': { title: '我的', tab: 'me', render: function () { return global.PagesUser.renderMe(); } },
     '/accounts': { title: '账号管理', tab: 'me', render: function () { return global.PagesUser.renderAccounts(); } },
+    '/profile': { title: '个人资料', tab: 'me', render: function () { return global.PagesUser.renderProfile(); } },
     '/redeem': { title: '兑换码', tab: 'me', render: function () { return global.PagesUser.renderRedeem(); } },
     '/purchase': { title: '充值中心', tab: 'me', render: function () { return global.PagesPayment.renderPurchase(); } },
+    '/orders': { title: '我的订单', tab: 'me', render: function () { return global.PagesPayment.renderPurchase('orders'); } },
+    '/subscriptions': { title: '我的订阅', tab: 'me', render: function () { return global.PagesPayment.renderPurchase('subscriptions'); } },
     '/affiliate': { title: '邀请返利', tab: 'me', render: function () { return global.PagesUser.renderAffiliate(); } },
     '/about': { title: '关于', tab: 'me', render: function () { return C.renderAbout(); } },
     '/updates': { title: '软件更新', tab: 'me', render: function () { return global.Updates.render(); } },
@@ -78,7 +85,7 @@
     actionsEl = U.el('div', { class: 'appbar-actions' });
     var backBtn = U.el('button', { class: 'icon-btn', html: U.ic('back', 20), style: { marginLeft: '-6px' } });
     backBtn.addEventListener('click', function () { history.back(); });
-    var leading = U.el('div', { class: 'row appbar-leading', style: { gap: '8px' } }, U.el('span', { html: mark }), titleEl);
+    var leading = U.el('div', { class: 'row appbar-leading', style: { gap: '8px' } }, U.el('span', { class: 'brand-orb', html: mark }), titleEl);
     appbar = U.el('header', { class: 'appbar' },
       leading,
       actionsEl
@@ -102,15 +109,28 @@
     app.appendChild(fade);
     app.appendChild(tabbar);
 
-    var updateBtn = U.el('button', { class: 'icon-btn update-indicator', html: U.ic('refresh', 19), title: '查看软件更新', 'aria-label': '查看软件更新' });
-    function updateIndicator() {
-      var status = global.Updates && global.Updates.state.status;
-      updateBtn.style.display = ['available', 'downloading', 'ready'].indexOf(status) >= 0 ? 'inline-flex' : 'none';
+    announcementBtn = U.el('button', {
+      class: 'icon-btn appbar-announcement', html: U.ic('bell', 22),
+      title: '平台公告', 'aria-label': '平台公告', 'data-announcement-entry': 'true'
+    });
+    announcementBtn.addEventListener('click', function () { App.go('#/announcements'); });
+    accountBtn = U.el('button', {
+      class: 'icon-btn appbar-account', html: U.ic('user', 22),
+      title: '账号管理', 'aria-label': '账号管理', 'data-account-entry': 'true'
+    });
+    function paintAccountButton() {
+      var logged = Api.AUTH.isLogged();
+      accountBtn.classList.toggle('is-authenticated', logged);
+      accountBtn.title = logged ? '账号与切换' : '登录账号';
+      accountBtn.setAttribute('aria-label', accountBtn.title);
     }
-    updateBtn.addEventListener('click', function () { App.go('#/updates'); });
-    global.addEventListener('pp:updates-changed', updateIndicator);
-    updateIndicator();
-    var themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('moon', 22), title: '切换明暗', 'aria-label': '切换明暗', 'data-theme-toggle': 'true' });
+    accountBtn.addEventListener('click', function () {
+      App.go(Api.AUTH.isLogged() ? '#/accounts' : '#/login');
+    });
+    global.addEventListener('pp:auth-changed', paintAccountButton);
+    global.addEventListener('pp:user-updated', paintAccountButton);
+
+    themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('moon', 22), title: '切换明暗', 'aria-label': '切换明暗', 'data-theme-toggle': 'true' });
     function paintThemeButton() {
       var dark = /(^|-)dark$/.test(document.documentElement.getAttribute('data-theme') || '');
       themeBtn.innerHTML = U.ic(dark ? 'sun' : 'moon', 22);
@@ -119,15 +139,10 @@
     }
     themeBtn.addEventListener('click', function () { toggleLightDark(); paintThemeButton(); });
     global.addEventListener('pp:theme-changed', paintThemeButton);
-    var refreshBtn = U.el('button', { class: 'icon-btn', html: U.ic('refresh', 22), title: '刷新', 'aria-label': '刷新' });
-    refreshBtn.addEventListener('click', function () {
-      Api.clearCache();
-      U.toast('正在刷新…');
-      boot(true);
-    });
-    actionsEl.appendChild(updateBtn);
+    actionsEl.appendChild(announcementBtn);
+    actionsEl.appendChild(accountBtn);
     actionsEl.appendChild(themeBtn);
-    actionsEl.appendChild(refreshBtn);
+    paintAccountButton();
     paintThemeButton();
 
     if (global.requestAnimationFrame) requestAnimationFrame(syncSpace); else setTimeout(syncSpace, 16);
@@ -146,6 +161,7 @@
         document.body.classList.toggle('scrolled', scrolled);
       });
     }, { passive: true });
+
   }
 
   function activeTabIndex() {
@@ -352,6 +368,13 @@
     return entry;
   }
 
+  function syncTabForRoute(def) {
+    Array.prototype.forEach.call(tabbar.children, function (button) {
+      button.classList.toggle('active', button.getAttribute('data-tab') === def.tab);
+    });
+    syncTabIndicator();
+  }
+
   function preloadPages() {
     var generation = ++preloadGeneration;
     var paths = Api.AUTH.isLogged() ? ['/plaza', '/keys', '/chat', '/me', '/home', '/channel-status'] : ['/plaza', '/channel-status'];
@@ -375,8 +398,26 @@
     var def = ROUTES[r.path];
     if (!def) { def = ROUTES['/home']; r.path = '/home'; }
 
-    if (!force && activePage && activePage.path === r.path && activePage.param === r.param) return;
-    if (activePage) {
+    if (!force && activePage && activePage.path === r.path && activePage.param === r.param && currentPath === r.path) {
+      pageEvent(activePage, 'activate');
+      return;
+    }
+    var paymentRoute = activePage &&
+      (r.path === '/purchase' || r.path === '/orders' || r.path === '/subscriptions') &&
+      (activePage.path === '/purchase' || activePage.path === '/orders' || activePage.path === '/subscriptions');
+    if (paymentRoute) {
+      activePage.path = r.path;
+      activePage.param = r.param;
+      titleEl.textContent = def.title;
+      syncTabForRoute(def);
+      pageCache[r.path] = activePage;
+      ['/purchase', '/orders', '/subscriptions'].forEach(function (path) {
+        if (path !== r.path && pageCache[path] === activePage) delete pageCache[path];
+      });
+      pageEvent(activePage, 'deactivate');
+      pageEvent(activePage, 'activate');
+    }
+    if (activePage && !paymentRoute) {
       activePage.scroll = view.scrollTop;
       pageEvent(activePage, 'deactivate');
       if (cachedRoutes[activePage.path] && !force) activePage.slot.remove();
@@ -390,6 +431,19 @@
     }
     currentPath = r.path;
 
+    if (announcementBtn) {
+      var onAnnouncements = r.path === '/announcements';
+      announcementBtn.classList.toggle('route-active', onAnnouncements);
+      if (onAnnouncements) announcementBtn.setAttribute('aria-current', 'page');
+      else announcementBtn.removeAttribute('aria-current');
+    }
+    if (accountBtn) {
+      var onAccount = ['/accounts', '/profile', '/login', '/register', '/forgot'].indexOf(r.path) >= 0;
+      accountBtn.classList.toggle('route-active', onAccount);
+      if (onAccount) accountBtn.setAttribute('aria-current', 'page');
+      else accountBtn.removeAttribute('aria-current');
+    }
+
     titleEl.textContent = r.path === '/home' && S.user ? '仪表盘' : def.title;
     subEl.textContent = r.path === '/home' && !S.user ? 'AI API Gateway · 统一模型接入' : '';
     titleEl.appendChild(subEl);
@@ -397,16 +451,16 @@
     if (def.hideTab) tabbar.style.display = 'none';
     else tabbar.style.display = 'flex';
     if (def.full) document.body.classList.add('chat-mode');
-
-    Array.prototype.forEach.call(tabbar.children, function (b) {
-      b.classList.toggle('active', b.getAttribute('data-tab') === def.tab);
-    });
-    syncTabIndicator();
+    syncTabForRoute(def);
 
     var entry = pageCache[r.path] || makePage(r.path, r.param);
     entry.param = r.param;
     activePage = entry;
-    view.appendChild(entry.slot);
+    if (!entry.slot.isConnected) view.appendChild(entry.slot);
+    entry.slot.classList.remove('route-enter');
+    void entry.slot.offsetWidth;
+    entry.slot.classList.add('route-enter');
+    setTimeout(function () { entry.slot.classList.remove('route-enter'); }, 240);
     view.scrollTop = entry.scroll || 0;
     var routeScrolled = view.scrollTop > 4;
     appbar.classList.toggle('scrolled', routeScrolled);
@@ -473,10 +527,26 @@
             (Api.AUTH.matches(context) || !Api.AUTH.currentId())) {
           S.user = null;
           S.keys = [];
-          if (['/home', '/dashboard', '/keys', '/usage', '/me', '/redeem', '/purchase', '/affiliate'].indexOf(currentPath) >= 0) renderRoute(true);
+          if (AUTH_ROUTES.indexOf(currentPath) >= 0) renderRoute(true);
         }
         return null;
       });
+    },
+    refreshCurrent: function () {
+      if (refreshInFlight) return refreshInFlight;
+      var path = currentPath;
+      var publicTask = loadPublic();
+      var userTask = Api.AUTH.isLogged() ? App.refreshUser() : Promise.resolve(null);
+      var activeTask = Promise.resolve();
+      if (path === '/home' || path === '/dashboard') activeTask = global.__ppLiveRefresh ? global.__ppLiveRefresh('manual') : Promise.resolve();
+      refreshInFlight = Promise.all([publicTask, userTask, activeTask]).catch(function () {
+        return null;
+      }).then(function () {
+        refreshInFlight = null;
+        global.dispatchEvent(new CustomEvent('pp:manual-refreshed', { detail: { at: Date.now(), path: path } }));
+        return true;
+      });
+      return refreshInFlight;
     }
   };
 
@@ -486,7 +556,7 @@
     if (event.detail.reason !== 'expired') return;
     App.refreshPublic();
     U.toast('登录已过期，请重新登录', 'err');
-    if (['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/redeem', '/purchase', '/affiliate'].indexOf(currentPath) >= 0) {
+    if (AUTH_ROUTES.indexOf(currentPath) >= 0) {
       App.go('#/accounts', true);
     }
   });

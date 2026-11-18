@@ -10,3 +10,6 @@ ios/dist/
 *.p12
 *.p8
 *.mobileprovision
+.artifacts-*/
+_shot.mjs
+shot-*.png

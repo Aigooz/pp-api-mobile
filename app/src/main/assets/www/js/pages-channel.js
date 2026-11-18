@@ -18,7 +18,9 @@
 
   function percentage(value) {
     var n = numeric(value);
-    return n === null ? '—' : n.toFixed(1) + '%';
+    if (n === null) return '—';
+    if (n > 0 && n <= 1) n *= 100;
+    return n.toFixed(1) + '%';
   }
 
   function statusInfo(status, availability) {
@@ -27,6 +29,7 @@
     if (status === 'degraded') return { kind: 'warning', label: '偏慢' };
     if (status !== 'operational') return { kind: 'unknown', label: '未知' };
     var value = numeric(availability);
+    if (value !== null && value > 0 && value <= 1) value *= 100;
     return value !== null && value < 95 ? { kind: 'warning', label: '波动' } : { kind: 'ok', label: '正常' };
   }
 

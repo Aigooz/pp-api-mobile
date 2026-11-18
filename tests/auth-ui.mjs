@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 const email = 'saved@example.test';
@@ -87,8 +87,8 @@ async function run(engine, name) {
         for (const copy of await page.locator('.plaza-model-copy').all()) {
           assert.equal(await copy.textContent(), '');
           const bounds = await copy.boundingBox();
-          assert.equal(Math.round(bounds.width), 28);
-          assert.equal(Math.round(bounds.height), 28);
+          assert.equal(Math.round(bounds.width), 32);
+          assert.equal(Math.round(bounds.height), 32);
         }
         assert.equal(await page.locator('#view').evaluate(node => node.scrollWidth <= node.clientWidth), true);
         if (screenshotDir && width === 390) await page.screenshot({ path: `${screenshotDir}/${name}-plaza-${theme}.png` });

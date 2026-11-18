@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { createPreviewServer } from '../preview.mjs';
+import { createPreviewServer, listenPreview } from '../preview.mjs';
 
 const server = createPreviewServer();
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'Asia/Shanghai' });
@@ -30,8 +30,8 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/public/channel-status') {
     if (statusFail) return route.fulfill(fail);
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ updatedAt: new Date().toISOString(), items: [
-      { model: 'green', group: '第一分组', status: 'operational', availability: 99 },
-      { model: 'yellow', group: '第一分组', status: 'operational', availability: 94 },
+      { model: 'green', group: '第一分组', status: 'operational', availability: 0.997 },
+      { model: 'yellow', group: '第一分组', status: 'operational', availability: 94.7 },
       { model: 'red', group: '第一分组', status: 'failed' },
       { model: 'shared', group: 'Codex 测试分组', status: 'operational', availability: 99 },
       ...Array.from({ length: 3 }, () => ({ model: 'duplicate', group: '第一分组', status: 'operational', availability: 99 }))
@@ -91,12 +91,19 @@ try {
   await page.getByRole('searchbox', { name: '搜索模型' }).fill('yellow');
   assert.equal(await page.locator('.plaza-model').count(), 1);
   assert.match(await page.locator('.plaza-status').getAttribute('aria-label'), /波动/);
+  await page.getByRole('searchbox', { name: '搜索模型' }).fill('');
+  await page.getByRole('button', { name: '渠道状态', exact: true }).click();
+  const channelCard = model => page.locator('.channel-item').filter({ has: page.locator('.channel-item-title strong', { hasText: new RegExp(`^${model}$`) }) });
+  await channelCard('green').getByText('99.7%').waitFor();
+  await channelCard('yellow').getByText('94.7%').waitFor();
+  await page.getByRole('button', { name: '模型广场', exact: true }).click();
 
   await page.goto(base + '/#/login');
   await page.locator('input[type=email]').fill('a@example.test');
   await page.locator('input[type=password]').fill('password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('用量分析').waitFor();
+  await page.getByRole('button', { name: '更多时间设置' }).click();
   await page.getByLabel('开始日期', { exact: true }).fill('2028-02-28');
   await page.getByRole('button', { name: '选择开始日期' }).click();
   await page.getByRole('button', { name: '2028-02-29' }).click();
@@ -138,7 +145,8 @@ try {
   assert.equal(keyGets, beforeRefresh + 1);
 
   groupFail = true;
-  await first.getByRole('button', { name: '编辑' }).click();
+  await first.getByRole('button', { name: /更多操作 A 令牌/ }).click();
+  await first.getByRole('button', { name: '编辑令牌', exact: true }).click();
   await page.getByText('加载失败，点击重试').waitFor();
   groupFail = false;
   await page.getByRole('button', { name: '选择分组' }).click();

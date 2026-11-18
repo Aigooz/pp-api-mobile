@@ -6,13 +6,17 @@
   var h = C.h, card = C.card;
 
   function authShell(title, subtitle, body, footer) {
-    return h('div', { class: 'page', style: { paddingTop: '18px' } },
-      h('div', { style: { textAlign: 'center', marginBottom: '22px' } },
-        h('img', { src: 'img/pp-logo.jpg', width: '56', height: '56', alt: 'Pp API', style: { borderRadius: '8px' } }),
-        h('h1', { style: { fontSize: '22px', margin: '12px 0 4px' } }, title),
-        h('p', { class: 'small muted', style: { margin: '0' } }, subtitle)
-      ),
-      card([h('div', { style: { padding: '18px 16px' } }, body)]),
+    return h('div', { class: 'page auth-page' },
+      h('section', { class: 'auth-card' },
+        h('div', { class: 'auth-brand' },
+          h('span', { class: 'auth-logo-wrap' }, h('img', { src: 'img/pp-logo.jpg', width: '48', height: '48', alt: 'Pp API' })),
+          h('div', { class: 'auth-brand-copy' },
+            h('span', { class: 'auth-eyebrow' }, 'PP API MOBILE'),
+            h('h1', null, title),
+            h('p', null, subtitle))),
+        h('div', { class: 'auth-form' }, body),
+        h('div', { class: 'auth-trust' },
+          h('span', { html: U.ic('shield', 15) }), '安全加密 · 多账号隔离 · 自动恢复登录')),
       footer || null
     );
   }
@@ -135,9 +139,9 @@
         h('a', { href: '#/register', class: 'small' }, '注册新账号')
       ),
       Api.AUTH.accounts().length ? h('button', {
-        class: 'btn btn-ghost btn-block', style: { marginTop: '8px' },
+        class: 'btn btn-ghost btn-block auth-account-return', style: { marginTop: '8px' },
         onclick: function () { App.go('#/accounts', true); }
-      }, '返回账号管理') : null
+      }, h('span', { html: U.ic('users', 16) }), '返回账号管理') : null
     );
 
     return authShell('欢迎回来', '登录后管理令牌、用量与余额', body,

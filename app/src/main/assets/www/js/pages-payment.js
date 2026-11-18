@@ -15,12 +15,15 @@
     } catch (e) { return ''; }
   }
   function money(value) { return Number(value).toFixed(2); }
-  function renderPurchase() {
+  function renderPurchase(initialView) {
     if (!Api.AUTH.isLogged()) return global.PagesUser.needLogin();
     var page = h('div', { class: 'page payment-page' });
     var balance = h('strong', null, '$' + U.usd(C.balanceOf(global.S.user || Api.AUTH.user() || {})));
     var formHost = h('div'), orderHost = h('div'), subscriptionHost = h('div');
-    var info, config, selectedPlan = null, method = '', checking = false, ordersReady = false;
+    var info, config, selectedPlan = null, method = '', checking = false, ordersReady = false, formDirty = false;
+    var requestedView = ['products', 'orders', 'subscriptions'].indexOf(initialView) >= 0 ? initialView : 'products';
+    var view = requestedView;
+    var productHost = h('div'), activeHost = h('div'), historyHost = h('div'), subscriptionsHost = h('div');
     // Balance-paid subscriptions are per model group, so everything is keyed by group id and
     // driven by what the site currently sells. Nothing about a specific plan is hardcoded.
     var cards = Object.create(null), cardRevisions = Object.create(null), uncertainGroups = Object.create(null);
@@ -36,10 +39,64 @@
       daycardUncertain: false });
     var activeOrder = shared.order;
 
-    page.appendChild(h('div', { class: 'payment-balance' }, h('span', null, '账户余额'), balance));
-    page.appendChild(formHost); page.appendChild(orderHost); page.appendChild(subscriptionHost);
+    var viewTabs = h('div', { class: 'payment-view-tabs', role: 'tablist', 'aria-label': '充值中心视图' });
+    page.appendChild(h('div', { class: 'card payment-account-strip' },
+      h('div', { class: 'payment-balance' }, h('span', null, '账户余额'), balance),
+      h('div', { class: 'payment-account-note' }, '余额支付与在线充值都会同步到当前账号，充值前可先核对余额和当前订单。')));
+    page.appendChild(viewTabs);
+    page.appendChild(h('div', { class: 'payment-view-body' },
+      h('section', { class: 'payment-view-panel', 'data-view': 'products' }, productHost, formHost),
+      h('section', { class: 'payment-view-panel', 'data-view': 'orders', hidden: true }, activeHost, historyHost),
+      h('section', { class: 'payment-view-panel', 'data-view': 'subscriptions', hidden: true }, subscriptionsHost)));
 
     function current() { return Api.AUTH.matches(account); }
+    function routeView() {
+      var match = String(global.location.hash || '').match(/^#\/(purchase|orders|subscriptions)(?:\/|$)/);
+      return !match || match[1] === 'purchase' ? 'products' : match[1];
+    }
+    function syncRouteView() {
+      if (!page.isConnected) return;
+      var next = routeView();
+      if (next === view) return;
+      view = next;
+      paintViews();
+      if (view === 'orders') loadOrders(true);
+      if (view === 'subscriptions') loadSubscriptions();
+    }
+    function activate() {
+      syncRouteView();
+      paintViews();
+    }
+    function paintViews() {
+      var defs = [
+        { key: 'products', label: '商品' },
+        { key: 'orders', label: '订单' },
+        { key: 'subscriptions', label: '订阅' }
+      ];
+      viewTabs.innerHTML = '';
+      defs.forEach(function (def) {
+        viewTabs.appendChild(h('button', {
+          type: 'button', role: 'tab', 'aria-selected': view === def.key ? 'true' : 'false',
+          class: view === def.key ? 'active' : '', onclick: function () {
+            view = def.key;
+            var nextPath = view === 'products' ? '#/purchase' : view === 'orders' ? '#/orders' : '#/subscriptions';
+            if (global.location.hash !== nextPath) {
+              global.history.replaceState(null, '', nextPath);
+            }
+            paintViews();
+            if (view === 'orders') loadOrders(true);
+            if (view === 'subscriptions') loadSubscriptions();
+          }
+        }, def.label));
+      });
+      Array.prototype.forEach.call(page.querySelectorAll('.payment-view-panel'), function (panel) {
+        panel.hidden = panel.getAttribute('data-view') !== view;
+      });
+    }
+    function syncSubmitAfterOrders() {
+      if (!info || !config) return;
+      updateSubmit();
+    }
     function groupOf(plan) {
       var gid = Number(plan && plan.group_id);
       return Number.isSafeInteger(gid) && gid > 0 ? gid : null;
@@ -66,8 +123,20 @@
     function daycardOrderBlocked() {
       return !!selectedPlan && daycardUncertain();
     }
+    function showOrders() {
+      if (view === 'orders') {
+        paintViews();
+        return;
+      }
+      view = 'orders'; paintViews();
+    }
     function updateSubmit() {
       var balancePayment = method === 'daycard_balance';
+      if (!info || !config) {
+        submit.disabled = true;
+        submit.textContent = ordersReady ? '正在加载充值信息…' : '正在检查订单…';
+        return;
+      }
       var card = currentCard();
       submit.disabled = !ordersReady || shared.submitting || !!activeOrder || shared.uncertain ||
         daycardOrderBlocked() ||
@@ -143,6 +212,56 @@
       });
     }
     function plans() { return info && Array.isArray(info.plans) ? info.plans : []; }
+    function planCategory(plan) {
+      var days = Number(plan && plan.validity_days);
+      if (isFinite(days) && days > 0) {
+        if (days <= 1) return 'day';
+        if (days <= 7) return 'week';
+        if (days <= 31) return 'month';
+        return 'long';
+      }
+      var text = String(plan && (plan.name + ' ' + plan.description) || '');
+      if (/天卡|日卡|24\s*小时|1\s*天/i.test(text)) return 'day';
+      if (/周卡|7\s*天|一周/i.test(text)) return 'week';
+      if (/月卡|30\s*天/i.test(text)) return 'month';
+      return 'long';
+    }
+    function planGroups(list) {
+      var meta = [
+        { key: 'day', label: '短期订阅', hint: '24 小时短期体验' },
+        { key: 'week', label: '一周订阅', hint: '7 天灵活订阅' },
+        { key: 'month', label: '月度订阅', hint: '30 天持续使用' },
+        { key: 'long', label: '长期订阅', hint: '按平台有效期提供' }
+      ];
+      return meta.map(function (group) {
+        group.plans = list.filter(function (plan) { return planCategory(plan) === group.key; });
+        return group;
+      }).filter(function (group) { return group.plans.length > 0; });
+    }
+    function planSignature() {
+      return plans().map(function (plan) {
+        return [plan.id, plan.group_id, plan.name, plan.price, plan.validity_days, plan.description].join(':');
+      }).join('|');
+    }
+    function mergeLivePlans(nextPlans) {
+      if (!Array.isArray(nextPlans)) return;
+      var selectedId = selectedPlan && String(selectedPlan.id);
+      var previousSignature = planSignature();
+      info.plans = nextPlans;
+      var selectedNow = selectedId && nextPlans.filter(function (plan) { return String(plan.id) === selectedId; })[0];
+      if (selectedPlan && selectedNow && !formDirty) {
+        selectedPlan = selectedNow;
+      } else if (selectedPlan && !selectedNow && formDirty) {
+        selectedPlan = null;
+        method = methods()[0] || '';
+        formDirty = false;
+        U.toast('当前商品已下架，商品列表已同步', 'err');
+      }
+      if (previousSignature !== planSignature()) {
+        paintForm();
+        loadAllCards();
+      }
+    }
     function paymentFee(value) {
       var rate = Number(info.recharge_fee_rate || config.recharge_fee_rate || 0);
       return isFinite(rate) && rate > 0 ? Math.ceil(value * rate - 0.0000001) / 100 : 0;
@@ -183,30 +302,61 @@
       if (method === 'daycard_balance' && cardState() !== 'loading' && !isDaycardPlan()) method = methods()[0] || '';
       var choices = h('div', { class: 'payment-products' });
       if (canBalance) choices.appendChild(h('label', { class: 'payment-choice' },
-        h('input', { type: 'radio', name: 'payment-product', checked: !selectedPlan, onchange: function () { selectedPlan = null; paintForm(); } }),
+        h('input', { type: 'radio', name: 'payment-product', checked: !selectedPlan, onchange: function () {
+          if (!selectedPlan) return;
+          selectedPlan = null;
+          formDirty = true;
+          paintForm();
+        } }),
         h('span', null, h('strong', null, '充值余额'), h('small', null, '自定义金额'))));
-      list.forEach(function (plan) {
-        var gid = groupOf(plan), card = cardFor(gid);
-        var payable = card && card.state === 'ready' && String(card.data.plan.group_id) === String(gid);
-        choices.appendChild(h('label', { class: 'payment-choice' },
-          h('input', { type: 'radio', name: 'payment-product', checked: selectedPlan && String(selectedPlan.id) === String(plan.id),
-            onchange: function () {
-              selectedPlan = plan;
-              if (gid && !cards[gid]) loadDaycard(gid);
-              paintForm();
-            } }),
-          h('span', null, h('strong', null, plan.name || '订阅套餐'),
-            h('small', null, '¥' + money(plan.price) + (plan.validity_days ? ' · ' + plan.validity_days + ' 天' : '') +
-              (payable ? ' · 可余额支付' : ''))),
-          payable ? h('span', { class: 'badge ok' }, '余额') : null));
+      planGroups(list).forEach(function (category) {
+        choices.appendChild(h('div', { class: 'payment-product-group' },
+          h('div', { class: 'payment-product-group-head' },
+            h('strong', null, category.label),
+            h('span', null, category.hint)),
+          h('div', { class: 'payment-product-grid' }, category.plans.map(function (plan) {
+            var gid = groupOf(plan), card = cardFor(gid);
+            var payable = card && card.state === 'ready' && String(card.data.plan.group_id) === String(gid);
+            return h('label', { class: 'payment-choice payment-plan-choice' + (selectedPlan && String(selectedPlan.id) === String(plan.id) ? ' selected' : '') },
+              h('input', { type: 'radio', name: 'payment-product', checked: selectedPlan && String(selectedPlan.id) === String(plan.id),
+                onchange: function () {
+                  if (selectedPlan && String(selectedPlan.id) === String(plan.id)) return;
+                  selectedPlan = plan;
+                  formDirty = true;
+                  if (gid && !cards[gid]) loadDaycard(gid);
+                  paintForm();
+                } }),
+              h('span', { class: 'payment-plan-copy' },
+                h('strong', null, plan.name || '订阅套餐'),
+                h('span', { class: 'payment-plan-price-row' },
+                  h('small', null, '¥' + money(plan.price) + (plan.validity_days ? ' · ' + plan.validity_days + ' 天' : '')),
+                  payable ? h('span', { class: 'badge ok payment-plan-payable' }, '可余额支付') : null),
+                plan.group_name ? h('em', null, plan.group_name) : null));
+          }))));
       });
       formHost.appendChild(section('选择商品', null, null, choices));
+      productHost.innerHTML = '';
+      productHost.appendChild(h('div', { class: 'payment-service-strip' },
+        h('span', { class: 'payment-service-icon', html: U.ic('refresh', 17) }),
+        h('div', null, h('strong', null, '站内商品实时同步'),
+          h('span', null, list.length ? '余额充值与 ' + list.length + ' 个订阅商品可用' : '余额充值可用，订阅商品暂未上架')),
+        h('span', { class: 'badge ok' }, '实时')));
       if (selectedPlan) {
         formHost.appendChild(h('div', { class: 'payment-plan-detail' },
           selectedPlan.description ? h('div', null, selectedPlan.description) : null,
           Array.isArray(selectedPlan.features) ? selectedPlan.features.map(function (feature) { return h('div', null, '· ' + feature); }) : null));
       } else {
         formHost.appendChild(section('充值金额（元）', null, null, h('div', null, amount,
+          h('div', { class: 'payment-amount-presets' }, amountPresets().map(function (value) {
+            return h('button', {
+              type: 'button', class: amountPresetClass(value),
+              onclick: function () {
+                amount.value = String(value);
+                updateTotal();
+                paintAmountPresets();
+              }
+            }, '¥' + value);
+          })),
           h('div', { class: 'tiny muted payment-limit' }, (Number(config.min_amount) > 0 ? '单笔最低 ¥' + money(config.min_amount) : '') +
             (Number(config.max_amount) > 0 ? ' · 最高 ¥' + money(config.max_amount) : '') +
             (Number(config.daily_limit) > 0 ? ' · 每日上限 ¥' + money(config.daily_limit) : '')))));
@@ -232,7 +382,32 @@
       if (info.help_text || config.help_text) formHost.appendChild(h('div', { class: 'payment-help' }, info.help_text || config.help_text));
       paintMethods(); updateTotal(); updateSubmit();
     }
+    function amountPresets() {
+      var min = Math.max(0.01, Number(config && config.min_amount) || 0.01);
+      var max = Number(config && config.max_amount);
+      var values = [];
+      var tiers = info && Array.isArray(info.recharge_bonus_tiers) ? info.recharge_bonus_tiers : [];
+      tiers.forEach(function (tier) {
+        var value = Number(pick(tier, 'amount', 'threshold', 'min_amount', 'min_recharge', 'recharge_amount'));
+        if (isFinite(value) && value > 0 && values.indexOf(value) < 0) values.push(value);
+      });
+      [20, 50, 100, 200].forEach(function (value) {
+        if (values.length < 4 && values.indexOf(value) < 0) values.push(value);
+      });
+      return values.filter(function (value) {
+        return value >= min && (!isFinite(max) || max <= 0 || value <= max);
+      }).sort(function (a, b) { return a - b; }).slice(0, 4);
+    }
+    function amountPresetClass(value) {
+      return Number(amount.value) === value ? 'active' : '';
+    }
+    function paintAmountPresets() {
+      Array.prototype.forEach.call(formHost.querySelectorAll('.payment-amount-presets button'), function (button) {
+        button.classList.toggle('active', Number(amount.value) === Number(String(button.textContent).replace(/[^\d.]/g, '')));
+      });
+    }
     amount.addEventListener('input', updateTotal);
+    amount.addEventListener('input', paintAmountPresets);
 
     function validation() {
       var value = orderAmount(), selectedMethod = info.methods && info.methods[method] || {};
@@ -273,12 +448,18 @@
           shared.order = { id: order.order_id, amount: value, payment_type: chosenMethod, order_type: payload.order_type,
             out_trade_no: order.out_trade_no || '', pay_url: order.pay_url || order.url || order.cashier_url || '',
             qr_code: order.qr_code || '', expires_at: order.expires_at || '', status: 'PENDING', pay_amount: order.pay_amount };
-          if (current()) { activeOrder = shared.order; paintActiveOrder(); loadOrders(); }
+          if (current()) {
+            activeOrder = shared.order;
+            showOrders();
+            paintActiveOrder();
+            loadOrders(true);
+          }
         }).catch(function (e) {
           shared.uncertain = true;
           if (current()) {
             U.toast((e.message || '创建订单失败') + '。请先检查订单记录。', 'err');
-            loadOrders();
+            showOrders();
+            loadOrders(true);
           }
         }).finally(function () { shared.submitting = false; updateSubmit(); notifyOrder(); });
       });
@@ -365,7 +546,7 @@
     }
 
     function paintActiveOrder() {
-      var host = page.querySelector('.payment-active');
+      var host = activeHost.querySelector('.payment-active');
       if (host) host.remove();
       if (!activeOrder) return;
       var order = activeOrder, state = String(order.status || '').toUpperCase();
@@ -393,7 +574,7 @@
         h('button', { class: 'btn btn-sm', disabled: checking, onclick: function () { refreshOrder(order); } }, checking ? '查询中…' : '刷新支付状态'),
         state === 'PENDING' ? h('button', { class: 'btn btn-sm', onclick: function () { cancel(order); } }, '取消订单') :
           h('button', { class: 'btn btn-sm', onclick: function () { activeOrder = null; shared.order = null; updateSubmit(); paintActiveOrder(); notifyOrder(); } }, '关闭')));
-      formHost.insertAdjacentElement('beforebegin', panel);
+      activeHost.insertAdjacentElement('beforeend', panel);
       if (panel.isConnected && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'nearest' });
     }
     function refreshOrder(order) {
@@ -432,8 +613,8 @@
           .catch(function (e) { U.toast(e.message, 'err'); });
       });
     }
-    function loadOrders() {
-      orderHost.innerHTML = '';
+    function loadOrders(revealOrder) {
+      historyHost.innerHTML = '';
       Promise.all([Api.myOrders({ page: 1, page_size: 20 }), Api.myOrders({ page: 1, page_size: 1, status: 'PENDING' })]).then(function (results) {
         if (!current()) return;
         var data = results[0], pendingData = results[1];
@@ -449,11 +630,24 @@
         if (!activeOrder && !shared.submitting) {
           var pending = pendingData.items.filter(function (order) { return String(order.status || '').toUpperCase() === 'PENDING'; })[0];
           if (Number(pendingData.total) > 0 && !pending) throw new Error('待支付订单状态返回不完整');
-          if (pending) { activeOrder = pending; shared.order = pending; paintActiveOrder(); }
+          if (pending) {
+            activeOrder = pending;
+            shared.order = pending;
+            paintActiveOrder();
+            revealOrder = true;
+          }
         }
-        updateSubmit();
-        orderHost.innerHTML = '';
-        orderHost.appendChild(section('最近订单', '刷新', loadOrders, items.length ? h('div', { class: 'payment-orders' }, items.map(function (order) {
+        if (!activeOrder && !activeHost.querySelector('.payment-empty')) {
+          activeHost.insertAdjacentElement('afterbegin', h('div', { class: 'payment-empty card' },
+            h('div', { class: 'dashboard-empty' }, '当前没有待支付订单')));
+        } else if (activeOrder) {
+          var empty = activeHost.querySelector('.payment-empty');
+          if (empty) empty.remove();
+        }
+        syncSubmitAfterOrders();
+        if (revealOrder && activeOrder) showOrders();
+        historyHost.innerHTML = '';
+        historyHost.appendChild(section('历史订单', '刷新', function () { loadOrders(true); }, items.length ? h('div', { class: 'payment-orders' }, items.map(function (order) {
           var status = String(order.status || '').toUpperCase();
           return h('div', { class: 'payment-order-row' }, h('div', null, h('strong', null, (order.order_type === 'subscription' ? '订阅' : '充值') + ' · ¥' + money(order.amount || 0)),
             h('div', { class: 'tiny muted' }, '#' + order.id + ' · ' + U.datetime(order.created_at))),
@@ -462,42 +656,75 @@
               activeOrder = order; shared.order = order; updateSubmit(); paintActiveOrder(); refreshOrder(order);
             } }, statuses[status] || '查看状态'));
         })) : h('div', { class: 'dashboard-empty' }, '暂无订单')));
-        if (shared.uncertain && !activeOrder) orderHost.appendChild(h('button', { class: 'btn btn-sm', onclick: function () {
+        if (shared.uncertain && !activeOrder) historyHost.appendChild(h('button', { class: 'btn btn-sm', onclick: function () {
           U.confirm('确认检查订单', '请确认已检查最近订单，避免重复支付。', '已检查').then(function (ok) {
             if (!ok || !current() || activeOrder) return;
             shared.uncertain = false; updateSubmit(); loadOrders(); notifyOrder();
           });
         } }, '已检查订单，继续下单'));
-      }).catch(function (e) { if (current()) { ordersReady = false; updateSubmit(); orderHost.innerHTML = ''; orderHost.appendChild(h('div', { class: 'notice warn section' }, '订单加载失败：' + e.message, ' ', h('button', { onclick: loadOrders }, '重试'))); } });
+      }).catch(function (e) {
+        if (!current()) return;
+        ordersReady = false; syncSubmitAfterOrders();
+        historyHost.innerHTML = '';
+        historyHost.appendChild(h('div', { class: 'notice warn section' }, '订单加载失败：' + e.message, ' ', h('button', { onclick: loadOrders }, '重试')));
+        paintForm();
+        showOrders();
+      });
     }
     function loadSubscriptions() {
       Api.subscriptions().then(function (data) {
         if (!current()) return;
-        var list = C.arrOf(data); subscriptionHost.innerHTML = '';
-        subscriptionHost.appendChild(section('我的订阅', null, null, list.length ? C.card(list.map(function (item) {
+        var list = C.arrOf(data); subscriptionsHost.innerHTML = '';
+        subscriptionsHost.appendChild(section('我的订阅', null, null, list.length ? C.card(list.map(function (item) {
           var until = pick(item, 'expires_at', 'expired_at', 'end_at');
           return h('div', { class: 'list-item' }, h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, pick(item, 'group_name', 'name') || (item.group && item.group.name) || '模型订阅'),
             h('div', { class: 'li-sub' }, until ? '有效至 ' + U.date(until) : '有效订阅')), h('span', { class: 'badge ok' }, '生效中'));
         })) : h('div', { class: 'dashboard-empty' }, '暂无生效订阅')));
-      }).catch(function () { if (current()) subscriptionHost.textContent = '订阅状态暂不可用'; });
+      }).catch(function () { if (current()) subscriptionsHost.textContent = '订阅状态暂不可用'; });
     }
     formHost.appendChild(h('div', { class: 'dashboard-loading' }, '正在加载充值信息…'));
     function loadConfig() {
       Promise.all([Api.paymentInfo(), Api.paymentConfig()]).then(function (result) {
         if (!current()) return;
-        info = result[0] || {}; config = result[1] || {};
-        method = methods()[0] || '';
+        info = Object.assign({}, info || {}, result[0] || {});
+        config = Object.assign({}, config || {}, result[1] || {});
+        if (methods().indexOf(method) < 0) method = methods()[0] || '';
+        var list = plans();
+        var stillListed = selectedPlan && list.filter(function (plan) {
+          return String(plan.id) === String(selectedPlan.id);
+        })[0];
+        if (stillListed) {
+          selectedPlan = stillListed;
+        } else if (selectedPlan) {
+          selectedPlan = null;
+          formDirty = false;
+          if (!document.hidden) U.toast('当前商品已下架，商品列表已同步', 'err');
+        }
         plans().forEach(function (plan) {
           var gid = groupOf(plan);
           if (gid) uncertainGroups[gid] = !!U.store.get(storageKey(gid), false);
         });
         paintForm();
         loadAllCards();
+        updateSubmit();
       }).catch(function (e) { if (current()) { formHost.innerHTML = ''; formHost.appendChild(h('div', { class: 'notice warn section' }, '充值信息加载失败：' + e.message, ' ', h('button', { onclick: loadConfig }, '重试'))); } });
     }
     function onVisible() {
       if (!page.isConnected || !current()) { document.removeEventListener('visibilitychange', onVisible); return; }
-      if (!document.hidden && activeOrder) refreshOrder(activeOrder);
+      if (document.hidden) return;
+      if (activeOrder) refreshOrder(activeOrder);
+      if (info && config) {
+        Api.paymentInfo().then(function (latest) {
+          if (!current() || !page.isConnected || !latest) return;
+          info = Object.assign({}, info, latest);
+          mergeLivePlans(latest.plans);
+          paintForm();
+        }).catch(function () {});
+      } else {
+        loadConfig();
+      }
+      loadOrders();
+      loadSubscriptions();
     }
     function onOrderChange(event) {
       if (!page.isConnected || !current()) { global.removeEventListener('pp:payment-changed', onOrderChange); return; }
@@ -508,8 +735,14 @@
     }
     document.addEventListener('visibilitychange', onVisible);
     global.addEventListener('pp:payment-changed', onOrderChange);
+    global.addEventListener('hashchange', syncRouteView);
     if (activeOrder) setTimeout(function () { if (page.isConnected && current()) paintActiveOrder(); }, 0);
-    loadConfig(); loadOrders(); loadSubscriptions();
+    activate();
+    page.addEventListener('pp:page-activate', activate);
+    page.addEventListener('pp:page-dispose', function () {
+      global.removeEventListener('hashchange', syncRouteView);
+    });
+    loadConfig(); loadOrders(true); loadSubscriptions();
     return page;
   }
   global.PagesPayment = { renderPurchase: renderPurchase };

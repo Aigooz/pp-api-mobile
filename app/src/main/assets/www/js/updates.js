@@ -59,7 +59,7 @@
       }
       if (status === 'available' && !state.manual && data.version && U.store.get('update_prompted', '') !== data.version) {
         U.store.set('update_prompted', data.version);
-        U.toast('发现新版本 ' + data.version + '，点击顶部更新图标查看', 'ok');
+        U.toast('发现新版本 ' + data.version + '，请到“我的 · 软件更新”查看', 'ok');
       }
     } else if (status === 'current') {
       if (['downloading', 'ready'].indexOf(state.status) >= 0) return;
