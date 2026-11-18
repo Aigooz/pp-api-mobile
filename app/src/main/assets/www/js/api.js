@@ -81,6 +81,16 @@
     return fetchHttp(method, url, headers, body);
   }
 
+  // Background route preloading can be invalidated before its fetch settles.
+  // Chromium silently ignores that cancellation; WebKit reports it as an
+  // access-control error even though no application request failed.
+  function settlePreload(promise) {
+    try {
+      Promise.resolve(promise).catch(function () {});
+    } catch (e) {}
+    return promise;
+  }
+
   var MSG_MAP = [
     ['invalid email or password', '邮箱或密码错误'],
     ['invalid credentials', '邮箱或密码错误'],
@@ -557,7 +567,7 @@
       return cached('plaza', 10 * 60e3, function () { return api('/model-plaza'); });
     },
     channelStatus: function () {
-      return request('GET', ORIGIN + '/api/public/channel-status', { 'Accept': 'application/json' }).then(function (res) {
+      return settlePreload(request('GET', ORIGIN + '/api/public/channel-status', { 'Accept': 'application/json' })).then(function (res) {
         var data = parse(res);
         if (res.status < 200 || res.status >= 300 || !data || !Array.isArray(data.items)) {
           throw mkErr(res.status, 'CHANNEL_STATUS', '渠道状态加载失败，请稍后重试');
