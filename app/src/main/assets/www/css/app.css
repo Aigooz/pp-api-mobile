@@ -1366,7 +1366,8 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 }
 .composer textarea {
   flex: 1; border: 0; background: transparent; outline: none; resize: none;
-  max-height: 120px; padding: 8px 0; font-size: 15px; line-height: 1.4;
+  height: 38px; max-height: 120px; padding: 8px 0; font-size: 15px; line-height: 22px;
+  box-sizing: border-box; overflow-y: hidden;
 }
 .send-btn {
   appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;

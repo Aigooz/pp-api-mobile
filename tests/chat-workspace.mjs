@@ -174,6 +174,22 @@ try {
           await page.evaluate(() => document.querySelector('#view').scrollWidth),
           await page.evaluate(() => document.querySelector('#view').clientWidth)
         );
+        const composerAlignment = await page.locator('.composer-box').evaluate(box => {
+          const textarea = box.querySelector('textarea');
+          const send = box.querySelector('.send-btn');
+          const text = textarea.getBoundingClientRect();
+          const button = send.getBoundingClientRect();
+          const style = getComputedStyle(textarea);
+          const line = parseFloat(style.lineHeight);
+          const textCenter = text.top + parseFloat(style.paddingTop) + line / 2;
+          return {
+            textHeight: text.height,
+            textCenter,
+            buttonCenter: (button.top + button.bottom) / 2
+          };
+        });
+        assert.ok(Math.abs(composerAlignment.textCenter - composerAlignment.buttonCenter) < 1.1,
+          JSON.stringify({ width, ...composerAlignment }));
         const icons = await page.locator('.chat-toolbar .tool-btn').evaluateAll(nodes => nodes.map(node => {
           const box = node.getBoundingClientRect();
           const icon = node.querySelector('svg').getBoundingClientRect();

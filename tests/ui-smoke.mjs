@@ -19,6 +19,7 @@ let failStatus = true;
 let statusRequests = 0;
 let noReliability = false;
 let emptyKeys = false;
+let largeTodayTokens = false;
 await page.route('**/__proxy/**', async route => {
   const p = new URL(route.request().url()).pathname.replace('/__proxy/site', '');
   if (p === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
@@ -51,7 +52,17 @@ await page.route('**/__proxy/**', async route => {
   ] }));
   if (p === '/api/v1/groups/available') return route.fulfill(ok([{ id: 1, name: '测试分组' }]));
   if (p === '/api/v1/usage/stats') return route.fulfill(ok({ total_actual_cost: 0.5, total_requests: 2, total_input_tokens: 20, total_output_tokens: 30 }));
-  if (p === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({ total_api_keys: 2, active_api_keys: 1, total_requests: 18, today_requests: 3, today_cost: 0.8, today_actual_cost: 0.4, total_cost: 2, total_actual_cost: 1, today_tokens: 50, today_input_tokens: 20, today_output_tokens: 30, total_tokens: 500, rpm: 2, tpm: 30, average_duration_ms: 1250, ...(noReliability ? {} : { success_rate: 0.9, total_errors: 2, today_success_rate: 0.8, today_errors: 1 }), total_cache_read_tokens: 40, today_cache_read_tokens: 10, by_platform: [{ platform: 'openai', today_actual_cost: 0.4, total_actual_cost: 1, total_requests: 18, total_tokens: 500 }] }));
+  if (p === '/api/v1/usage/dashboard/stats') return route.fulfill(ok({
+    total_api_keys: 2, active_api_keys: 1, total_requests: 18, today_requests: 3,
+    today_cost: 0.8, today_actual_cost: 0.4, total_cost: 2, total_actual_cost: 1,
+    today_tokens: largeTodayTokens ? 1234567 : 50,
+    today_input_tokens: largeTodayTokens ? 1234567 : 20,
+    today_output_tokens: largeTodayTokens ? 1234567890 : 30,
+    total_tokens: 500, rpm: 2, tpm: 30, average_duration_ms: 1250,
+    ...(noReliability ? {} : { success_rate: 0.9, total_errors: 2, today_success_rate: 0.8, today_errors: 1 }),
+    total_cache_read_tokens: 40, today_cache_read_tokens: largeTodayTokens ? 0 : 10,
+    by_platform: [{ platform: 'openai', today_actual_cost: 0.4, total_actual_cost: 1, total_requests: 18, total_tokens: 500 }]
+  }));
   if (p === '/api/v1/usage/dashboard/trend') {
     trendQueries.push(new URL(route.request().url()).searchParams);
     return route.fulfill(ok({ trend: manyPoints ? Array.from({ length: 80 }, (_, i) => ({ date: `point-${i}`, input_tokens: i + 1, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 })) : singlePoint ? [
@@ -252,6 +263,7 @@ try {
   assert.equal(await metricDetails.nth(1).locator(':scope > div').count(), 3);
   assert.equal(await page.locator('.dashboard-quality-item .dashboard-metric-detail').nth(0).locator(':scope > div').count(), 3);
   assert.equal(await page.locator('.dashboard-quality-item .dashboard-metric-detail').nth(1).locator(':scope > div').count(), 3);
+  largeTodayTokens = true;
   noReliability = true;
   await page.evaluate(async () => {
     Api.clearCache();
@@ -260,6 +272,11 @@ try {
   });
   await page.waitForFunction(() => !document.querySelector('.dashboard-quality-grid').textContent.includes('今日成功率'));
   assert.doesNotMatch(await page.locator('.dashboard-quality-grid').innerText(), /成功率|出错|未知/);
+  const todayTokens = page.locator('.dashboard-hero-secondary .dashboard-metric').filter({ hasText: '今日 Tokens' });
+  assert.match(await todayTokens.locator('strong').innerText(), /^1\.2346M$/);
+  assert.match(await todayTokens.innerText(), /输入 1\.2346M/);
+  assert.match(await todayTokens.innerText(), /输出 1\.2346B/);
+  assert.match(await todayTokens.innerText(), /缓存 0$/);
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.locator('.dashboard-metric').count(), 6);

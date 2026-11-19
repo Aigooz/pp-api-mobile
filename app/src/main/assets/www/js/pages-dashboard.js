@@ -20,6 +20,13 @@
   // Balance is a live, spendable figure: keep all four decimals visible instead of rounding cents away.
   function balanceMoney(value) { return '$' + U.usd(value); }
   function token(value) { return U.tokens(number(value)); }
+  // Today's token totals stay precise at compact units: 1M and 1B always show four decimals.
+  function todayToken(value) {
+    var n = Math.max(0, number(value));
+    if (n >= 1e9) return (n / 1e9).toFixed(4) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(4) + 'M';
+    return U.tokens(n);
+  }
   function svg(tag, attrs) {
     var node = document.createElementNS('http://www.w3.org/2000/svg', tag);
     Object.keys(attrs || {}).forEach(function (key) { node.setAttribute(key, attrs[key]); });
@@ -255,7 +262,7 @@
               balanceCard),
             h('div', { class: 'dashboard-hero-secondary' },
               metric('今日费用', money(stats.today_actual_cost), ['实际 ' + money(stats.today_actual_cost), '标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost)], 'card'),
-              metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt')))),
+              metric('今日 Tokens', todayToken(stats.today_tokens), ['输入 ' + todayToken(stats.today_input_tokens), '输出 ' + todayToken(stats.today_output_tokens), '缓存 ' + todayToken(todayCache)], 'bolt')))),
         h('section', { class: 'card dashboard-quality' },
           h('div', { class: 'dashboard-quality-head' },
             h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与实时性能')),

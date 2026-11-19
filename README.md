@@ -1,15 +1,15 @@
 # Pp API Mobile
 
-Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前正式版为 `1.34.0`。
+Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前正式版为 `1.34.1`。
 
 ## 功能
 
-- 仪表盘、四位小数余额、实时余额与并发，以及支持精确时间范围的用量分析。
+- 仪表盘、四位小数余额、实时余额与并发，以及支持精确时间范围的用量分析；今日 Token 使用 M/B 单位时固定展示四位小数。
 - 模型广场与渠道状态，包含模型概览、名称/价格/上下文排序、双段价格、缓存价格、收藏和紧凑复制按钮；模型广场不显示厂商信息、最近使用和多余的详情占位，点击模型名称即可查看完整信息。
 - 模型状态使用红、黄、绿三种标记，每个模型均可直接复制名称；站内新增分组或渠道会自动发现并同步。
 - 登录页可选择记住密码，按账号保存到 Android Keystore 加密存储或 iOS 钥匙串；会话失效时先刷新会话，必要时自动恢复登录。网络临时故障不会直接清除账号，两步验证仍需本人确认；主动退出或移除账号会清除该账号保存的密码。
 - “我的”集中展示资料、余额、充值、兑换、订阅、订单与账号管理；订单和订阅可直达对应视图，登录、资料与账号页使用同一套原生风格组件。
-- 对话工作台支持多回答版本切换、编辑保留旧分支、任意消息重试/收藏/删除、持久草稿、流式空闲超时恢复、思考过程折叠、精确 usage 展示，以及 Markdown/JSON 导入导出；Markdown、KaTeX、代码块和生图结果均可安全渲染。
+- 对话工作台支持多回答版本切换、编辑保留旧分支、任意消息重试/收藏/删除、持久草稿、流式空闲超时恢复、思考过程折叠、精确 usage 展示，以及 Markdown/JSON 导入导出；Markdown、KaTeX、代码块和生图结果均可安全渲染，输入区在单行与多行状态下保持稳定对齐。
 - 充值中心按站内实时商品生成统一订阅列表；支持余额支付的商品会自动显示，不会写死具体套餐；金额预设跟随站内活动动态生成。
 - 仪表盘、令牌并发和运行质量数据定时刷新；切换页面时复用已加载内容，减少重复等待。
 - 兑换码区分订阅与余额；主题可独立切换明暗外观，顶部操作区与底部磨砂玻璃导航支持轻量果冻切换动效。
@@ -55,7 +55,7 @@ Android 需要 JDK 17 或 21、Android SDK 35 和 Gradle 8.9。在配置 SDK 后
 
 iOS 需要 macOS、Xcode 16 或更新版本；打开 `ios/PpApiMobile.xcodeproj`，或手动运行 `Build iOS package` 工作流。工作流生成未签名 IPA，并构建和启动模拟器。签名分发需要相应 Apple 开发者配置。
 
-发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.34.0` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.34.0 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
+发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.34.1` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.34.1 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
 
 ## 数据与第三方组件
 

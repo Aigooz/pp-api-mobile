@@ -1097,7 +1097,8 @@
 
     function autoGrow() {
       input.style.height = 'auto';
-      input.style.height = Math.min(120, input.scrollHeight) + 'px';
+      input.style.height = Math.max(38, Math.min(120, input.scrollHeight)) + 'px';
+      input.style.overflowY = input.scrollHeight > 120 ? 'auto' : 'hidden';
     }
 
     function selectModel() {
