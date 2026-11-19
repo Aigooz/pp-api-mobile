@@ -11,5 +11,7 @@ ios/dist/
 *.p8
 *.mobileprovision
 .artifacts-*/
+.artifacts-1.34/
+Pp-API-android.apk
 _shot.mjs
 shot-*.png

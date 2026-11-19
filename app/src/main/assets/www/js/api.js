@@ -745,6 +745,39 @@
   // ---------- streaming (chat completions) ----------
   // Native bridge pushes base64 lines. Falls back to fetch streaming in browsers.
   function chatStream(payload, key, handlers) {
+    handlers = handlers || {};
+    var lifecycle = null;
+    var watchdog = 0;
+    var idleMs = Math.max(10000, Number(handlers.idleTimeoutMs) || 90000);
+    var finished = false;
+
+    function armWatchdog() {
+      if (finished || idleMs <= 0) return;
+      clearTimeout(watchdog);
+      watchdog = setTimeout(function () {
+        if (finished) return;
+        finished = true;
+        try {
+          if (global.Native && global.Native.stream) global.Native.abort(id);
+        } catch (e) {}
+        delete streams[id];
+        if (handlers.onError) handlers.onError('流式响应超时，请重试', 0);
+      }, idleMs);
+    }
+
+    function settle(kind, value) {
+      if (finished) return;
+      if (kind === 'error') {
+        finished = true;
+        clearTimeout(watchdog);
+        if (handlers.onError) handlers.onError(value && value.message || value || '请求失败', value && value.status);
+        return;
+      }
+      finished = true;
+      clearTimeout(watchdog);
+      if (kind === 'done' && handlers.onDone) handlers.onDone();
+    }
+
     var id = 's' + (++seq);
     var headers = {
       'Content-Type': 'application/json',
@@ -753,8 +786,26 @@
       'X-User-UI-Request': '1',
       'Authorization': 'Bearer ' + key
     };
-    var parser = makeSseParser(handlers);
+    var parser = makeSseParser({
+      onEvent: function (value) {
+        armWatchdog();
+        if (handlers.onEvent) handlers.onEvent(value);
+      },
+      onDone: function () { settle('done'); },
+      onError: function (message, status) { settle('error', { message: message, status: status }); }
+    });
     streams[id] = parser;
+    lifecycle = {
+      abort: function () {
+        finished = true;
+        clearTimeout(watchdog);
+        try {
+          if (global.Native && global.Native.stream) global.Native.abort(id);
+        } catch (e) {}
+        delete streams[id];
+      }
+    };
+    armWatchdog();
 
     if (!(global.Native && global.Native.stream)) {
       // browser fallback
@@ -783,16 +834,16 @@
         return pump();
       }).catch(function (e) { if (e.name !== 'AbortError') parser.error(e.message); })
         .then(function () { delete streams[id]; });
-      return { abort: function () { ctrl.abort(); delete streams[id]; } };
+      return {
+        abort: function () {
+          try { ctrl.abort(); } catch (e) {}
+          if (lifecycle && lifecycle.abort) lifecycle.abort();
+        }
+      };
     }
 
     global.Native.stream(id, 'POST', V1 + '/chat/completions', JSON.stringify(headers), JSON.stringify(payload));
-    return {
-      abort: function () {
-        try { global.Native.abort(id); } catch (e) {}
-        delete streams[id];
-      }
-    };
+    return lifecycle;
   }
 
   function makeSseParser(h) {

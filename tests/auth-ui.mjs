@@ -105,6 +105,13 @@ async function run(engine, name) {
         await page.setViewportSize({ width, height: 844 });
         assert.equal(await page.locator('.plaza-model-copy svg').count(), 3);
         await page.locator('.plaza-model-copy').first().waitFor({ state: 'visible' });
+        await page.waitForFunction(() => {
+          const nodes = Array.from(document.querySelectorAll('.plaza-model-copy'));
+          return nodes.length === 3 && nodes.every(node => {
+            const box = node.getBoundingClientRect();
+            return Math.round(box.width) === 32 && Math.round(box.height) === 32;
+          });
+        });
         const copies = await page.locator('.plaza-model-copy').evaluateAll(nodes => nodes.map(node => {
           const box = node.getBoundingClientRect();
           return { text: node.textContent, width: box.width, height: box.height };

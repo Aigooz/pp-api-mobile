@@ -1,38 +1,44 @@
-/* 对话工作台：多会话历史、参数设置、流式输出 */
+/* Chat workspace: message branches, resilient streaming, history and settings. */
 (function (global) {
   'use strict';
+
   var U = global.U;
   var C = global.PagesCore;
-  var h = C.h, emptyState = C.emptyState, pick = C.pick, arrOf = C.arrOf;
-
-  var STORE = 'chat_store_v2';
-  var MAX_SESSIONS = 30;
+  var Store = global.PagesChatStore;
+  var h = C.h;
+  var emptyState = C.emptyState;
+  var pick = C.pick;
+  var arrOf = C.arrOf;
   var activeChat = null;
-  global.addEventListener('pp:auth-changed', function () {
-    if (activeChat) activeChat();
-    activeChat = null;
-  });
   var SUGGESTS = [
     '用一句话解释量子纠缠',
     '帮我写一封简短的请假邮件',
     '把这段代码改成 Python 并解释',
     '给新产品起 10 个中文名字'
   ];
+  global.addEventListener('pp:auth-changed', function () {
+    if (activeChat) activeChat();
+    activeChat = null;
+  });
 
   var markdown = null;
   if (global.markdownit && global.texmath && global.katex) {
     markdown = global.markdownit({ html: false, linkify: false, breaks: true })
-      .use(global.texmath, { engine: global.katex, delimiters: ['dollars', 'brackets'],
-        katexOptions: { trust: false, maxExpand: 100, maxSize: 20, throwOnError: false } });
+      .use(global.texmath, {
+        engine: global.katex,
+        delimiters: ['dollars', 'brackets'],
+        katexOptions: { trust: false, maxExpand: 100, maxSize: 20, throwOnError: false }
+      });
     markdown.validateLink = function (url) { return /^(https?:\/\/|mailto:)/i.test(url); };
     markdown.renderer.rules.image = function (tokens, idx) {
       return U.esc(tokens[idx].content || '图片');
     };
     markdown.renderer.rules.fence = function (tokens, idx) {
-      var token = tokens[idx], lang = String(token.info || '').trim().split(/\s+/)[0] || '代码';
+      var token = tokens[idx];
+      var lang = String(token.info || '').trim().split(/\s+/)[0] || '代码';
       return '<div class="chat-code"><div class="chat-code-head"><span>' + U.esc(lang) +
-        '</span><button type="button" class="chat-code-copy" aria-label="复制代码" title="复制代码">' + U.ic('copy', 15) +
-        '</button></div><pre><code>' + U.esc(token.content) + '</code></pre></div>';
+        '</span><button type="button" class="chat-code-copy" aria-label="复制代码" title="复制代码">' +
+        U.ic('copy', 15) + '</button></div><pre><code>' + U.esc(token.content) + '</code></pre></div>';
     };
     markdown.inline.ruler.before('escape', 'chat_math_brackets', function (state, silent) {
       var opening = state.src.slice(state.pos, state.pos + 2);
@@ -61,71 +67,134 @@
         { trust: false, maxExpand: 100, maxSize: 20, throwOnError: false }) + '</span>';
     };
   }
+
   function md(text) {
     try { return markdown ? markdown.render(String(text || '')) : U.esc(text || ''); }
     catch (e) { return U.esc(text || ''); }
   }
 
-  // A model-independent heuristic, not a tokenizer or a billing value.
+  // Estimated locally for context budgeting, not presented as billing usage.
   function estimateText(text) {
     var ascii = 0, other = 0;
-    Array.from(String(text || '')).forEach(function (c) {
-      if (c.charCodeAt(0) < 128) ascii++;
+    Array.from(String(text || '')).forEach(function (character) {
+      if (character.charCodeAt(0) < 128) ascii++;
       else other++;
     });
     return Math.ceil(ascii / 4 + other * 1.3);
   }
 
-  function newId() {
-    return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  function isImageModel(name) {
+    return /(gpt-image|dall-?e|flux|seedream|imagen|wanx|qwen-image|nano-banana|midjourney|ideogram|recraft)/i.test(String(name || ''));
   }
 
-  function makeSession(model, keyId) {
-    return {
-      id: newId(),
-      title: '新对话',
-      messages: [],
-      model: model || '',
-      keyId: keyId || 0,
-      pinned: false,
-      settings: { systemPrompt: '', temperature: null, maxTokens: null },
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
+  function imageDataUri(value) {
+    var base64 = String(value || '').replace(/\s+/g, '');
+    var mime = /^\/9j\//.test(base64) ? 'image/jpeg' :
+      /^R0lGOD/.test(base64) ? 'image/gif' :
+      /^UklGR/.test(base64) ? 'image/webp' : 'image/png';
+    return 'data:' + mime + ';base64,' + base64;
   }
 
-  function titleOf(messages) {
-    var first = messages.filter(function (m) { return m.role === 'user'; })[0];
-    if (!first) return '新对话';
-    var t = String(first.content || '').replace(/\s+/g, ' ').trim();
-    return t.slice(0, 22) || '新对话';
-  }
-
-  function loadState(storeKey) {
-    var st = U.store.get(storeKey, null);
-    if (!st || !Array.isArray(st.sessions)) {
-      var legacyOwner = U.store.get('chat_legacy_owner', '');
-      var canMigrate = !!legacyOwner && legacyOwner === Api.AUTH.currentId();
-      st = canMigrate ? U.store.get(STORE, null) : null;
-      if (!st || !Array.isArray(st.sessions)) st = { activeId: '', sessions: [] };
-      var legacy = canMigrate && !st.sessions.length ? U.store.get('chat_messages', []) : [];
-      if (Array.isArray(legacy) && legacy.length) {
-        var s = makeSession();
-        s.messages = legacy.filter(function (m) { return m && m.role; });
-        s.title = titleOf(s.messages);
-        st.sessions.push(s);
-        st.activeId = s.id;
+  function extractImage(data) {
+    var items = (data && (data.data || data.images || data.output || data.results)) || [];
+    if (!Array.isArray(items)) items = [items];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (typeof item === 'string') {
+        if (/^(https?:|data:)/.test(item)) return item;
+        continue;
       }
+      if (!item) continue;
+      var base64 = item.b64_json || item.base64 || item.image_base64 || item.b64;
+      if (base64) return String(base64).indexOf('data:') === 0 ? base64 : imageDataUri(base64);
+      var url = item.url || item.image_url || item.image || (item.image && item.image.url);
+      if (url) return url;
     }
-    st.sessions = st.sessions.filter(function (s) { return s && Array.isArray(s.messages); });
-    st.sessions.forEach(function (s) {
-      if (s.pinned === undefined) s.pinned = false;
-      s.settings = s.settings || { systemPrompt: '', temperature: null, maxTokens: null };
-      s.settings.systemPrompt = s.settings.systemPrompt || '';
-      if (s.settings.temperature === undefined) s.settings.temperature = null;
-      if (s.settings.maxTokens === undefined) s.settings.maxTokens = null;
+    return data && typeof data.url === 'string' ? data.url : '';
+  }
+
+  function extractText(data) {
+    var choice = data && data.choices && data.choices[0];
+    if (!choice) return data && typeof data.content === 'string' ? data.content : '';
+    var content = choice.message && choice.message.content;
+    if (Array.isArray(content)) {
+      return content.map(function (part) {
+        return typeof part === 'string' ? part : part && (part.text || part.content) || '';
+      }).join('');
+    }
+    return String(content || choice.text || '');
+  }
+
+  function extractReasoning(data) {
+    var choice = data && data.choices && data.choices[0];
+    if (!choice) return '';
+    var message = choice.delta || choice.message || {};
+    return String(message.reasoning_content || message.reasoning || '');
+  }
+
+  function extractUsage(data) {
+    if (!data || typeof data !== 'object') return null;
+    return data.usage || (data.choices && data.choices[0] && data.choices[0].usage) || null;
+  }
+
+  function mergeUsage(previous, next) {
+    if (!next || typeof next !== 'object') return previous || null;
+    return Object.assign({}, previous || {}, next);
+  }
+
+  function prettyErr(error) {
+    var text = String(error || '').trim();
+    if (/^<(!doctype|html)/i.test(text)) return '服务返回了网页错误页（可能被网关或代理拦截）';
+    try {
+      var parsed = JSON.parse(text);
+      if (parsed) {
+        var message = parsed.error ?
+          (typeof parsed.error === 'string' ? parsed.error : parsed.error.message || parsed.error.msg) :
+          (parsed.message || parsed.msg);
+        if (message) return String(message).slice(0, 300);
+      }
+    } catch (e) {}
+    return text.slice(0, 300) || '请求失败';
+  }
+
+  function roleLabel(message) {
+    return message.role === 'user' ? '我' : message.role === 'assistant' ? '助手' : '系统';
+  }
+
+  function summaryUsage(usage) {
+    if (!usage) return '';
+    var prompt = Number(usage.prompt_tokens || usage.input_tokens || 0);
+    var completion = Number(usage.completion_tokens || usage.output_tokens || 0);
+    var total = Number(usage.total_tokens || prompt + completion || 0);
+    return total ? 'Tokens ' + U.num(prompt) + ' + ' + U.num(completion) + ' = ' + U.num(total) : '';
+  }
+
+  function timingLabel(message) {
+    if (!message || !message.finishedAt || !message.createdAt) return '';
+    var seconds = Math.max(0, (message.finishedAt - message.createdAt) / 1000);
+    return seconds < .1 ? '' : seconds.toFixed(seconds < 10 ? 1 : 0) + 's';
+  }
+
+  function pageIconButton(icon, label, handler) {
+    var button = h('button', {
+      class: 'tool-btn', type: 'button', html: U.ic(icon, 18),
+      'aria-label': label, title: label, onclick: handler
     });
-    return st;
+    return button;
+  }
+
+  function actionButton(icon, label, handler, extraClass) {
+    return h('button', {
+      class: extraClass || '', type: 'button', title: label, 'aria-label': label,
+      html: U.ic(icon, 15), onclick: function (event) {
+        event.stopPropagation();
+        handler(event);
+      }
+    });
+  }
+
+  function messageActions(items, className) {
+    return h('div', { class: 'msg-actions ' + (className || '') }, items);
   }
 
   function renderChat() {
@@ -133,85 +202,174 @@
     if (activeChat) activeChat();
 
     var authContext = Api.AUTH.context();
-    var storeKey = STORE + ':' + encodeURIComponent(Api.AUTH.currentId());
-    var state = loadState(storeKey);
-    var session = state.sessions.filter(function (s) { return s.id === state.activeId; })[0];
+    var accountId = Api.AUTH.currentId();
+    var state = Store.load(accountId);
+    var session = Store.activeSession(state);
     if (!session) {
-      session = state.sessions[0] || makeSession(global.S.chatModel);
-      if (!state.sessions.length) state.sessions.push(session);
+      session = Store.makeSession(global.S.chatModel);
+      state.sessions.push(session);
       state.activeId = session.id;
+      Store.save(accountId, state);
     }
     if (global.S.useSelectedChatModel && global.S.chatModel) {
       session.model = global.S.chatModel;
       global.S.useSelectedChatModel = false;
     }
 
+    var disposed = false;
     var streaming = false;
-    var controller = null;
+    var draftTimer = 0;
+    var saveTimer = 0;
+    var scrollFrame = 0;
     var keys = global.S.keys || [];
     var modelList = [];
     var modelLimits = {};
-    var plazaLimitSource = null, plazaLimits = {};
+    var plazaLimitSource = null;
+    var plazaLimits = {};
     var modelsRun = 0;
-    var stopped = false;
-    var disposed = false;
-    var imageRun = 0;
-    var completionRun = 0;
+    var runSeq = 0;
+    var currentRun = null;
+    var currentController = null;
+    var storageWarningShown = false;
 
-    function isCurrent() { return !disposed && Api.AUTH.matches(authContext); }
-    activeChat = function () {
-      if (disposed) return;
-      stopped = true;
-      imageRun++;
-      completionRun++;
-      if (controller) { try { controller.abort(); } catch (e) {} }
-      if (streaming) {
-        var last = session.messages[session.messages.length - 1];
-        if (last && last.role === 'assistant') {
-          last.pending = false;
-          if (!last.content && !last.image && !last.error) last.content = '（已停止）';
-          save();
+    function isCurrent() {
+      return !disposed && Api.AUTH.matches(authContext) && Api.AUTH.currentId() === accountId;
+    }
+
+    function saveNow() {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = 0;
+      }
+      session.updatedAt = Date.now();
+      Store.save(accountId, state);
+    }
+
+    function saveSoon(delay) {
+      if (saveTimer) return;
+      saveTimer = global.setTimeout(function () {
+        saveTimer = 0;
+        if (!disposed) saveNow();
+      }, delay || 240);
+    }
+
+    function abortGeneration(markStopped) {
+      runSeq++;
+      currentRun = null;
+      if (currentController) {
+        try { currentController.abort(); } catch (e) {}
+        currentController = null;
+      }
+      if (!streaming) return;
+      streaming = false;
+      setBusy(false);
+      var node = (session.nodes || []).filter(function (item) {
+        return item.messages.some(function (message) { return message.pending; });
+      }).pop();
+      var message = node && Store.selected(node);
+      if (message) {
+        message.pending = false;
+        message.stopped = !!markStopped;
+        message.finishedAt = Date.now();
+        if (!message.content && !message.image && !message.error) {
+          message.content = markStopped ? '（已停止生成）' : '（连接已断开）';
         }
       }
+      saveNow();
+      paint();
+    }
+
+    activeChat = function () {
+      if (disposed) return;
+      abortGeneration(false);
+      if (draftTimer) clearTimeout(draftTimer);
+      if (saveTimer) clearTimeout(saveTimer);
+      if (scrollFrame) cancelAnimationFrame(scrollFrame);
+      page.removeEventListener('pp:page-activate', onActivate);
+      page.removeEventListener('pp:page-dispose', onDispose);
+      global.removeEventListener('pp:keys-updated', onKeysUpdated);
+      global.removeEventListener('pp:keys-changed', onKeysChanged);
+      global.removeEventListener('pp:chat-storage-warning', onStorageWarning);
       disposed = true;
     };
 
-    function save() {
-      session.updatedAt = Date.now();
-      state.sessions.sort(function (a, b) {
-        return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
-      });
-      state.sessions = state.sessions.slice(0, MAX_SESSIONS);
-      U.store.set(storeKey, state);
-    }
-    save();
-
-    // ---------- shell ----------
     var page = h('div', { class: 'page chat-wrap' });
-    var msgsHost = h('div', { id: 'msgs' });
+    var msgsHost = h('div', { id: 'msgs', 'aria-live': 'polite' });
     var info = h('div', { class: 'composer-meta' });
-    var tokenButton = h('button', { class: 'token-estimate-btn', type: 'button', 'aria-label': '查看 Token 使用量估算' });
-
-    var modelChip = h('button', { class: 'chip' }, h('span', null, session.model || '选择模型'));
-    var keyChip = h('button', { class: 'chip' }, h('span', null, '令牌'));
-    var settingBtn = h('button', { class: 'tool-btn', html: U.ic('settings', 18), 'aria-label': '对话设置' });
-    var historyBtn = h('button', { class: 'tool-btn', html: U.ic('clock', 18), 'aria-label': '历史对话' });
+    var tokenButton = h('button', {
+      class: 'token-estimate-btn', type: 'button',
+      'aria-label': '查看 Token 使用量估算'
+    });
+    var modelChip = h('button', { class: 'chip', type: 'button' },
+      h('span', null, session.model || '选择模型'));
+    var keyChip = h('button', { class: 'chip', type: 'button' }, h('span', null, '令牌'));
+    var settingBtn = pageIconButton('settings', '对话设置', openSettings);
+    var historyBtn = pageIconButton('clock', '历史对话', openHistory);
 
     page.appendChild(h('div', { class: 'chat-toolbar' },
-      h('div', { class: 'chips' }, modelChip, keyChip),
-      settingBtn, historyBtn
-    ));
+      h('div', { class: 'chips' }, modelChip, keyChip), settingBtn, historyBtn));
     page.appendChild(msgsHost);
 
-    var input = h('textarea', { rows: '1', placeholder: '输入消息', 'aria-label': '输入消息' });
-    var send = h('button', { class: 'send-btn', html: U.ic('send', 18), 'aria-label': '发送消息', title: '发送消息' });
+    var input = h('textarea', {
+      rows: '1', placeholder: '输入消息', 'aria-label': '输入消息',
+      autocomplete: 'off', spellcheck: 'false'
+    });
+    input.value = session.draft || '';
+    var send = h('button', {
+      class: 'send-btn', type: 'button', html: U.ic('send', 18),
+      'aria-label': '发送消息', title: '发送消息'
+    });
     page.appendChild(h('div', { class: 'composer' },
-      h('div', { class: 'composer-box' }, input, send), h('div', { class: 'composer-footer' }, info, tokenButton)));
+      h('div', { class: 'composer-box' }, input, send),
+      h('div', { class: 'composer-footer' }, info, tokenButton)));
 
-    // ---------- helpers ----------
     function activeKey() {
-      return keys.filter(function (k) { return String(k.id) === String(session.keyId); })[0] ||
-        keys.filter(function (k) { return String(k.status) === 'active'; })[0] || keys[0] || null;
+      return keys.filter(function (key) {
+        return String(key.id) === String(session.keyId);
+      })[0] || keys.filter(function (key) {
+        return String(key.status) === 'active';
+      })[0] || keys[0] || null;
+    }
+
+    function modelLimit() {
+      if (modelLimits[session.model]) return modelLimits[session.model];
+      if (plazaLimitSource !== global.S.plaza) {
+        plazaLimitSource = global.S.plaza;
+        plazaLimits = {};
+        C.plazaModels(plazaLimitSource).forEach(function (model) {
+          var value = Number(model.context);
+          if (!(value > 0 && isFinite(value))) return;
+          if (!plazaLimits[model.name]) plazaLimits[model.name] = [];
+          if (plazaLimits[model.name].indexOf(value) < 0) plazaLimits[model.name].push(value);
+        });
+      }
+      var values = plazaLimits[session.model] || [];
+      return values.length === 1 ? values[0] : 0;
+    }
+
+    function estimate() {
+      var image = isImageModel(session.model);
+      var context = image ? { messages: [], omitted: 0, total: 0 } :
+        Store.contextMessages(session, null, session.settings);
+      var contextTokens = context.messages.reduce(function (total, message) {
+        return total + estimateText(message.content) + 4;
+      }, 0);
+      var draftText = input.value.trim();
+      var inputTokens = draftText ? estimateText(draftText) + 4 : 0;
+      return {
+        input: inputTokens,
+        context: contextTokens,
+        count: context.messages.length,
+        omitted: context.omitted,
+        total: contextTokens + inputTokens,
+        limit: image ? 0 : modelLimit(),
+        image: image
+      };
+    }
+
+    function paintEstimate() {
+      var value = estimate();
+      tokenButton.textContent = 'Token 估算 · ' + U.num(value.total);
     }
 
     function paintInfo() {
@@ -219,13 +377,10 @@
       var key = activeKey();
       info.appendChild(h('span', { class: 'nowrap' }, session.model || '未选择模型'));
       info.appendChild(h('span', null, '·'));
-      info.appendChild(h('span', { class: 'nowrap' }, key ? ('令牌 ' + (key.name || U.maskKey(key.key))) : '未选择令牌'));
-      if (isImageModel(session.model)) {
-        info.appendChild(h('span', { class: 'badge teal', style: { flex: '0 0 auto' } }, '生图'));
-      }
-      if (session.settings.systemPrompt) {
-        info.appendChild(h('span', { class: 'badge teal' }, '系统提示词'));
-      }
+      info.appendChild(h('span', { class: 'nowrap' },
+        key ? ('令牌 ' + (key.name || U.maskKey(key.key))) : '未选择令牌'));
+      if (isImageModel(session.model)) info.appendChild(h('span', { class: 'badge teal' }, '生图'));
+      if (session.settings.systemPrompt) info.appendChild(h('span', { class: 'badge teal' }, '系统提示词'));
       var usage = estimate();
       if (usage.limit && !usage.image) {
         var ratio = Math.min(100, usage.total / usage.limit * 100);
@@ -238,254 +393,399 @@
       paintEstimate();
     }
 
-    function contextMessages(upto) {
-      var messages = session.messages.slice(0, upto)
-        .filter(function (m) { return m.content && m.content.length > 0; })
-        .map(function (m) { return { role: m.role, content: m.content }; });
-      if (session.settings.systemPrompt) messages.unshift({ role: 'system', content: session.settings.systemPrompt });
-      return messages;
-    }
-
-    function estimate() {
-      var image = isImageModel(session.model);
-      var context = image ? [] : contextMessages(session.messages.length);
-      var contextTokens = context.reduce(function (total, m) { return total + estimateText(m.content) + 4; }, 0);
-      var draft = input.value.trim();
-      var inputTokens = draft ? estimateText(draft) + 4 : 0;
-      return { input: inputTokens, context: contextTokens, count: context.length,
-        total: inputTokens + contextTokens, limit: image ? 0 : modelLimit(), image: image };
-    }
-    function modelLimit() {
-      if (modelLimits[session.model]) return modelLimits[session.model];
-      if (plazaLimitSource !== global.S.plaza) {
-        plazaLimitSource = global.S.plaza;
-        plazaLimits = {};
-        C.plazaModels(plazaLimitSource).forEach(function (m) {
-          var value = Number(m.context);
-          if (!(value > 0 && isFinite(value))) return;
-          if (!plazaLimits[m.name]) plazaLimits[m.name] = [];
-          if (plazaLimits[m.name].indexOf(value) < 0) plazaLimits[m.name].push(value);
-        });
-      }
-      var values = plazaLimits[session.model] || [];
-      return values.length === 1 ? values[0] : 0;
-    }
-    function paintEstimate() {
-      var value = estimate();
-      tokenButton.textContent = 'Token 估算 · ' + U.num(value.total);
-    }
     function openEstimate() {
       var value = estimate();
-      function row(label, number) {
-        return h('div', { class: 'token-row' }, h('span', null, label), h('strong', null, number));
-      }
-      var body = h('div', { class: 'token-details' },
-        row('当前输入', '约 ' + U.num(value.input)),
-        row('上下文', '约 ' + U.num(value.context)),
-        row('上下文消息数', U.num(value.count)),
-        row('总计', '约 ' + U.num(value.total)),
-        row('模型限制', value.image ? '不适用' : value.limit ? U.num(value.limit) : '未知'),
-        h('p', { class: 'token-note' }, value.image ? '生图请求仅发送当前输入；图片用量无法在此估算。' :
-          '按当前输入、已发送消息和系统提示词粗略估算，实际用量以模型服务返回为准。'));
-      U.sheet({ title: 'Token 使用量估算', body: body, actions: [{ label: '关闭' }] });
+      var rows = [
+        ['当前输入', '约 ' + U.num(value.input)],
+        ['上下文', '约 ' + U.num(value.context)],
+        ['上下文消息数', U.num(value.count)],
+        ['自动裁剪', value.omitted ? value.omitted + ' 条较早消息' : '未触发'],
+        ['总计', '约 ' + U.num(value.total)],
+        ['模型限制', value.image ? '不适用' : value.limit ? U.num(value.limit) : '未知']
+      ];
+      U.sheet({
+        title: 'Token 使用量估算',
+        body: h('div', { class: 'token-details' },
+          rows.map(function (row) {
+            return h('div', { class: 'token-row' }, h('span', null, row[0]), h('strong', null, row[1]));
+          }),
+          h('p', { class: 'token-note' }, value.image ?
+            '生图请求仅发送当前输入；图片用量无法在此估算。' :
+            '根据实际发送上下文粗略估算。上游返回 usage 时，消息底部会显示精确值。')),
+        actions: [{ label: '关闭' }]
+      });
     }
 
-    function scrollBottom(force) {
-      if (!App.isPageActive(page)) return;
+    function nearBottom() {
       var main = document.querySelector('main');
-      if (!main) return;
-      var near = main.scrollHeight - main.scrollTop - main.clientHeight < 200;
-      if (force || near) main.scrollTop = main.scrollHeight;
+      return !main || main.scrollHeight - main.scrollTop - main.clientHeight < 220;
     }
 
-    function isImageModel(name) {
-      return /(gpt-image|dall-?e|flux|seedream|imagen|wanx|qwen-image|nano-banana|midjourney|ideogram|recraft)/i.test(String(name || ''));
+    function scrollToBottom(force) {
+      if (!App.isPageActive(page) || (!force && !nearBottom())) return;
+      if (scrollFrame) return;
+      scrollFrame = requestAnimationFrame(function () {
+        scrollFrame = 0;
+        var main = document.querySelector('main');
+        if (main && App.isPageActive(page)) main.scrollTop = main.scrollHeight;
+      });
     }
 
-    function imageDataUri(value) {
-      var b64 = String(value || '').replace(/\s+/g, '');
-      var mime = /^\/9j\//.test(b64) ? 'image/jpeg' :
-        /^R0lGOD/.test(b64) ? 'image/gif' :
-        /^UklGR/.test(b64) ? 'image/webp' : 'image/png';
-      return 'data:' + mime + ';base64,' + b64;
-    }
-
-    function extractImage(d) {
-      var arr = (d && (d.data || d.images || d.output || d.results)) || [];
-      if (!Array.isArray(arr)) arr = [arr];
-      for (var i = 0; i < arr.length; i++) {
-        var it = arr[i];
-        if (typeof it === 'string') {
-          if (/^(https?:|data:)/.test(it)) return it;
-          continue;
-        }
-        if (!it) continue;
-        var b64 = it.b64_json || it.base64 || it.image_base64 || it.b64;
-        if (b64) return String(b64).indexOf('data:') === 0 ? b64 : imageDataUri(b64);
-        var u = it.url || it.image_url || it.image || (it.image && it.image.url);
-        if (u) return u;
-      }
-      if (d && typeof d.url === 'string') return d.url;
-      return '';
-    }
-
-    function extractText(d) {
-      var c = d && d.choices && d.choices[0];
-      if (c) return (c.message && c.message.content) || c.text || '';
-      if (d && typeof d.content === 'string') return d.content;
-      return '';
-    }
-
-    function prettyErr(err) {
-      var s = String(err || '').trim();
-      if (/^<(!doctype|html)/i.test(s)) return '服务返回了网页错误页（可能被网关/代理拦截，或该模型不支持此接口）';
-      try {
-        var j = JSON.parse(s);
-        if (j) {
-          if (j.error) return (typeof j.error === 'string' ? j.error : (j.error.message || j.error.msg || JSON.stringify(j.error))).slice(0, 300);
-          if (j.message) return String(j.message).slice(0, 300);
-        }
-      } catch (e) {}
-      return s.slice(0, 300) || '请求失败';
-    }
-
-    function fillBubble(body, msg) {
+    function fillBubble(body, message) {
       body.innerHTML = '';
-      if (msg.pending) {
+      if (message.pending && isImageModel(session.model) && !message.content) {
         body.appendChild(h('div', { class: 'img-wrap' }, h('div', { class: 'img-loading' })));
         body.appendChild(h('div', { class: 'tiny muted', style: { marginTop: '8px' } }, '正在生成图片…'));
         return;
       }
-      if (msg.content) {
-        body.appendChild(msg.role === 'user' ? h('div', { class: 'bubble-text user-text' }, msg.content) :
-          h('div', { class: 'bubble-text markdown-body', html: md(msg.content) }));
+      if (message.reasoning) {
+        var reasoning = h('details', { class: 'chat-reasoning' },
+          h('summary', null, '思考过程'),
+          h('div', { class: 'markdown-body reasoning-body', html: md(message.reasoning) }));
+        body.appendChild(reasoning);
       }
-      if (msg.image) {
-        var img = h('img', { class: 'gen', alt: '生成图片', src: msg.image });
-        img.addEventListener('click', function (e) {
-          e.stopPropagation();
+      if (message.content) {
+        body.appendChild(message.role === 'user' ?
+          h('div', { class: 'bubble-text user-text' }, message.content) :
+          h('div', { class: 'bubble-text markdown-body', html: md(message.content) }));
+      }
+      if (message.image) {
+        var image = h('img', { class: 'gen', alt: '生成图片', src: message.image });
+        image.addEventListener('click', function (event) {
+          event.stopPropagation();
           U.sheet({
             title: '生成结果',
-            body: h('div', null, h('img', { src: msg.image, style: { width: '100%', borderRadius: '14px' } })),
+            body: h('div', null, h('img', { src: message.image, style: { width: '100%', borderRadius: '8px' } })),
             actions: [{ label: '关闭' }]
           });
         });
-        body.appendChild(img);
+        body.appendChild(image);
       }
-      if (msg.error) {
-        body.appendChild(h('div', { class: 'err-box' }, '⚠ ' + msg.error));
-        if (msg.detail) body.appendChild(h('div', { class: 'err-detail' }, msg.detail));
+      if (message.error) {
+        body.appendChild(h('div', { class: 'err-box' }, '⚠ ' + message.error));
+        if (message.detail) body.appendChild(h('div', { class: 'err-detail' }, message.detail));
       }
+      if (message.pending && !message.image) {
+        body.appendChild(h('span', { class: 'typing', 'aria-label': '正在生成' }, h('i'), h('i'), h('i')));
+      }
+      if (!body.children.length) body.appendChild(h('span', { class: 'tiny muted' }, '（无内容）'));
     }
 
-    function bubble(msg) {
-      var isUser = msg.role === 'user';
-      var row = h('div', { class: 'bubble-row ' + (isUser ? 'me' : 'ai') });
-      var body = h('div', { class: 'bubble' });
-      fillBubble(body, msg);
-      if (!isUser) row.appendChild(h('div', { class: 'chat-avatar', 'aria-hidden': 'true', html: U.ic('sparkle', 16) }));
+    function messageMeta(message) {
+      var bits = [];
+      if (message.role !== 'user') {
+        if (message.model) bits.push(message.model);
+        bits.push(U.datetime(message.finishedAt || message.createdAt));
+        var timing = timingLabel(message);
+        if (timing) bits.push('耗时 ' + timing);
+        var usage = summaryUsage(message.usage);
+        if (usage) bits.push(usage);
+      }
+      if (message.stopped) bits.push('已停止');
+      if (message.favorite) bits.push('已收藏');
+      if (!bits.length) return null;
+      return h('div', { class: 'chat-message-meta' + (message.role === 'user' ? ' me' : '') },
+        bits.map(function (bit) { return h('span', null, bit); }));
+    }
+
+    function candidateSwitcher(node, message) {
+      if (!node || node.messages.length < 2) return null;
+      function go(index) {
+        if (streaming) return;
+        Store.selectCandidate(node, index);
+        session.updatedAt = Date.now();
+        saveNow();
+        paint();
+      }
+      return h('div', { class: 'message-branches', role: 'group', 'aria-label': '回答版本' },
+        h('button', {
+          type: 'button', 'aria-label': '上一个回答', title: '上一个回答',
+          disabled: node.selectIndex <= 0 ? '' : null,
+          onclick: function () { go(node.selectIndex - 1); }
+        }, '‹'),
+        h('span', { class: 'branch-count' }, (node.selectIndex + 1) + ' / ' + node.messages.length),
+        h('button', {
+          type: 'button', 'aria-label': '下一个回答', title: '下一个回答',
+          disabled: node.selectIndex >= node.messages.length - 1 ? '' : null,
+          onclick: function () { go(node.selectIndex + 1); }
+        }, '›'));
+    }
+
+    function rowFor(node, message, index) {
+      var isUser = message.role === 'user';
+      var row = h('div', {
+        class: 'bubble-row ' + (isUser ? 'me' : 'ai'),
+        'data-node-id': node.id,
+        'data-message-id': message.id
+      });
+      var body = h('div', { class: 'bubble' + (message.favorite ? ' is-favorite' : '') });
+      fillBubble(body, message);
+      if (!isUser) row.appendChild(h('div', {
+        class: 'chat-avatar', 'aria-hidden': 'true', html: U.ic('sparkle', 16)
+      }));
       row.appendChild(body);
       return row;
     }
-    function editMessage(index) {
-      if (streaming) return;
-      var msg = session.messages[index];
-      if (!msg || msg.role !== 'user') return;
-      var draft = h('textarea', { class: 'textarea chat-edit-input', rows: '5', 'aria-label': '编辑消息' });
-      draft.value = msg.content;
-      U.sheet({
-        title: '编辑并重新发送',
-        body: h('div', null, draft, h('p', { class: 'tiny muted' }, '这条消息之后的内容会被移除，并从编辑后的内容继续对话。')),
-        actions: [
-          { label: '取消' },
-          { label: '重新发送', kind: 'primary', onClick: function () {
-            var text = draft.value.trim();
-            if (!text) { U.toast('消息不能为空', 'err'); return false; }
-            session.messages = session.messages.slice(0, index + 1);
-            session.messages[index].content = text;
-            session.messages[index].error = '';
-            persistAndPaint();
-            runCompletion();
-            return true;
-          } }
-        ]
+
+    function messageMenu(node, message, index) {
+      var options = [];
+      function add(label, icon, handler, danger) {
+        options.push(h('button', {
+          class: 'list-item' + (danger ? ' text-danger' : ''), type: 'button',
+          onclick: function () {
+            U.closeOverlay();
+            handler();
+          }
+        }, h('span', { class: 'li-icon', html: U.ic(icon, 17) }),
+          h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, label))));
+      }
+      add(message.favorite ? '取消收藏' : '收藏这条消息', 'star', function () {
+        message.favorite = !message.favorite;
+        saveNow();
+        paint();
       });
+      add('复制消息内容', 'copy', function () {
+        U.copy(Store.messageText(message));
+      });
+      if (message.role === 'user' && !streaming) {
+        add('编辑并创建新版本', 'edit', function () { editMessage(node, message); });
+      }
+      if (message.role === 'assistant' && !streaming) {
+        add('重新生成这一条', 'refresh', function () {
+          regenerateNode(node, false);
+        });
+        add('非流式重试', 'play', function () {
+          regenerateNode(node, true);
+        });
+      }
+      if (!message.pending && !streaming) {
+        add('保留到这里并另建对话', 'branch', function () { branchFrom(node); });
+      }
+      if (node.messages.length > 1 && message.role === 'assistant') {
+        add('删除当前回答版本', 'trash', function () { removeCandidate(node, message); }, true);
+      } else {
+        add('从对话中删除', 'trash', function () { deleteMessage(node, message); }, true);
+      }
+      U.sheet({ title: '消息操作', body: h('div', { class: 'chat-action-menu' }, options) });
     }
-    function branchFrom(index) {
-      var source = session.messages.slice(0, index + 1);
-      if (!source.length) return;
-      var copy = makeSession(session.model, session.keyId);
-      copy.messages = JSON.parse(JSON.stringify(source));
-      copy.title = titleOf(copy.messages);
-      copy.settings = JSON.parse(JSON.stringify(session.settings));
-      copy.createdAt = Date.now();
-      copy.updatedAt = Date.now();
-      state.sessions.unshift(copy);
-      state.activeId = copy.id;
-      save();
-      U.toast('已创建分支对话', 'ok');
-      App.go('#/chat', true);
+
+    function inlineActions(node, message) {
+      if (message.pending) return null;
+      var items = [];
+      if (message.error && message.role === 'assistant') {
+        items.push(h('button', {
+          class: 'retry-action', type: 'button', title: '重试',
+          'aria-label': '重试', onclick: function (event) {
+            event.stopPropagation();
+            regenerateNode(node, false);
+          }
+        }, U.ic('refresh', 14), h('span', null, '重试')));
+        items.push(h('button', {
+          class: 'retry-action', type: 'button', title: '非流式重试',
+          'aria-label': '非流式重试', onclick: function (event) {
+            event.stopPropagation();
+            regenerateNode(node, true);
+          }
+        }, U.ic('play', 14), h('span', null, '非流式')));
+      }
+      items.push(actionButton('copy', '复制消息', function () {
+        U.copy(Store.messageText(message));
+      }));
+      if (message.role === 'user' && !streaming) {
+        items.push(actionButton('edit', '编辑并创建新版本', function () { editMessage(node, message); }));
+      }
+      if (message.role === 'assistant' && !streaming) {
+        items.push(actionButton('refresh', '重新生成', function () { regenerateNode(node, false); }, 'retry-action'));
+      }
+      items.push(actionButton('more', '更多消息操作', function () {
+        messageMenu(node, message);
+      }));
+      var actions = messageActions(items, message.role === 'user' ? 'me' : 'ai');
+      actions.setAttribute('data-node-id', node.id);
+      actions.setAttribute('data-message-id', message.id);
+      return actions;
     }
 
     function paint() {
       msgsHost.innerHTML = '';
-      if (!session.messages.length) {
+      if (!session.nodes.length) {
         msgsHost.appendChild(h('div', { class: 'chat-welcome' },
           h('div', { class: 'chat-welcome-icon', html: U.ic('chat', 25) }),
-          h('h2', null, '开始新的对话'), h('p', null, session.model || '选择模型后开始')));
+          h('h2', null, '开始新的对话'),
+          h('p', null, session.model || '选择模型后开始')));
         if (!keys.length) {
           msgsHost.appendChild(h('div', { style: { textAlign: 'center', marginTop: '-12px' } },
-            h('button', { class: 'btn btn-primary btn-sm', onclick: function () { App.go('#/keys'); } }, '创建我的第一个令牌')));
+            h('button', {
+              class: 'btn btn-primary btn-sm', type: 'button',
+              onclick: function () { App.go('#/keys'); }
+            }, '创建我的第一个令牌')));
         } else {
-          msgsHost.appendChild(h('div', { class: 'suggests' }, SUGGESTS.map(function (t) {
+          msgsHost.appendChild(h('div', { class: 'suggests' }, SUGGESTS.map(function (text) {
             return h('button', {
-              class: 'suggest',
-              onclick: function () { input.value = t; autoGrow(); paintEstimate(); input.focus(); }
-            }, t);
+              class: 'suggest', type: 'button',
+              onclick: function () {
+                input.value = text;
+                saveDraft();
+                autoGrow();
+                paintEstimate();
+                input.focus();
+              }
+            }, text);
           })));
         }
-        paintEstimate();
+      } else {
+        session.nodes.forEach(function (node, index) {
+          var message = Store.selected(node);
+          if (!message) return;
+          var row = rowFor(node, message, index);
+          var switcher = candidateSwitcher(node, message);
+          if (switcher) row.querySelector('.bubble').appendChild(switcher);
+          var meta = messageMeta(message);
+          if (meta) row.querySelector('.bubble').appendChild(meta);
+          msgsHost.appendChild(row);
+          var actions = inlineActions(node, message);
+          if (actions) msgsHost.appendChild(actions);
+        });
+      }
+      paintEstimate();
+      paintInfo();
+    }
+
+    function saveDraft() {
+      session.draft = input.value;
+      if (draftTimer) clearTimeout(draftTimer);
+      draftTimer = global.setTimeout(function () {
+        draftTimer = 0;
+        if (!disposed) Store.saveDraft(accountId, state, session.id, session.draft);
+      }, 250);
+    }
+
+    function sendMessage() {
+      if (streaming) {
+        U.toast('正在生成，可先停止');
         return;
       }
-      session.messages.forEach(function (m, i) {
-        msgsHost.appendChild(bubble(m));
-        var last = i === session.messages.length - 1;
-        if (!m.pending && (m.content || (m.role !== 'user' && last && !streaming))) {
-          var actions = [];
-          if (m.content) actions.push(h('button', { 'aria-label': '复制消息', title: '复制消息', html: U.ic('copy', 15), onclick: function () { U.copy(m.content); } }));
-          if (m.role === 'user' && !streaming) {
-            actions.push(h('button', { 'aria-label': '编辑并重新发送', title: '编辑并重新发送', html: U.ic('edit', 15), onclick: function () { editMessage(i); } }));
-          }
-          if (m.content && !m.pending && !streaming) {
-            actions.push(h('button', { 'aria-label': '从这里创建分支', title: '从这里创建分支', html: U.ic('branch', 15), onclick: function () { branchFrom(i); } }));
-          }
-          if (m.role !== 'user' && last && !streaming && m.error) {
-            actions.push(h('button', { onclick: regenerate }, '重试'));
-            actions.push(h('button', { onclick: regenerateStreaming }, '非流式重试'));
-          } else if (m.role !== 'user' && last && !streaming) {
-            actions.push(h('button', { onclick: regenerate }, m.image ? '再生成一张' : '重新生成'));
-          }
-          if (actions.length) msgsHost.appendChild(h('div', { class: 'msg-actions ' + (m.role === 'user' ? 'me' : 'ai') }, actions));
-        }
+      var text = input.value.trim();
+      if (!text) return;
+      if (!session.model) {
+        U.toast('请先选择模型', 'err');
+        selectModel();
+        return;
+      }
+      if (!activeKey()) {
+        U.toast('请先创建并选择令牌', 'err');
+        return;
+      }
+      var node = Store.appendUserNode(session, text, {
+        model: session.model,
+        keyName: (activeKey() || {}).name || ''
       });
-      paintEstimate();
-      scrollBottom(true);
-    }
-
-    function persistAndPaint() {
-      if (!session.title || session.title === '新对话') session.title = titleOf(session.messages);
-      save();
+      input.value = '';
+      session.draft = '';
+      autoGrow();
+      saveNow();
       paint();
+      scrollToBottom(true);
+      if (isImageModel(session.model)) runImage(node, text);
+      else runCompletion(node, false, null);
     }
 
-    // ---------- request payload ----------
-    function buildPayload(upto) {
-      var p = { model: session.model, messages: contextMessages(upto), stream: true };
-      var t = session.settings.temperature;
-      if (t !== null && t !== '' && isFinite(Number(t))) p.temperature = Number(t);
-      var m = session.settings.maxTokens;
-      if (m !== null && m !== '' && Number(m) > 0) p.max_tokens = Number(m);
-      return p;
+    function editablePrompt(node) {
+      var message = Store.selected(node);
+      if (!message || message.role !== 'user') return '';
+      return message.content;
+    }
+
+    function editMessage(node, message) {
+      if (streaming) return;
+      var draft = h('textarea', { class: 'textarea chat-edit-input', rows: '5', 'aria-label': '编辑消息' });
+      draft.value = message.content;
+      U.sheet({
+        title: '编辑并创建新版本',
+        body: h('div', null, draft,
+          h('p', { class: 'tiny muted' }, '旧问题和回答会保留，可在版本切换中找回。')),
+        actions: [
+          { label: '取消' },
+          {
+            label: '保存并重新生成', kind: 'primary', onClick: function () {
+              var value = draft.value.trim();
+              if (!value) { U.toast('消息不能为空', 'err'); return false; }
+              var replacement = Store.normalizeMessage(Object.assign({}, message, {
+                id: Store.uid('m'),
+                content: value,
+                error: '',
+                detail: '',
+                pending: false,
+                stopped: false,
+                createdAt: Date.now(),
+                finishedAt: 0
+              }), 'user');
+              node.messages.push(replacement);
+              node.selectIndex = node.messages.length - 1;
+              session.nodes = session.nodes.slice(0, session.nodes.indexOf(node) + 1);
+              if (!session.title || session.title === '新对话') session.title = Store.titleOf(session);
+              saveNow();
+              paint();
+              if (isImageModel(session.model)) runImage(node, value);
+              else runCompletion(node, false, null);
+              return true;
+            }
+          }
+        ]
+      });
+    }
+
+    function deleteMessage(node, message) {
+      U.confirm('删除消息', '这会从当前对话中移除这条消息，相关回答也会一并移除。', '删除', true)
+        .then(function (ok) {
+          if (!ok || !isCurrent()) return;
+          Store.removeNode(session, node);
+          saveNow();
+          paint();
+          U.toast('已删除消息', 'ok');
+        });
+    }
+
+    function removeCandidate(node, message) {
+      U.confirm('删除这个回答版本', '其他回答版本会保留。', '删除', true).then(function (ok) {
+        if (!ok || !isCurrent()) return;
+        Store.removeCandidate(node, message);
+        saveNow();
+        paint();
+        U.toast('已删除回答版本', 'ok');
+      });
+    }
+
+    function branchFrom(node) {
+      var index = session.nodes.indexOf(node);
+      if (index < 0) return;
+      var copy = Store.makeSession(session.model, session.keyId);
+      copy.title = Store.titleOf(session);
+      copy.settings = Store.normalizeSettings(session.settings);
+      copy.nodes = Store.clone(session.nodes.slice(0, index + 1));
+      copy.draft = '';
+      copy.createdAt = Date.now();
+      copy.updatedAt = Date.now();
+      state.sessions.unshift(copy);
+      state.activeId = copy.id;
+      saveNow();
+      U.closeOverlay();
+      App.go('#/chat', true);
+    }
+
+    function buildPayload(node, forceNonStream) {
+      var upto = session.nodes.indexOf(node) + 1;
+      var context = Store.contextMessages(session, upto, session.settings);
+      var payload = { model: session.model, messages: context.messages, stream: !forceNonStream };
+      var temperature = session.settings.temperature;
+      if (temperature !== null && temperature !== '' && isFinite(Number(temperature))) {
+        payload.temperature = Number(temperature);
+      }
+      var maxTokens = session.settings.maxTokens;
+      if (maxTokens !== null && maxTokens !== '' && Number(maxTokens) > 0) {
+        payload.max_tokens = Number(maxTokens);
+      }
+      return payload;
     }
 
     function setBusy(on) {
@@ -496,256 +796,303 @@
       send.style.background = on ? 'var(--danger)' : '';
     }
 
-    // ---------- text chat (SSE, with non-stream fallback) ----------
-    function runCompletion(forceNonStream) {
+    function setMessageContent(target, message, run) {
+      if (!isCurrent() || !run || run.id !== currentRun || message.runId !== run.id) return;
+      target.innerHTML = '';
+      if (message.reasoning) {
+        target.appendChild(h('details', { class: 'chat-reasoning', open: '' },
+          h('summary', null, '思考过程'),
+          h('div', { class: 'markdown-body reasoning-body', html: md(message.reasoning) })));
+      }
+      target.appendChild(message.content ?
+        h('div', { class: 'bubble-text markdown-body', html: md(message.content) }) :
+        h('span', { class: 'typing', 'aria-label': '正在生成' }, h('i'), h('i'), h('i')));
+    }
+
+    function runCompletion(promptNode, forceNonStream, existingNode) {
+      if (disposed || !isCurrent()) return;
       var key = activeKey();
-      if (!session.model) { U.toast('请先选择模型', 'err'); selectModel(); return; }
-      if (!key) { U.toast('请先创建并选择令牌', 'err'); return; }
-      controller = null;
-      var run = ++completionRun;
-      function currentRun() { return isCurrent() && run === completionRun; }
-
-      var aiMsg = { role: 'assistant', content: '' };
-      session.messages.push(aiMsg);
-      save();
-      var row = bubble(aiMsg);
-      var target = row.querySelector('.bubble');
-      target.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-      msgsHost.appendChild(row);
-      scrollBottom(true);
+      if (!session.model) {
+        U.toast('请先选择模型', 'err');
+        selectModel();
+        return;
+      }
+      if (!key) {
+        U.toast('请先创建并选择令牌', 'err');
+        return;
+      }
+      var node = existingNode ||
+        Store.appendAssistantNode(session, promptNode, { model: session.model });
+      var message = Store.selected(node);
+      if (!message) return;
+      var run = { id: Store.uid('run'), seq: ++runSeq };
+      currentRun = run;
+      message.pending = true;
+      message.error = '';
+      message.detail = '';
+      message.model = session.model;
+      message.keyName = key.name || '';
+      message.runId = run.id;
+      message.createdAt = Date.now();
+      message.finishedAt = 0;
+      saveNow();
       setBusy(true);
-      stopped = false;
+      paint();
+      scrollToBottom(true);
 
-      var payload = buildPayload(session.messages.length - 1);
-      var done = false;
+      var targetRow = document.querySelector('.bubble-row[data-message-id="' + message.id + '"] .bubble');
       var frame = 0;
+      var completed = false;
+      var fallbackStarted = false;
+      var payload = buildPayload(promptNode || node, forceNonStream);
 
+      function stillCurrent() {
+        return isCurrent() && currentRun === run && run.seq === runSeq;
+      }
+      function finish() {
+        if (completed || !stillCurrent()) return;
+        completed = true;
+        message.pending = false;
+        message.finishedAt = Date.now();
+        currentRun = null;
+        currentController = null;
+        setBusy(false);
+        saveNow();
+        paint();
+        scrollToBottom();
+      }
+      function fail(error, status, detail) {
+        if (!stillCurrent()) return;
+        completed = true;
+        message.pending = false;
+        message.error = prettyErr(error);
+        message.detail = (detail ? detail + '\n' : '') +
+          (status ? 'HTTP ' + status + '\n' : '') + String(error || '').slice(0, 700);
+        message.finishedAt = Date.now();
+        currentRun = null;
+        currentController = null;
+        setBusy(false);
+        saveNow();
+        paint();
+        U.toast('生成失败，可从消息菜单重试', 'err');
+      }
       function paintStream() {
         frame = 0;
-        if (!currentRun() || done) return;
-        target.innerHTML = '<div class="bubble-text markdown-body">' + md(aiMsg.content) + '</div>';
+        if (!stillCurrent() || !targetRow) return;
+        setMessageContent(targetRow, message, run);
         paintEstimate();
-        scrollBottom();
+        scrollToBottom();
+      }
+      function applyDelta(data) {
+        if (!stillCurrent()) return;
+        var choice = data && data.choices && data.choices[0];
+        if (!choice) {
+          var usage = extractUsage(data);
+          if (usage) message.usage = mergeUsage(message.usage, usage);
+          return;
+        }
+        var delta = choice.delta || choice.message || {};
+        var content = typeof delta.content === 'string' ? delta.content : '';
+        var reasoning = delta.reasoning_content || delta.reasoning || '';
+        if (content) message.content += content;
+        if (reasoning) message.reasoning += reasoning;
+        if (choice.finish_reason) message.finishReason = choice.finish_reason;
+        message.usage = mergeUsage(message.usage, extractUsage(data));
+        if ((content || reasoning) && !frame) frame = global.setTimeout(paintStream, 48);
       }
 
-      function fail(err, status, detail) {
-        aiMsg.error = prettyErr(err);
-        aiMsg.detail = (detail ? detail + '\n' : '') + (status ? 'HTTP ' + status + '\n' : '') +
-          String(err || '').slice(0, 700);
-        persistAndPaint();
-        U.toast('生成失败，可点「重试」', 'err');
-      }
-
-      function ok(text) {
-        aiMsg.content = text;
-        aiMsg.error = null;
-        aiMsg.detail = '';
-        persistAndPaint();
-      }
-
-      function nonStreamFallback(reason) {
-        if (done) return;
-        done = true;
-        Api.chatOnce(key.key, payload).then(function (d) {
-          if (stopped || !currentRun()) return;
-          setBusy(false);
-          var text = extractText(d);
+      function nonStream(reason) {
+        if (!stillCurrent() || fallbackStarted) return;
+        fallbackStarted = true;
+        if (currentController) {
+          try { currentController.abort(); } catch (e) {}
+          currentController = null;
+        }
+        var oncePayload = Object.assign({}, payload, { stream: false });
+        Api.chatOnce(key.key, oncePayload).then(function (data) {
+          if (!stillCurrent()) return;
+          var text = extractText(data);
+          var reasoning = extractReasoning(data);
+          if (text) message.content = text;
+          if (reasoning) message.reasoning = reasoning;
+          message.usage = mergeUsage(message.usage, extractUsage(data));
           if (!text) {
-            var img = extractImage(d);
-            if (img) { aiMsg.image = img; aiMsg.content = ''; persistAndPaint(); return; }
-            throw new Error('接口未返回文本：' + JSON.stringify(d).slice(0, 200));
+            var image = extractImage(data);
+            if (image) message.image = image;
+            else throw new Error('接口未返回文本：' + JSON.stringify(data).slice(0, 200));
           }
-          ok(text);
-        }).catch(function (e) {
-          if (stopped || !currentRun()) return;
-          setBusy(false);
-          fail(e.message || '请求失败', e.status || 0, '流式失败：' + reason + '\n非流式回退失败：' + (e.message || ''));
-        }).then(function () {
-          if (currentRun()) setBusy(false);
+          message.error = '';
+          finish();
+        }).catch(function (error) {
+          fail(error.message || reason || '请求失败', error.status, '流式回退：' + reason);
         });
-      }
-
-      function finish(err, status, detail) {
-        if (done || !currentRun()) return;
-        if (!err) {
-          done = true;
-          setBusy(false);
-          if (!aiMsg.content) {
-            aiMsg.content = '（无内容返回）';
-            persistAndPaint();
-          } else {
-            persistAndPaint();
-          }
-          scrollBottom();
-          return;
-        }
-        if (stopped) {
-          done = true;
-          setBusy(false);
-          if (!aiMsg.content) aiMsg.content = '（已停止）';
-          persistAndPaint();
-          scrollBottom();
-          return;
-        }
-        // retry once without streaming for transport-ish failures
-        var retryable = !status || status === 0 || status >= 500 || /网络|超时|timed? ?out|network/i.test(String(err));
-        if (retryable) {
-          nonStreamFallback(String(err) + (status ? ' (' + status + ')' : ''));
-          return;
-        }
-        done = true;
-        setBusy(false);
-        fail(err, status, detail);
       }
 
       if (forceNonStream) {
-        nonStreamFallback('手动选择非流式');
+        nonStream('主动使用非流式请求');
         return;
       }
 
-      controller = Api.chatStream(payload, key.key, {
-        onEvent: function (j) {
-          if (!currentRun() || stopped || done) return;
-          var choice = j && j.choices && j.choices[0];
-          if (!choice) {
-            if (j && j.error) finish((j.error && j.error.message) || '上游返回错误', 0, '');
-            return;
+      try {
+        currentController = Api.chatStream(payload, key.key, {
+          idleTimeoutMs: 90000,
+          onEvent: function (data) {
+            if (!stillCurrent() || completed) return;
+            if (data && data.error) {
+              fail(data.error.message || data.error, 0, '');
+              return;
+            }
+            applyDelta(data);
+          },
+          onDone: function () {
+            if (!stillCurrent()) return;
+            if (!message.content && !message.reasoning && !message.image) {
+              message.content = '（无内容返回）';
+            }
+            message.error = '';
+            finish();
+          },
+          onError: function (error, status) {
+            if (!stillCurrent()) return;
+            if (!status || status === 0 || status >= 500 ||
+                /超时|网络|timeout|network/i.test(String(error))) {
+              nonStream(String(error));
+              return;
+            }
+            fail(error, status, '流式请求失败');
           }
-          var d = choice.delta || choice.message || {};
-          var chunk = d.content || d.reasoning_content || '';
-          if (chunk) {
-            aiMsg.content += chunk;
-        if (!frame) frame = global.setTimeout(paintStream, 120);
-          }
-        },
-        onDone: function () { finish(null); },
-        onError: function (msg, status) { finish(msg || '网络错误', status); }
-      });
-
-      setTimeout(function () {
-        if (currentRun() && streaming && !done) {
-          try { controller.abort(); } catch (e) {}
-          finish('请求超时', 0);
-        }
-      }, 180000);
+        });
+      } catch (error) {
+        nonStream(error.message || '无法建立流式连接');
+      }
     }
 
-    // ---------- image generation ----------
-    function runImage(prompt) {
+    function runImage(promptNode, prompt) {
       var key = activeKey();
-      if (!key) { U.toast('请先创建并选择令牌', 'err'); return; }
-      controller = null;
-      var run = ++imageRun;
-      var aiMsg = { role: 'assistant', content: '', pending: true };
-      session.messages.push(aiMsg);
-      save();
-      paint();
+      if (!key) {
+        U.toast('请先创建并选择令牌', 'err');
+        return;
+      }
+      var node = Store.appendAssistantNode(session, promptNode, { model: session.model });
+      var message = Store.selected(node);
+      var run = { id: Store.uid('run'), seq: ++runSeq };
+      currentRun = run;
+      message.pending = true;
+      message.runId = run.id;
+      message.createdAt = Date.now();
+      saveNow();
       setBusy(true);
+      paint();
+      scrollToBottom(true);
 
+      function current() {
+        return isCurrent() && currentRun === run && run.seq === runSeq;
+      }
       function end() {
-        if (run !== imageRun || !isCurrent()) return;
-        aiMsg.pending = false;
+        if (!current()) return;
+        message.pending = false;
+        message.finishedAt = Date.now();
+        currentRun = null;
+        currentController = null;
         setBusy(false);
-        persistAndPaint();
-        scrollBottom();
+        saveNow();
+        paint();
+        scrollToBottom();
       }
-
-      function done(img, revised) {
-        if (run !== imageRun || !isCurrent()) return;
-        aiMsg.image = img;
-        if (revised && typeof revised === 'string') aiMsg.content = '';
-        end();
-      }
-
-      function failed(err, detail) {
-        if (run !== imageRun || !isCurrent()) return;
-        aiMsg.error = prettyErr(err);
-        aiMsg.detail = (detail ? detail + '\n' : '') + String(err || '').slice(0, 700);
+      function failed(error, detail) {
+        if (!current()) return;
+        message.error = prettyErr(error);
+        message.detail = String(detail || error || '').slice(0, 700);
         end();
         U.toast('图片生成失败', 'err');
       }
-
-      function call(payload) {
-        return Api.generateImage(key.key, payload).then(function (d) {
-          var img = extractImage(d);
-          if (!img) {
-            var t = extractText(d);
-            throw new Error(t || ('接口未返回图片：' + JSON.stringify(d).slice(0, 220)));
+      function request(payload) {
+        return Api.generateImage(key.key, payload).then(function (data) {
+          if (!current()) return;
+          var image = extractImage(data);
+          if (!image) {
+            var text = extractText(data);
+            throw new Error(text || ('接口未返回图片：' + JSON.stringify(data).slice(0, 220)));
           }
-          var arr = (d && d.data) || [];
-          var first = Array.isArray(arr) ? (arr[0] || {}) : {};
-          done(img, first.revised_prompt);
+          message.image = image;
+          message.usage = mergeUsage(message.usage, extractUsage(data));
+          var first = Array.isArray(data.data) ? (data.data[0] || {}) : {};
+          if (first.revised_prompt) message.revision = String(first.revised_prompt);
+          end();
         });
       }
-
-      var base = { model: session.model, prompt: prompt, n: 1, size: '1024x1024' };
-      call(base).catch(function (e) {
-        if (!isCurrent()) return;
-        var msg = String(e.message || '');
-        // some gateways reject size/n; retry with the minimal payload
-        if (/size|resolution|invalid|unsupported|unknown/i.test(msg)) {
-          return call({ model: session.model, prompt: prompt }).catch(function (e2) {
-            failed(e2.message || msg, '模型：' + session.model);
-          });
-        }
-        failed(msg, '模型：' + session.model);
-
-      });
+      request({ model: session.model, prompt: prompt, n: 1, size: '1024x1024' })
+        .catch(function (error) {
+          if (!current()) return;
+          if (/size|resolution|invalid|unsupported|unknown/i.test(String(error.message || ''))) {
+            return request({ model: session.model, prompt: prompt })
+              .catch(function (second) { failed(second.message || error.message, '模型：' + session.model); });
+          }
+          failed(error.message || '请求失败', '模型：' + session.model);
+        });
     }
 
-    function sendMessage() {
-      if (streaming) { U.toast('正在生成，可先停止'); return; }
-      var text = input.value.trim();
-      if (!text) return;
-      if (!session.model) { U.toast('请先选择模型', 'err'); selectModel(); return; }
-      if (!activeKey()) { U.toast('请先创建并选择令牌', 'err'); return; }
-      input.value = '';
-      autoGrow();
-      session.messages.push({ role: 'user', content: text });
-      if (!session.title || session.title === '新对话') session.title = titleOf(session.messages);
-      save();
-      paint();
-      if (isImageModel(session.model)) runImage(text);
-      else runCompletion(false);
-    }
-
-    function regenerate(forceNonStream) {
-      if (streaming) return;
-      var lastUser = null;
-      while (session.messages.length) {
-        var m = session.messages[session.messages.length - 1];
-        if (m.role === 'user') { lastUser = m; break; }
-        session.messages.pop();
+    function regenerateNode(node, forceNonStream) {
+      if (streaming || !node) return;
+      var index = session.nodes.indexOf(node);
+      if (index < 0) return;
+      var promptNode = null;
+      var prompt = '';
+      var selectedMessage = Store.selected(node);
+      if (selectedMessage && selectedMessage.role === 'user') {
+        promptNode = node;
+        prompt = selectedMessage.content;
+      } else if (selectedMessage && selectedMessage.role === 'assistant') {
+        promptNode = session.nodes[index - 1];
+        prompt = promptNode && editablePrompt(promptNode);
       }
-      if (!lastUser) return;
-      save();
+      if (!promptNode || !prompt) {
+        U.toast('找不到对应的用户消息', 'err');
+        return;
+      }
+      if (selectedMessage && selectedMessage.role === 'user') {
+        session.nodes = session.nodes.slice(0, index + 1);
+        saveNow();
+        paint();
+        if (isImageModel(session.model)) runImage(promptNode, prompt);
+        else runCompletion(promptNode, !!forceNonStream, null);
+        return;
+      }
+      if (!selectedMessage || selectedMessage.role !== 'assistant') {
+        U.toast('这条消息不能重新生成', 'err');
+        return;
+      }
+      var newMessage = Store.normalizeMessage({
+        role: 'assistant', content: '', pending: true,
+        model: session.model, createdAt: Date.now()
+      }, 'assistant');
+      Store.addCandidate(node, newMessage);
+      session.nodes = session.nodes.slice(0, index + 1);
+      saveNow();
       paint();
-      if (isImageModel(session.model)) runImage(lastUser.content);
-      else runCompletion(!!forceNonStream);
+      if (isImageModel(session.model)) runImage(promptNode, editablePrompt(promptNode));
+      else runCompletion(promptNode, !!forceNonStream, node);
     }
-
-    function regenerateStreaming() { regenerate(true); }
 
     send.addEventListener('click', function () {
       if (streaming) {
-        stopped = true;
-        imageRun++;
-        completionRun++;
-        if (controller) { try { controller.abort(); } catch (e) {} }
-        var last = session.messages[session.messages.length - 1];
-        if (last && last.role === 'assistant') {
-          last.pending = false;
-          if (!last.content) last.content = '（已停止）';
-        }
-        setBusy(false);
-        persistAndPaint();
+        abortGeneration(true);
+        U.toast('已停止生成', 'ok');
         return;
       }
       sendMessage();
     });
-    input.addEventListener('input', function () { autoGrow(); paintEstimate(); });
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    input.addEventListener('input', function () {
+      session.draft = input.value;
+      saveDraft();
+      autoGrow();
+      paintEstimate();
+    });
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        sendMessage();
+      }
     });
 
     function autoGrow() {
@@ -753,7 +1100,6 @@
       input.style.height = Math.min(120, input.scrollHeight) + 'px';
     }
 
-    // ---------- model & key pickers ----------
     function selectModel() {
       if (!modelList.length) {
         loadModels(function () {
@@ -762,146 +1108,171 @@
         });
         return;
       }
-      var q = h('input', { class: 'input', placeholder: '搜索模型…', style: { marginBottom: '10px' } });
-      var host = h('div', { style: { maxHeight: '50vh', overflowY: 'auto' } });
+      var search = h('input', { class: 'input', placeholder: '搜索模型…', style: { marginBottom: '10px' } });
+      var host = h('div', { class: 'chat-model-picker' });
       function paintList() {
-        var kw = q.value.trim().toLowerCase();
+        var keyword = search.value.trim().toLowerCase();
         host.innerHTML = '';
-        var list = modelList.filter(function (m) { return !kw || m.toLowerCase().indexOf(kw) >= 0; });
-        if (!list.length) {
-          host.appendChild(h('div', { class: 'empty' }, h('p', null, '没有匹配的模型')));
-        }
-        list.slice(0, 300).forEach(function (m) {
-          host.appendChild(h('div', {
-            class: 'list-item',
+        var list = modelList.filter(function (name) {
+          return !keyword || name.toLowerCase().indexOf(keyword) >= 0;
+        }).slice(0, 300);
+        if (!list.length) host.appendChild(emptyState('没有匹配的模型', '', 'grid'));
+        list.forEach(function (name) {
+          host.appendChild(h('button', {
+            class: 'list-item', type: 'button',
             onclick: function () {
-              session.model = m;
-              global.S.chatModel = m;
-              save();
-              modelChip.firstChild.textContent = m;
+              session.model = name;
+              global.S.chatModel = name;
+              saveNow();
+              modelChip.firstChild.textContent = name;
               U.closeOverlay();
               paintInfo();
             }
-          },
-            h('div', { class: 'li-body' }, h('div', { class: 'li-title', style: { fontSize: '13px' } }, m)),
-            isImageModel(m) ? h('span', { class: 'badge teal', style: { flex: '0 0 auto' } }, '生图') : null
-          ));
+          }, h('span', { class: 'li-icon', html: U.ic('sparkle', 16) }),
+            h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, name)),
+            isImageModel(name) ? h('span', { class: 'badge teal' }, '生图') : null));
         });
       }
-      q.addEventListener('input', paintList);
+      search.addEventListener('input', paintList);
       paintList();
-      U.sheet({ title: '选择模型（' + modelList.length + '）', body: h('div', null, q, host) });
+      U.sheet({ title: '选择模型（' + modelList.length + '）', body: h('div', null, search, host) });
     }
 
     function selectKey() {
-      if (!keys.length) { App.go('#/keys'); return; }
-      var host = h('div', null);
-      keys.forEach(function (k) {
-        host.appendChild(h('div', {
-          class: 'list-item',
+      if (!keys.length) {
+        App.go('#/keys');
+        return;
+      }
+      var host = h('div');
+      keys.forEach(function (key) {
+        host.appendChild(h('button', {
+          class: 'list-item', type: 'button',
           onclick: function () {
-            session.keyId = k.id;
-            save();
-            keyChip.firstChild.textContent = '令牌 · ' + (k.name || U.maskKey(k.key));
+            session.keyId = key.id;
+            saveNow();
+            keyChip.firstChild.textContent = '令牌 · ' + (key.name || U.maskKey(key.key));
             U.closeOverlay();
             paintInfo();
             loadModels();
           }
-        },
+        }, h('span', { class: 'li-icon', html: U.ic('key', 16) }),
           h('div', { class: 'li-body' },
-            h('div', { class: 'li-title' }, k.name || '未命名'),
-            h('div', { class: 'li-sub mono' }, U.maskKey(k.key || ''))),
-          String(k.status) === 'active' ? h('span', { class: 'badge ok' }, '可用') : h('span', { class: 'badge' }, '已停用')
-        ));
+            h('div', { class: 'li-title' }, key.name || '未命名'),
+            h('div', { class: 'li-sub mono' }, U.maskKey(key.key || ''))),
+          String(key.status) === 'active' ? h('span', { class: 'badge ok' }, '可用') :
+            h('span', { class: 'badge' }, '已停用')));
       });
-      host.appendChild(h('div', { class: 'list-item', onclick: function () { U.closeOverlay(); App.go('#/keys'); } },
-        h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, '管理令牌 ›'))));
       U.sheet({ title: '选择令牌', body: host });
     }
 
     function applyModelList(list) {
       if (!isCurrent()) return;
-      modelList = list;
+      modelList = list.filter(Boolean);
       if (!session.model && modelList.length) {
         session.model = modelList[0];
-        save();
         global.S.chatModel = session.model;
         modelChip.firstChild.textContent = session.model;
-        paintInfo();
+        saveNow();
       }
+      paintInfo();
     }
 
-    function loadModels(cb) {
+    function loadModels(callback) {
       var key = activeKey();
       var run = ++modelsRun;
       modelLimits = {};
       paintEstimate();
-      function setLimits(list) {
-        modelLimits = {};
-        (list || []).forEach(function (m) {
-          if (!m || typeof m !== 'object') return;
-          var value = Number(pick(m, 'context_length', 'max_context_tokens', 'context_window'));
-          if (value > 0 && isFinite(value)) modelLimits[m.id || m.name] = value;
-        });
-        paintEstimate();
-      }
-      var fallback = function () {
+      function fallback() {
         if (!isCurrent() || run !== modelsRun) return;
         var names = [];
-        C.plazaModels(global.S.plaza).forEach(function (m) { if (names.indexOf(m.name) < 0) names.push(m.name); });
-        setLimits([]);
+        C.plazaModels(global.S.plaza).forEach(function (model) {
+          if (names.indexOf(model.name) < 0) names.push(model.name);
+        });
         applyModelList(names);
-        if (cb) cb();
-      };
-      if (!key) { fallback(); return; }
-      Api.modelsWithKey(key.key).then(function (d) {
+        if (callback) callback();
+      }
+      if (!key) {
+        fallback();
+        return;
+      }
+      Api.modelsWithKey(key.key).then(function (data) {
         if (!isCurrent() || run !== modelsRun) return;
-        var arr = Array.isArray(d) ? d : (d && (d.data || d.models)) || [];
-        var list = arr.map(function (m) { return typeof m === 'string' ? m : (m.id || m.name); }).filter(Boolean);
-        if (!list.length) { fallback(); return; }
-        setLimits(arr);
-        applyModelList(list);
-        if (cb) cb();
+        var items = Array.isArray(data) ? data : (data && (data.data || data.models)) || [];
+        var names = items.map(function (item) {
+          return typeof item === 'string' ? item : item.id || item.name;
+        }).filter(Boolean);
+        modelLimits = {};
+        items.forEach(function (item) {
+          if (!item || typeof item !== 'object') return;
+          var context = Number(pick(item, 'context_length', 'max_context_tokens', 'context_window'));
+          if (context > 0 && isFinite(context)) modelLimits[item.id || item.name] = context;
+        });
+        if (!names.length) {
+          fallback();
+          return;
+        }
+        applyModelList(names);
+        if (callback) callback();
       }).catch(fallback);
     }
 
-    // ---------- settings ----------
     function openSettings() {
-      var sp = h('textarea', { class: 'textarea', rows: '3', maxlength: '16000', placeholder: '告诉助手如何回答，例如：使用简洁的中文，先给出结论。' });
-      sp.value = session.settings.systemPrompt || '';
-      var temp = h('input', { class: 'input', type: 'number', min: '0', max: '2', step: '0.1', placeholder: '模型默认（0–2）', inputmode: 'decimal' });
-      temp.value = session.settings.temperature === null ? '' : String(session.settings.temperature);
-      var maxTok = h('input', { class: 'input', type: 'number', min: '1', step: '1', placeholder: '模型默认', inputmode: 'numeric' });
-      maxTok.value = session.settings.maxTokens === null ? '' : String(session.settings.maxTokens);
+      var systemPrompt = h('textarea', {
+        class: 'textarea', rows: '3', maxlength: '16000',
+        placeholder: '告诉助手如何回答，例如：使用简洁的中文，先给出结论。'
+      });
+      systemPrompt.value = session.settings.systemPrompt || '';
+      var temperature = h('input', {
+        class: 'input', type: 'number', min: '0', max: '2', step: '0.1',
+        placeholder: '模型默认（0–2）', inputmode: 'decimal'
+      });
+      temperature.value = session.settings.temperature === null ? '' : String(session.settings.temperature);
+      var maxTokens = h('input', {
+        class: 'input', type: 'number', min: '1', step: '1',
+        placeholder: '模型默认', inputmode: 'numeric'
+      });
+      maxTokens.value = session.settings.maxTokens === null ? '' : String(session.settings.maxTokens);
+      var maxContext = h('input', {
+        class: 'input', type: 'number', min: '2', step: '1',
+        placeholder: '默认 40', inputmode: 'numeric'
+      });
+      maxContext.value = String(session.settings.maxContext || 40);
 
       var body = h('div', null,
-        h('div', { class: 'field' }, h('label', null, '系统提示词'), sp),
+        h('div', { class: 'field' }, h('label', null, '系统提示词'), systemPrompt),
         h('div', { class: 'row', style: { gap: '10px' } },
-          h('div', { class: 'field', style: { flex: '1' } }, h('label', null, '随机性 temperature'), temp),
-          h('div', { class: 'field', style: { flex: '1' } }, h('label', null, '最大输出 tokens'), maxTok)
-        ),
+          h('div', { class: 'field', style: { flex: '1' } }, h('label', null, '随机性 temperature'), temperature),
+          h('div', { class: 'field', style: { flex: '1' } }, h('label', null, '最大输出 tokens'), maxTokens)),
+        h('div', { class: 'field' }, h('label', null, '上下文消息上限'), maxContext,
+          h('p', { class: 'field-help' }, '超出时自动保留最近的消息，并避免以孤立回答开头。')),
         h('div', { class: 'divider' }),
-        h('div', { class: 'row', style: { gap: '8px' } },
+        h('div', { class: 'chat-settings-grid' },
           h('button', {
-            class: 'btn btn-sm', style: { flex: '1' },
+            class: 'btn btn-sm', type: 'button',
             onclick: function () {
-              if (!session.messages.length) { U.toast('当前对话已经是空的'); return; }
-              U.confirm('清空当前对话', '只清空当前会话的消息，历史对话仍保留。', '清空', true).then(function (ok) {
-                if (!ok) return;
-                session.messages = [];
-                session.title = '新对话';
-                save();
-                U.closeOverlay();
-                paint();
-              });
+              U.confirm('清空当前对话', '只清空当前会话的消息，历史对话仍保留。', '清空', true)
+                .then(function (ok) {
+                  if (!ok || !isCurrent()) return;
+                  Store.clearSession(session);
+                  input.value = '';
+                  saveNow();
+                  U.closeOverlay();
+                  paint();
+                });
             }
           }, '清空对话'),
           h('button', {
-            class: 'btn btn-sm', style: { flex: '1' },
-            onclick: function () { exportMarkdown(); }
-          }, '复制为 Markdown')
-        )
-      );
+            class: 'btn btn-sm', type: 'button',
+            onclick: exportMarkdown
+          }, '复制 Markdown'),
+          h('button', {
+            class: 'btn btn-sm', type: 'button',
+            onclick: exportJson
+          }, '导出 JSON'),
+          h('button', {
+            class: 'btn btn-sm', type: 'button',
+            onclick: importJson
+          }, '导入 JSON')));
 
       U.sheet({
         title: '对话设置',
@@ -910,12 +1281,14 @@
           { label: '取消' },
           {
             label: '保存', kind: 'primary', onClick: function () {
-              session.settings.systemPrompt = sp.value.trim();
-              var t = temp.value.trim();
+              session.settings.systemPrompt = systemPrompt.value.trim();
+              var t = temperature.value.trim();
               session.settings.temperature = t === '' ? null : Math.max(0, Math.min(2, Number(t)));
-              var m = maxTok.value.trim();
+              var m = maxTokens.value.trim();
               session.settings.maxTokens = m === '' ? null : Math.max(1, Math.floor(Number(m)));
-              save();
+              var c = maxContext.value.trim();
+              session.settings.maxContext = c === '' ? 40 : Math.max(2, Math.floor(Number(c)));
+              saveNow();
               paintInfo();
               U.toast('设置已保存', 'ok');
               return true;
@@ -926,139 +1299,223 @@
     }
 
     function exportMarkdown() {
-      if (!session.messages.length) { U.toast('还没有内容可复制'); return; }
-      var out = ['# ' + (session.title || '对话'), ''];
-      if (session.settings.systemPrompt) out.push('> 系统提示词：' + session.settings.systemPrompt, '');
-      session.messages.forEach(function (m) {
-        out.push('## ' + (m.role === 'user' ? '用户' : '助手'), '', m.content, '');
+      if (!session.nodes.length) {
+        U.toast('还没有内容可复制');
+        return;
+      }
+      var output = ['# ' + (session.title || '对话'), ''];
+      if (session.settings.systemPrompt) output.push('> 系统提示词：' + session.settings.systemPrompt, '');
+      session.nodes.forEach(function (node) {
+        var message = Store.selected(node);
+        if (!message) return;
+        output.push('## ' + roleLabel(message), '', Store.messageText(message), '');
+        if (message.usage) output.push('`' + summaryUsage(message.usage) + '`', '');
       });
-      U.copy(out.join('\n'));
+      U.copy(output.join('\n'));
     }
 
-    // ---------- history ----------
+    function exportJson() {
+      var payload = {
+        version: 3,
+        exportedAt: new Date().toISOString(),
+        sessions: Store.clone(state.sessions)
+      };
+      U.copy(JSON.stringify(payload, null, 2));
+    }
+
+    function importJson() {
+      var field = h('textarea', {
+        class: 'textarea', rows: '8',
+        placeholder: '粘贴 Pp 对话 JSON'
+      });
+      U.sheet({
+        title: '导入对话',
+        body: h('div', null, field,
+          h('p', { class: 'field-help' }, '导入会新增到当前账号，不会覆盖现有对话。')),
+        actions: [
+          { label: '取消' },
+          {
+            label: '导入', kind: 'primary', onClick: function () {
+              var imported;
+              try { imported = Store.importState(JSON.parse(field.value)); }
+              catch (error) {
+                U.toast(error.message || 'JSON 格式不正确', 'err');
+                return false;
+              }
+              if (!imported.sessions.length) {
+                U.toast('没有可导入的对话', 'err');
+                return false;
+              }
+              imported.sessions.forEach(function (item) {
+                item.id = Store.uid('c');
+                state.sessions.push(item);
+              });
+              state.activeId = imported.sessions[0].id;
+              saveNow();
+              U.closeOverlay();
+              App.go('#/chat', true);
+              U.toast('已导入 ' + imported.sessions.length + ' 个对话', 'ok');
+              return true;
+            }
+          }
+        ]
+      });
+    }
+
     function openHistory() {
       var list = state.sessions.slice().sort(function (a, b) {
-        return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+        return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt;
       });
-      var host = h('div', null);
-      host.appendChild(h('button', {
-        class: 'btn btn-primary btn-block', style: { marginBottom: '12px' },
-        onclick: function () {
-          var s = makeSession(session.model, session.keyId);
-          state.sessions.unshift(s);
-          state.activeId = s.id;
-          save();
-          U.closeOverlay();
-          App.go('#/chat');
-        }
-      }, '＋ 新对话'));
-
-      if (!list.length) {
-        host.appendChild(emptyState('还没有历史对话', '发起第一轮对话后会出现在这里', 'chat'));
-      }
-      var search = h('input', { class: 'input chat-history-search', type: 'search', placeholder: '搜索历史对话', 'aria-label': '搜索历史对话' });
+      var search = h('input', {
+        class: 'input chat-history-search', type: 'search',
+        placeholder: '搜索历史对话', 'aria-label': '搜索历史对话'
+      });
       var rows = h('div', { class: 'chat-history-list' });
-      host.appendChild(search);
-      host.appendChild(rows);
+      var host = h('div', null,
+        h('div', { class: 'chat-history-head' },
+          h('button', {
+            class: 'btn btn-primary btn-block', type: 'button',
+            onclick: function () {
+              var next = Store.makeSession(session.model, session.keyId);
+              state.sessions.unshift(next);
+              state.activeId = next.id;
+              saveNow();
+              U.closeOverlay();
+              App.go('#/chat', true);
+            }
+          }, '＋ 新对话'),
+          h('button', {
+            class: 'tool-btn', type: 'button', title: '导出全部对话',
+            'aria-label': '导出全部对话', html: U.ic('doc', 18),
+            onclick: function () { exportJson(); }
+          })),
+        search,
+        rows);
+
       function paintList() {
         var query = search.value.trim().toLowerCase();
         rows.innerHTML = '';
-        var visible = list.filter(function (s) {
+        var visible = list.filter(function (item) {
           if (!query) return true;
-          return String(s.title || '新对话').toLowerCase().indexOf(query) >= 0 ||
-            (s.messages || []).some(function (message) { return String(message.content || '').toLowerCase().indexOf(query) >= 0; });
+          return String(item.title || '新对话').toLowerCase().indexOf(query) >= 0 ||
+            Store.allText(item).toLowerCase().indexOf(query) >= 0;
         });
         if (!visible.length) {
-          rows.appendChild(emptyState(query ? '没有找到相关对话' : '还没有历史对话', query ? '换个关键词试试' : '发起第一轮对话后会出现在这里', 'chat'));
+          rows.appendChild(emptyState(query ? '没有找到相关对话' : '还没有历史对话',
+            query ? '换个关键词试试' : '发起第一轮对话后会出现在这里', 'chat'));
           return;
         }
-        visible.forEach(function (s) { rows.appendChild(historyRow(s)); });
+        visible.forEach(function (item) { rows.appendChild(historyRow(item)); });
       }
-      function historyRow(s) {
-        var active = s.id === session.id;
-        var item = h('div', {
-          class: 'list-item' + (s.pinned ? ' pinned' : ''),
+
+      function historyRow(item) {
+        var isActive = item.id === session.id;
+        var row = h('div', {
+          class: 'list-item' + (item.pinned ? ' pinned' : ''),
+          role: 'button', tabindex: '0',
           onclick: function () {
-            state.activeId = s.id;
-            save();
+            state.activeId = item.id;
+            saveNow();
             U.closeOverlay();
-            App.go('#/chat');
+            App.go('#/chat', true);
+          },
+          onkeydown: function (event) {
+            if (event.key === 'Enter' || event.key === ' ') event.currentTarget.click();
           }
-        },
-          h('span', { class: 'li-icon', html: U.ic(active ? 'chat' : 'doc', 16) }),
+        }, h('span', { class: 'li-icon', html: U.ic(isActive ? 'chat' : 'doc', 16) }),
           h('div', { class: 'li-body' },
-            h('div', { class: 'li-title nowrap' }, (s.pinned ? '置顶 · ' : '') + (s.title || '新对话')),
-            h('div', { class: 'li-sub' }, s.messages.length + ' 条 · ' + U.ago(s.updatedAt))),
-          active ? h('span', { class: 'badge teal' }, '当前') : null
-        );
+            h('div', { class: 'li-title nowrap' },
+              (item.pinned ? '置顶 · ' : '') + (item.title || '新对话')),
+            h('div', { class: 'li-sub' },
+              Store.sessionCount(state, item) + ' 条 · ' + U.ago(item.updatedAt))),
+          isActive ? h('span', { class: 'badge teal' }, '当前') : null);
         var pin = h('button', {
-          class: 'icon-btn', style: { width: '32px', height: '32px' }, title: s.pinned ? '取消置顶' : '置顶对话',
-          'aria-label': (s.pinned ? '取消置顶 ' : '置顶 ') + (s.title || '新对话'),
+          class: 'icon-btn', type: 'button', title: item.pinned ? '取消置顶' : '置顶对话',
+          'aria-label': (item.pinned ? '取消置顶 ' : '置顶 ') + item.title,
           html: U.ic('pin', 16),
           onclick: function (event) {
             event.stopPropagation();
-            s.pinned = !s.pinned;
-            list.sort(function (a, b) {
-              return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
-            });
-            save();
+            item.pinned = !item.pinned;
+            saveNow();
             paintList();
           }
         });
         var rename = h('button', {
-          class: 'icon-btn', style: { width: '32px', height: '32px' }, title: '重命名对话',
-          'aria-label': '重命名 ' + (s.title || '新对话'), html: U.ic('edit', 16),
+          class: 'icon-btn', type: 'button', title: '重命名对话',
+          'aria-label': '重命名 ' + item.title, html: U.ic('edit', 16),
           onclick: function (event) {
             event.stopPropagation();
-            var field = h('input', { class: 'input', value: s.title || '新对话', maxlength: '60', 'aria-label': '对话名称' });
-            U.sheet({ title: '重命名对话', body: field, actions: [{ label: '取消' }, {
-              label: '保存', kind: 'primary', onClick: function () {
-                var value = field.value.trim();
-                if (!value) { U.toast('名称不能为空', 'err'); return false; }
-                s.title = value;
-                s.updatedAt = Date.now();
-                save();
-                list.sort(function (a, b) {
-                  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
-                });
-                paintList();
-                return true;
-              }
-            }] });
-          }
-        });
-        var del = h('button', {
-          class: 'icon-btn', style: { width: '32px', height: '32px' },
-          html: U.ic('trash', 16),
-          onclick: function (e) {
-            e.stopPropagation();
-            U.confirm('删除对话', '「' + (s.title || '新对话') + '」将被永久删除。', '删除', true).then(function (ok) {
-              if (!ok) return;
-              state.sessions = state.sessions.filter(function (x) { return x.id !== s.id; });
-              if (state.activeId === s.id) state.activeId = (state.sessions[0] || {}).id || '';
-              save();
-              U.closeOverlay();
-              App.go('#/chat', true);
+            var name = h('input', { class: 'input', value: item.title, maxlength: '60', 'aria-label': '对话名称' });
+            U.sheet({
+              title: '重命名对话',
+              body: name,
+              actions: [
+                { label: '取消' },
+                {
+                  label: '保存', kind: 'primary', onClick: function () {
+                    var value = name.value.trim();
+                    if (!value) {
+                      U.toast('名称不能为空', 'err');
+                      return false;
+                    }
+                    item.title = value;
+                    item.updatedAt = Date.now();
+                    saveNow();
+                    paintList();
+                    return true;
+                  }
+                }
+              ]
             });
           }
         });
-        item.appendChild(h('div', { class: 'li-tail' }, pin, rename, del));
-        return item;
+        var remove = h('button', {
+          class: 'icon-btn', type: 'button', title: '删除对话',
+          'aria-label': '删除 ' + item.title, html: U.ic('trash', 16),
+          onclick: function (event) {
+            event.stopPropagation();
+            U.confirm('删除对话', '「' + item.title + '」将被永久删除。', '删除', true)
+              .then(function (ok) {
+                if (!ok || !isCurrent()) return;
+                state.sessions = state.sessions.filter(function (candidate) {
+                  return candidate.id !== item.id;
+                });
+                if (state.activeId === item.id) {
+                  state.activeId = state.sessions[0] ? state.sessions[0].id : '';
+                }
+                saveNow();
+                U.closeOverlay();
+                App.go('#/chat', true);
+              });
+          }
+        });
+        row.appendChild(h('div', { class: 'li-tail' }, pin, rename, remove));
+        return row;
       }
+
       search.addEventListener('input', paintList);
       paintList();
-
       U.sheet({ title: '历史对话', body: host });
     }
 
     modelChip.addEventListener('click', selectModel);
     keyChip.addEventListener('click', selectKey);
     tokenButton.addEventListener('click', openEstimate);
+    settingBtn.addEventListener('click', openSettings);
+    historyBtn.addEventListener('click', openHistory);
+
     msgsHost.addEventListener('click', function (event) {
-      var copyButton = event.target.closest('.chat-code-copy');
-      if (copyButton) {
-        var code = copyButton.closest('.chat-code').querySelector('pre code');
+      var codeCopy = event.target.closest('.chat-code-copy');
+      if (codeCopy) {
+        var code = codeCopy.closest('.chat-code').querySelector('pre code');
         if (code) U.copy(code.textContent);
+        return;
+      }
+      var retry = event.target.closest('.retry-action');
+      if (retry) {
+        var nodeId = retry.closest('.msg-actions').getAttribute('data-node-id');
+        var node = session.nodes.filter(function (item) { return item.id === nodeId; })[0];
+        regenerateNode(node, retry.getAttribute('aria-label') === '非流式重试');
         return;
       }
       var link = event.target.closest('.markdown-body a');
@@ -1072,63 +1529,71 @@
         else global.open(url, '_blank', 'noopener,noreferrer');
       });
     });
-    settingBtn.addEventListener('click', openSettings);
-    historyBtn.addEventListener('click', openHistory);
-
-    // ---------- boot ----------
-    if (session.model) global.S.chatModel = session.model;
-    modelChip.firstChild.textContent = session.model || '选择模型';
-    paintInfo();
-    paint();
 
     function updateKeys(items) {
       if (!isCurrent()) return;
-      keys = items;
+      keys = Array.isArray(items) ? items : [];
       global.S.keys = keys;
       var key = activeKey();
       if (key) {
-        if (!session.keyId) { session.keyId = key.id; save(); }
+        if (!session.keyId) {
+          session.keyId = key.id;
+          saveSoon();
+        }
         keyChip.firstChild.textContent = '令牌 · ' + (key.name || U.maskKey(key.key));
       } else {
         keyChip.firstChild.textContent = '无可用令牌';
       }
       paintInfo();
-      if (session.model && modelList.length) global.S.chatModel = session.model;
-      if (!session.messages.length) paint();
       loadModels(function () {
-        if (!session.model && modelList.length) {
-          session.model = modelList[0];
-          save();
-          modelChip.firstChild.textContent = session.model;
-          paintInfo();
-        }
+        if (session.model && !isImageModel(session.model)) paintInfo();
       });
     }
+
     function onKeysUpdated(event) {
-      if (event.detail && event.detail.account === authContext.id && Array.isArray(event.detail.items)) updateKeys(event.detail.items);
+      if (event.detail && event.detail.account === authContext.id && Array.isArray(event.detail.items)) {
+        updateKeys(event.detail.items);
+      }
     }
     function onKeysChanged() {
       if (!isCurrent()) return;
-      Api.keys(1, 100).then(function (data) { updateKeys(arrOf(data)); }).catch(function () {});
+      Api.keys(1, 100).then(function (data) {
+        if (isCurrent()) updateKeys(arrOf(data));
+      }).catch(function () {});
     }
-    global.addEventListener('pp:keys-updated', onKeysUpdated);
-    global.addEventListener('pp:keys-changed', onKeysChanged);
-    page.addEventListener('pp:page-activate', function () {
+    function onStorageWarning(event) {
+      if (storageWarningShown) return;
+      storageWarningShown = true;
+      U.toast(event.detail && event.detail.compact ?
+        '聊天记录较多，已保留最近内容' : '聊天存储空间已满，请导出后清理', 'err');
+    }
+    function onActivate() {
+      if (!isCurrent()) return;
       if (global.S.useSelectedChatModel && global.S.chatModel) {
         session.model = global.S.chatModel;
         global.S.useSelectedChatModel = false;
         modelChip.firstChild.textContent = session.model;
-        save(); paintInfo();
+        saveSoon();
+        paintInfo();
       }
-    });
-    page.addEventListener('pp:page-dispose', function () {
-      global.removeEventListener('pp:keys-updated', onKeysUpdated);
-      global.removeEventListener('pp:keys-changed', onKeysChanged);
+    }
+    function onDispose() {
       if (activeChat) activeChat();
       activeChat = null;
-    });
-    Api.keys(1, 100).then(function (d) {
-      updateKeys(arrOf(d));
+    }
+
+    global.addEventListener('pp:keys-updated', onKeysUpdated);
+    global.addEventListener('pp:keys-changed', onKeysChanged);
+    global.addEventListener('pp:chat-storage-warning', onStorageWarning);
+    page.addEventListener('pp:page-activate', onActivate);
+    page.addEventListener('pp:page-dispose', onDispose);
+
+    if (session.model) global.S.chatModel = session.model;
+    modelChip.firstChild.textContent = session.model || '选择模型';
+    autoGrow();
+    paint();
+    Api.keys(1, 100).then(function (data) {
+      updateKeys(arrOf(data));
     }).catch(function () {
       if (!isCurrent()) return;
       keyChip.firstChild.textContent = '令牌加载失败';
@@ -1137,14 +1602,12 @@
     return page;
   }
 
-  function removeAccountData(id) {
-    U.store.del(STORE + ':' + encodeURIComponent(id));
-    if (U.store.get('chat_legacy_owner', '') === id) {
-      U.store.del(STORE);
-      U.store.del('chat_messages');
-      U.store.del('chat_legacy_owner');
-    }
+  function removeAccountData(accountId) {
+    Store.remove(accountId);
   }
 
-  global.PagesChat = { renderChat: renderChat, removeAccountData: removeAccountData };
+  global.PagesChat = {
+    renderChat: renderChat,
+    removeAccountData: removeAccountData
+  };
 })(window);
