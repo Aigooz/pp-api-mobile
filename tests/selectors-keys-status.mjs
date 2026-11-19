@@ -92,6 +92,12 @@ try {
   assert.equal(await page.locator('.plaza-model').count(), 1);
   assert.match(await page.locator('.plaza-status').getAttribute('aria-label'), /波动/);
   await page.getByRole('searchbox', { name: '搜索模型' }).fill('');
+  const groupHeadingStyles = await page.locator('.plaza-group-head h2').evaluateAll(nodes => nodes.map(node => {
+    const style = getComputedStyle(node);
+    return [style.fontSize, style.fontWeight, style.lineHeight].join('|');
+  }));
+  assert.ok(groupHeadingStyles.length >= 2);
+  assert.equal(new Set(groupHeadingStyles).size, 1);
   await page.getByRole('button', { name: '渠道状态', exact: true }).click();
   const channelCard = model => page.locator('.channel-item').filter({ has: page.locator('.channel-item-title strong', { hasText: new RegExp(`^${model}$`) }) });
   await channelCard('green').getByText('99.7%').waitFor();

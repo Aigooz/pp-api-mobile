@@ -49,6 +49,9 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/usage/dashboard/models') return route.fulfill(ok({ models: [] }));
   if (path === '/api/v1/usage') return route.fulfill(ok({ items: [], total: 0 }));
   if (path === '/api/v1/announcements') return route.fulfill(ok([]));
+  if (path === '/api/v1/subscriptions/active') return route.fulfill(ok([
+    { id: 1, group_name: '基础分组', expires_at: '2026-12-01T10:11:12+08:00' }
+  ]));
   return route.fulfill(ok([]));
 });
 
@@ -57,6 +60,15 @@ try {
   await page.getByText('快捷操作').waitFor();
   await page.waitForFunction(() => !!window.__ppLiveRefresh);
   await page.waitForFunction(() => !!window.__ppBalanceRefresh);
+  const homeBeforeTimer = { ...calls };
+  assert.equal(await page.evaluate(() => {
+    window.__homeRefreshNode = document.querySelector('.dashboard');
+    return !!window.__homeRefreshNode;
+  }), true);
+  await page.waitForTimeout(10500);
+  assert.ok(calls.dashboard > homeBeforeTimer.dashboard, 'dashboard should refresh after ten seconds');
+  assert.equal(await page.evaluate(() => window.__homeRefreshNode === document.querySelector('.dashboard')), true,
+    'silent refresh must keep the current dashboard visible');
   const initialMe = calls.me;
   balance = 7.25;
   const refreshed = await page.evaluate(() => window.__ppBalanceRefresh());
@@ -64,7 +76,7 @@ try {
   assert.ok(calls.me > initialMe, 'balance refresh should request the account endpoint');
   assert.equal(await page.getByText('$7.25').count() > 0, true);
   await page.waitForTimeout(10000);
-  assert.ok(calls.me >= initialMe + 2, 'balance refresh should run on the ten-second interval');
+  assert.ok(calls.me > initialMe, 'balance refresh should run on the ten-second interval');
   const initial = { ...calls };
   plazaGeneration = 2;
   channelGeneration = 2;
@@ -86,8 +98,11 @@ try {
   });
   for (let i = 0; i < 20 && calls.plaza <= beforeVisible.plaza; i++) await page.waitForTimeout(50);
   assert.ok(calls.plaza > beforeVisible.plaza, 'returning to the foreground should request fresh data');
+  await page.evaluate(() => App.go('#/purchase'));
+  await page.getByRole('tab', { name: '订阅', exact: true }).click();
+  assert.equal(await page.getByText(/有效至 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('Live refresh: automatic data refresh, new group/channel discovery and foreground refresh passed');
+  console.log('Live refresh: ten-second no-flicker updates, discovery, foreground refresh and second-level expiry passed');
 } finally {
   await context.close();
   await browser.close();

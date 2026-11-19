@@ -551,7 +551,7 @@
         if (!statusUpdated) { statusByModel = Object.create(null); updateStatusDots(); }
       }).then(function () {
         statusPending = false;
-        if (App.isPageActive(host)) statusTimer = setTimeout(loadStatus, 60000);
+        if (App.isPageActive(host)) statusTimer = setTimeout(loadStatus, 10000);
       });
     }
     loadStatus();
@@ -860,10 +860,15 @@
     host.addEventListener('pp:page-activate', function () {
       if (String(gid) !== String(S2.plazaGroup || 0)) { gid = S2.plazaGroup || 0; paint(); }
       clearTimeout(statusTimer);
-      if (!statusUpdated || Date.now() - statusUpdated >= 60000) loadStatus();
-      else statusTimer = setTimeout(loadStatus, 60000 - (Date.now() - statusUpdated));
+      if (!statusUpdated || Date.now() - statusUpdated >= 10000) loadStatus();
+      else statusTimer = setTimeout(loadStatus, 10000 - (Date.now() - statusUpdated));
     });
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(statusTimer); });
+    host.addEventListener('pp:page-refresh', function () {
+      clearTimeout(statusTimer);
+      loadStatus();
+      paint();
+    });
     host.addEventListener('pp:page-dispose', function () { clearTimeout(statusTimer); });
     updatePlaza();
     paintSort();
@@ -873,33 +878,66 @@
   // ---------------- announcements ----------------
   function renderAnnouncements(id) {
     var page = h('div', { class: 'page' });
-    Api.announcements().then(function (list) {
-      var items = arrOf(list);
-      if (id) {
-        var item = items.filter(function (a) { return String(a.id) === String(id); })[0] || items[0];
-        if (!item) { page.appendChild(emptyState('公告不存在', '', 'bell')); return; }
-        page.appendChild(h('div', { class: 'card pad' },
-          h('h2', { style: { margin: '0 0 4px', fontSize: '18px' } }, pick(item, 'title', 'name') || '公告'),
-          h('div', { class: 'tiny muted', style: { marginBottom: '12px' } }, U.date(pick(item, 'created_at', 'published_at'))),
-          h('div', { class: 'announcement-body', html: U.cleanHtml(pick(item, 'content', 'body', 'summary') || '') })
-        ));
-        return;
-      }
-      if (!items.length) { page.appendChild(emptyState(Api.AUTH.isLogged() ? '暂无公告' : '请先登录', Api.AUTH.isLogged() ? '平台有新动态会显示在这里' : '登录后查看平台公告', 'bell')); return; }
-      items.forEach(function (a) {
-        page.appendChild(h('div', { class: 'card', style: { marginBottom: '10px' } },
-          h('div', { class: 'list-item', onclick: function () { App.go('#/announcements/' + (a.id || 0)); } },
-            h('span', { class: 'li-icon', html: U.ic('bell', 17) }),
-            h('div', { class: 'li-body' },
-              h('div', { class: 'li-title' }, pick(a, 'title', 'name') || '公告'),
-              h('div', { class: 'li-sub' }, U.date(pick(a, 'created_at', 'published_at')))
-            ),
-            h('div', { class: 'li-tail', html: U.ic('chevron', 16) })
-          )));
+    var version = 0, timer = null, loaded = false;
+    function load(silent) {
+      var currentVersion = ++version;
+      return Api.announcements().then(function (list) {
+        if (currentVersion !== version) return;
+        page.dataset.announcementVersion = String(currentVersion);
+        var next = h('div', { class: 'page' });
+        var items = arrOf(list);
+        if (id) {
+          var item = items.filter(function (a) { return String(a.id) === String(id); })[0] || items[0];
+          if (item) {
+            next.appendChild(h('div', { class: 'card pad' },
+              h('h2', { style: { margin: '0 0 4px', fontSize: '18px' } }, pick(item, 'title', 'name') || '公告'),
+              h('div', { class: 'tiny muted', style: { marginBottom: '12px' } }, U.date(pick(item, 'created_at', 'published_at'))),
+              h('div', { class: 'announcement-body', html: U.cleanHtml(pick(item, 'content', 'body', 'summary') || '') })
+            ));
+          } else {
+            next.appendChild(emptyState('公告不存在', '', 'bell'));
+          }
+        } else if (!items.length) {
+          next.appendChild(emptyState(Api.AUTH.isLogged() ? '暂无公告' : '请先登录', Api.AUTH.isLogged() ? '平台有新动态会显示在这里' : '登录后查看平台公告', 'bell'));
+        } else {
+          items.forEach(function (a) {
+            next.appendChild(h('div', { class: 'card', style: { marginBottom: '10px' } },
+              h('div', { class: 'list-item', onclick: function () { App.go('#/announcements/' + (a.id || 0)); } },
+                h('span', { class: 'li-icon', html: U.ic('bell', 17) }),
+                h('div', { class: 'li-body' },
+                  h('div', { class: 'li-title' }, pick(a, 'title', 'name') || '公告'),
+                  h('div', { class: 'li-sub' }, U.date(pick(a, 'created_at', 'published_at')))
+                ),
+                h('div', { class: 'li-tail', html: U.ic('chevron', 16) })
+              )));
+          });
+        }
+        page.replaceChildren.apply(page, Array.prototype.slice.call(next.childNodes));
+        loaded = true;
+      }).catch(function (e) {
+        if (loaded || silent) return;
+        page.replaceChildren(emptyState('公告加载失败', e.message, 'alert'));
       });
-    }).catch(function (e) {
-      page.appendChild(emptyState('公告加载失败', e.message, 'alert'));
+    }
+    function schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        timer = null;
+        if (!page.isConnected || !App.isPageActive(page) || document.hidden) return;
+        load(true).finally(schedule);
+      }, 10000);
+    }
+    page.addEventListener('pp:page-activate', function () {
+      clearTimeout(timer);
+      load(true).finally(schedule);
     });
+    page.addEventListener('pp:page-deactivate', function () { clearTimeout(timer); });
+    page.addEventListener('pp:page-refresh', function () { load(true).finally(schedule); });
+    page.addEventListener('pp:page-dispose', function () {
+      clearTimeout(timer);
+      version++;
+    });
+    load();
     return page;
   }
 

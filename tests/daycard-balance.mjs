@@ -14,6 +14,7 @@ const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.s
 const raw = (data, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(data) });
 let daycardBalance = 2, accountBalance = 10, daycardPrice = 3.66, subscription = null, infoError = false, buyMode = 'success';
 let buys = [];
+let subscriptionSeconds = 0;
 
 await page.route('**/__proxy/**', async route => {
   const url = new URL(route.request().url());
@@ -49,7 +50,8 @@ await page.route('**/__proxy/**', async route => {
     if (buyMode === 'uncertain') return route.fulfill(raw({ error: '服务异常' }, 503));
     daycardBalance -= daycardPrice;
     accountBalance = 6.34;
-    subscription = { expires_at: '2026-12-01T10:00:00+08:00' };
+    subscriptionSeconds += 86400;
+    subscription = { expires_at: new Date(Date.UTC(2026, 11, 1, 2, 0, 0) + subscriptionSeconds * 1000).toISOString() };
     return route.fulfill(raw({ paid: daycardPrice }));
   }
   return route.fulfill(ok({ items: [] }));
@@ -95,8 +97,8 @@ try {
   subscription = { expires_at: '2026-12-01T10:00:00+08:00' };
   await purchasePage();
   await chooseBalance();
-  assert.equal(await page.getByRole('button', { name: '已持有该订阅' }).isDisabled(), true);
-  assert.match(await page.locator('.payment-balance-note').innerText(), /已生效/);
+  assert.equal(await page.getByRole('button', { name: '叠加续费' }).isDisabled(), false);
+  assert.match(await page.locator('.payment-balance-note').innerText(), /有效至 2026-12-01 10:00:00，可叠加续费/);
 
   subscription = null;
   infoError = true;
@@ -150,10 +152,18 @@ try {
   await confirmBalance();
   await page.getByRole('button', { name: '确认支付', exact: true }).evaluate(button => { button.click(); button.click(); });
   await page.getByText('订阅开通成功，已扣 ¥3.66').waitFor();
-  await page.getByRole('button', { name: '已持有该订阅' }).waitFor();
+  await page.getByRole('button', { name: '叠加续费' }).waitFor();
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-daycard-active-390.png', animations: 'disabled', fullPage: true });
   assert.equal(buys.length, 3);
   assert.deepEqual(buys, Array(3).fill({ body: { group_id: 13 }, authorization: 'Bearer daycard-token' }));
+  const firstExpiry = await page.locator('.payment-balance-note').innerText();
+  assert.match(firstExpiry, /有效至 2026-12-02 10:00:00/);
+  await page.getByRole('button', { name: '叠加续费' }).click();
+  await page.getByRole('heading', { name: '确认余额支付' }).waitFor();
+  await page.getByRole('button', { name: '确认续费', exact: true }).click();
+  await page.getByText('续费成功，已扣 ¥3.66').waitFor();
+  assert.equal(buys.length, 4);
+  assert.match(await page.locator('.payment-balance-note').innerText(), /有效至 2026-12-03 10:00:00/);
   await page.locator('.payment-balance').getByText('$6.34').waitFor();
   await page.getByRole('navigation').getByRole('button', { name: '我的', exact: true }).click();
   await page.locator('#view').getByText('$6.34').waitFor();

@@ -176,6 +176,19 @@ try {
   await page.getByRole('button', { name: '重试' }).click();
   await page.getByRole('tab', { name: '商品', exact: true }).click();
   await page.getByText('充值金额（元）').waitFor();
+  const syncIconLayout = await page.locator('.payment-service-icon').evaluate(node => {
+    const box = node.getBoundingClientRect();
+    const icon = node.querySelector('svg').getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      offsetX: Math.abs((icon.left + icon.right) / 2 - (box.left + box.right) / 2),
+      offsetY: Math.abs((icon.top + icon.bottom) / 2 - (box.top + box.bottom) / 2)
+    };
+  });
+  assert.equal(Math.round(syncIconLayout.width), 34);
+  assert.equal(Math.round(syncIconLayout.height), 34);
+  assert.ok(syncIconLayout.offsetX < .5 && syncIconLayout.offsetY < .5, JSON.stringify(syncIconLayout));
   await page.getByRole('button', { name: '确认订单' }).waitFor();
   await page.getByLabel('充值金额（元）').fill('10');
   if (process.env.PP_TEST_SCREENSHOTS) await page.screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-payment-form-390.png', animations: 'disabled' });

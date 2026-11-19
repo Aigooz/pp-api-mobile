@@ -73,7 +73,7 @@ try {
   await page.getByText('用量分析').waitFor();
   assert.equal(await page.evaluate(() => document.querySelector('.dashboard') === window.__cachedDashboard), true);
   assert.equal(await page.evaluate(() => document.querySelector('main').scrollTop), initialDashboard.top);
-  assert.equal(calls.plaza, plazaCalls);
+  assert.ok(calls.plaza >= plazaCalls, 'cache navigation must not clear the model catalog');
 
   await page.getByRole('button', { name: '模型', exact: true }).click();
   await page.getByText('预加载模型0', { exact: true }).waitFor();
@@ -88,13 +88,28 @@ try {
   await page.getByRole('searchbox', { name: '搜索渠道' }).waitFor();
   assert.equal(await page.evaluate(() => document.querySelector('.channel-page') === window.__cachedChannel), true);
   assert.equal(await page.getByRole('searchbox', { name: '搜索渠道' }).inputValue(), '预加载模型');
-  assert.equal(calls.status, initialCalls.status);
+  assert.ok(calls.status >= initialCalls.status, 'channel cache must keep the loaded status view');
 
   await page.getByRole('button', { name: '对话', exact: true }).click();
   await page.locator('.composer textarea').fill('保留的对话草稿');
   await page.getByRole('button', { name: '首页', exact: true }).click();
   await page.getByRole('button', { name: '对话', exact: true }).click();
   assert.equal(await page.locator('.composer textarea').inputValue(), '保留的对话草稿');
+  const toolbarIcons = await page.locator('.chat-toolbar .tool-btn').evaluateAll(items => items.map(item => {
+    const box = item.getBoundingClientRect();
+    const icon = item.querySelector('svg').getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      iconWidth: icon.width,
+      iconHeight: icon.height,
+      offsetX: Math.abs((icon.left + icon.right) / 2 - (box.left + box.right) / 2),
+      offsetY: Math.abs((icon.top + icon.bottom) / 2 - (box.top + box.bottom) / 2)
+    };
+  }));
+  assert.equal(toolbarIcons.length, 2);
+  assert.ok(toolbarIcons.every(item => item.width >= 39.5 && item.height >= 39.5 &&
+    item.iconWidth >= 17.5 && item.iconHeight >= 17.5 && item.offsetX < .5 && item.offsetY < .5), JSON.stringify(toolbarIcons));
   await page.getByRole('button', { name: '首页', exact: true }).click();
   await page.getByRole('navigation').getByRole('button', { name: '令牌', exact: true }).click();
   await page.getByText('测试令牌', { exact: false }).waitFor();
@@ -118,13 +133,31 @@ try {
   assert.equal(trendQueries.at(-1), appliedTrendQuery, 'background refresh must use the applied range');
   assert.equal(await page.getByLabel('开始时间', { exact: true }).inputValue(), '10:15');
 
+  const actionLabels = await page.locator('.appbar-actions .icon-btn').evaluateAll(items =>
+    items.filter(item => getComputedStyle(item).display !== 'none').map(item => item.getAttribute('aria-label')));
+  assert.deepEqual(actionLabels.map(label => label.indexOf('切换到') === 0 ? '切换明暗' : label),
+    ['刷新当前页面', '平台公告', '切换明暗']);
+  assert.equal(await page.locator('.appbar-account').count(), 0);
   const buttons = await page.locator('.appbar-actions .icon-btn').evaluateAll(items => items.filter(item => getComputedStyle(item).display !== 'none').map(item => {
     const rect = item.getBoundingClientRect();
     const icon = item.querySelector('svg').getBoundingClientRect();
-    return { width: rect.width, height: rect.height, iconWidth: icon.width, iconHeight: icon.height };
+    return { width: rect.width, height: rect.height, iconWidth: icon.width, iconHeight: icon.height,
+      offsetX: Math.abs((icon.left + icon.right) / 2 - (rect.left + rect.right) / 2),
+      offsetY: Math.abs((icon.top + icon.bottom) / 2 - (rect.top + rect.bottom) / 2) };
   }));
-  assert.ok(buttons.length >= 1);
-  assert.ok(buttons.every(item => item.width >= 44 && item.height >= 44 && item.iconWidth >= 22 && item.iconHeight >= 22));
+  assert.equal(buttons.length, 3);
+  assert.ok(buttons.every(item => item.width >= 44 && item.height >= 44 && item.iconWidth >= 22 && item.iconHeight >= 22 &&
+    item.offsetX < .5 && item.offsetY < .5), JSON.stringify(buttons));
+  await page.evaluate(() => {
+    window.__refreshEvents = 0;
+    const original = window.__ppLiveRefresh;
+    window.__ppLiveRefresh = reason => {
+      if (reason === 'manual') window.__refreshEvents++;
+      return original(reason);
+    };
+  });
+  await page.getByRole('button', { name: '刷新当前页面' }).click();
+  await page.waitForFunction(() => window.__refreshEvents === 1);
 
   const routeBeforeBack = await page.evaluate(() => location.hash);
   await page.evaluate(() => {
@@ -164,7 +197,7 @@ try {
   await page.waitForFunction(expected => location.hash === expected, routeBeforeBack);
   assert.equal(await page.evaluate(() => location.hash), routeBeforeBack);
   assert.deepEqual(errors, []);
-  console.log('Navigation cache: preload, DOM reuse, scroll, drafts, layered back and header targets passed');
+  console.log('Navigation cache: preload, DOM reuse, scroll, drafts, layered back, header order and icon alignment passed');
 } finally {
   await context.close();
   await browser.close();

@@ -132,7 +132,6 @@
     var requestVersion = 0, summaryVersion = 0, lastSummary = null, appliedQuery = null, refreshedAt = Date.now(), refreshTimer = null;
     var totalConcurrency = null;
     function current() { return Api.AUTH.matches(account) && App.isPageRetained(page); }
-
     var granularityControl = h('div', { class: 'seg dashboard-granularity', 'aria-label': '统计粒度' },
       ['day', 'hour'].map(function (value) {
         return h('button', { class: value === granularity ? 'active' : '', onclick: function () {
@@ -258,7 +257,7 @@
               '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
         h('section', { class: 'card dashboard-quality' },
           h('div', { class: 'dashboard-quality-head' },
-            h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与令牌状态')),
+            h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与实时性能')),
             h('button', { class: 'dashboard-inline-action', onclick: function () { App.go('#/usage'); } }, '查看用量 ›')),
           h('div', { class: 'dashboard-quality-grid' },
             metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
@@ -564,28 +563,25 @@
     }
 
     function refreshVisible() {
-      if (!current() || !App.isPageActive(page)) return;
-      refreshedAt = Date.now();
-      loadSummary(true);
-      loadCharts(true);
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshVisible, 60000);
-    }
-    function liveUpdated(event) {
-      if (!current() || !App.isPageActive(page)) return;
+      if (!current() || !App.isPageActive(page) || document.hidden) return;
       refreshedAt = Date.now();
       loadSummary(true);
       loadCharts(true);
-      if (event && event.detail && event.detail.reason === 'visible') {
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(refreshVisible, 60000);
-      }
+      refreshTimer = setTimeout(refreshVisible, 10000);
+    }
+    function scheduleRefresh() {
+      clearTimeout(refreshTimer);
+      if (!current() || !App.isPageActive(page) || document.hidden) return;
+      var remaining = 10000 - Math.max(0, Date.now() - refreshedAt);
+      if (remaining <= 0) refreshVisible();
+      else refreshTimer = setTimeout(refreshVisible, remaining);
     }
     function userUpdated() {
       if (!current()) return;
       var balanceValue = summaryHost.querySelector('.dashboard-balance-value');
-      if (balanceValue) balanceValue.textContent = balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
-      else if (lastSummary) renderSummary(lastSummary);
+      var nextBalance = balanceMoney(C.balanceOf(global.S.user || Api.AUTH.user() || {}));
+      if (balanceValue && balanceValue.textContent !== nextBalance) balanceValue.textContent = nextBalance;
     }
     function manualUpdated() {
       if (!current()) return;
@@ -594,19 +590,17 @@
       loadCharts(true);
     }
     global.addEventListener('pp:user-updated', userUpdated);
-    global.addEventListener('pp:live-refreshed', liveUpdated);
-    global.addEventListener('pp:manual-refreshed', manualUpdated);
-    page.addEventListener('pp:page-activate', function () {
-      clearTimeout(refreshTimer);
-      refreshVisible();
-      refreshTimer = setTimeout(refreshVisible, 60000);
-    });
+    page.addEventListener('pp:page-activate', scheduleRefresh);
     page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
+    page.addEventListener('pp:page-refresh', function () {
+      refreshedAt = Date.now();
+      loadSummary(true);
+      loadCharts(true);
+      scheduleRefresh();
+    });
     page.addEventListener('pp:page-dispose', function () {
       clearTimeout(refreshTimer);
       global.removeEventListener('pp:user-updated', userUpdated);
-      global.removeEventListener('pp:live-refreshed', liveUpdated);
-      global.removeEventListener('pp:manual-refreshed', manualUpdated);
     });
     loadSummary();
     loadCharts();

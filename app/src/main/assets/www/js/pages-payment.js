@@ -15,6 +15,11 @@
     } catch (e) { return ''; }
   }
   function money(value) { return Number(value).toFixed(2); }
+  function orderRequestMessage(error, fallback) {
+    var message = String(error && (error.message || error) || '');
+    return /access control checks|aborterror|request was cancelled|request canceled|load failed/i.test(message)
+      ? '请求异常中断' : message || fallback;
+  }
   function renderPurchase(initialView) {
     if (!Api.AUTH.isLogged()) return global.PagesUser.needLogin();
     var page = h('div', { class: 'page payment-page' });
@@ -66,6 +71,8 @@
     function activate() {
       syncRouteView();
       paintViews();
+      if (view === 'orders') loadOrders(true);
+      if (view === 'subscriptions') loadSubscriptions();
     }
     function paintViews() {
       var defs = [
@@ -140,15 +147,14 @@
       var card = currentCard();
       submit.disabled = !ordersReady || shared.submitting || !!activeOrder || shared.uncertain ||
         daycardOrderBlocked() ||
-        (balancePayment && (cardState() !== 'ready' || !card || !isDaycardPlan() || !!card.subscription || Number(card.user.balance) < Number(card.plan.price)));
+        (balancePayment && (cardState() !== 'ready' || !card || !isDaycardPlan() || Number(card.user.balance) < Number(card.plan.price)));
       submit.textContent = shared.submitting ? (balancePayment ? '正在处理订阅…' : '正在创建订单…') : !ordersReady ? '正在检查订单…' :
         activeOrder ? '请先处理当前订单' : shared.uncertain ? '请先检查订单记录' :
         daycardOrderBlocked() ? '请先核对订阅状态' :
         balancePayment && cardState() === 'loading' ? '正在核对订阅…' :
         balancePayment && card && !isDaycardPlan() ? '订阅信息不可用' :
-        balancePayment && card && card.subscription ? '已持有该订阅' :
         balancePayment && card && Number(card.user.balance) < Number(card.plan.price) ? '账户余额不足' :
-        balancePayment ? '确认余额支付' : '确认订单';
+        balancePayment ? (card && card.subscription ? '叠加续费' : '确认余额支付') : '确认订单';
     }
     function notifyOrder() { global.dispatchEvent(new CustomEvent('pp:payment-changed', { detail: account.id })); }
     function methods() {
@@ -268,6 +274,11 @@
       });
     }
     function paintForm() {
+      if (!info || !config) {
+        formHost.innerHTML = '';
+        formHost.appendChild(h('div', { class: 'dashboard-loading' }, '正在加载充值信息…'));
+        return;
+      }
       formHost.innerHTML = '';
       var canBalance = !info.balance_disabled && !config.balance_disabled;
       var list = plans();
@@ -345,7 +356,7 @@
         ' ', h('button', { type: 'button', onclick: function () { loadDaycard(gid); } }, '重试')));
       if (isDaycardPlan()) {
         formHost.appendChild(h('div', { class: 'payment-balance-note' }, '账户余额 ¥' + money(card.user.balance) + ' · 订阅价格 ¥' + money(card.plan.price) +
-          (card.subscription ? ' · 已生效' + (card.subscription.expires_at ? '，有效至 ' + U.datetime(card.subscription.expires_at) : '') : '')));
+          (card.subscription ? ' · 已生效' + (card.subscription.expires_at ? '，有效至 ' + U.datetimeSeconds(card.subscription.expires_at) + '，可叠加续费' : '，可叠加续费') : '')));
         if (daycardUncertain()) formHost.appendChild(h('div', { class: 'notice warn payment-balance-note' },
           '上次余额支付结果未确认，请先刷新并核对订阅状态及余额，避免重复扣款。 ',
           h('button', { type: 'button', onclick: function () { loadDaycard(gid); } }, '刷新状态'), ' ',
@@ -431,7 +442,7 @@
         }).catch(function (e) {
           shared.uncertain = true;
           if (current()) {
-            U.toast((e.message || '创建订单失败') + '。请先检查订单记录。', 'err');
+            U.toast(orderRequestMessage(e, '创建订单失败') + '。请先检查订单记录。', 'err');
             showOrders();
             loadOrders(true);
           }
@@ -449,7 +460,7 @@
 
     function confirmDaycard() {
       var card = currentCard(), gid = currentGroup();
-      if (!card || !gid || cardState() !== 'ready' || !isDaycardPlan() || daycardUncertain() || card.subscription ||
+      if (!card || !gid || cardState() !== 'ready' || !isDaycardPlan() || daycardUncertain() ||
           Number(card.user.balance) < Number(card.plan.price)) return;
       var chosenPlan = selectedPlan, displayedPrice = Number(card.plan.price);
       var revision = cardRevisions[gid] = (cardRevisions[gid] || 0) + 1;
@@ -460,13 +471,13 @@
         if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() || Number(fresh.plan.price) !== displayedPrice) {
           U.toast('订阅信息已变化，请重新确认', 'err'); return;
         }
-        if (fresh.subscription) { U.toast('该订阅已生效，无需重复购买'); return; }
         if (Number(fresh.user.balance) < Number(fresh.plan.price)) { U.toast('账户余额不足，请先充值', 'err'); return; }
         if (daycardUncertain()) { U.toast('上次支付结果未确认，请先核对', 'err'); return; }
         shared.submitting = false; updateSubmit(); notifyOrder();
         U.confirm('确认余额支付', '订阅：' + fresh.plan.name + '\n支付金额：¥' + money(fresh.plan.price) +
           '\n有效期：' + (Number(fresh.plan.validity_days) > 0 ? fresh.plan.validity_days + ' 天' : '以平台为准') +
-          '\n账户余额：¥' + money(fresh.user.balance) + '\n免支付通道费，确认后将立即扣款并开通。', '确认支付').then(function (ok) {
+          (fresh.subscription && fresh.subscription.expires_at ? '\n当前到期：' + U.datetimeSeconds(fresh.subscription.expires_at) + '\n续费后将在当前到期时间上叠加。' : '') +
+          '\n账户余额：¥' + money(fresh.user.balance) + '\n免支付通道费，确认后将立即扣款并开通。', fresh.subscription ? '确认续费' : '确认支付').then(function (ok) {
           if (!ok || !current() || !page.isConnected || shared.submitting || daycardUncertain() || shared.uncertain || shared.order ||
               method !== 'daycard_balance' || selectedPlan !== chosenPlan || currentCard() !== fresh) return;
           shared.submitting = true;
@@ -476,7 +487,7 @@
             if (!current() || !page.isConnected || confirmedRevision !== cardRevisions[gid]) return null;
             applyDaycard(gid, latest);
             if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() ||
-                latest.plan.name !== fresh.plan.name || Number(latest.plan.price) !== displayedPrice || latest.subscription || Number(latest.user.balance) < displayedPrice) {
+                latest.plan.name !== fresh.plan.name || Number(latest.plan.price) !== displayedPrice || Number(latest.user.balance) < displayedPrice) {
               U.toast('订阅价格、余额或状态已变化，请重新确认', 'err'); return null;
             }
             setDaycardUncertain(true);
@@ -488,7 +499,7 @@
               throw new Error('支付结果不完整');
             }
             setDaycardUncertain(false);
-            if (current()) U.toast('订阅开通成功，已扣 ¥' + money(paid), 'ok');
+            if (current()) U.toast((fresh.subscription ? '续费成功' : '订阅开通成功') + '，已扣 ¥' + money(paid), 'ok');
             if (current()) {
               loadDaycard(gid); loadSubscriptions(); loadOrders();
               App.refreshUser().then(function (user) {
@@ -501,7 +512,7 @@
               (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429);
             if (definite) { setDaycardUncertain(false); }
             if (current()) {
-              U.toast((error.message || '余额支付失败') + (daycardUncertain() ? '。请先核对订阅状态和余额。' : ''), 'err');
+              U.toast(orderRequestMessage(error, '余额支付失败') + (daycardUncertain() ? '。请先核对订阅状态和余额。' : ''), 'err');
               loadDaycard(gid); loadSubscriptions();
             }
           }).finally(function () {
@@ -587,9 +598,10 @@
           .catch(function (e) { U.toast(e.message, 'err'); });
       });
     }
-    function loadOrders(revealOrder) {
-      historyHost.innerHTML = '';
-      Promise.all([Api.myOrders({ page: 1, page_size: 20 }), Api.myOrders({ page: 1, page_size: 1, status: 'PENDING' })]).then(function (results) {
+    function loadOrders(revealOrder, silent) {
+      silent = silent === true && !!historyHost.firstElementChild;
+      if (!silent) historyHost.innerHTML = '';
+      return Promise.all([Api.myOrders({ page: 1, page_size: 20 }), Api.myOrders({ page: 1, page_size: 1, status: 'PENDING' })]).then(function (results) {
         if (!current()) return;
         var data = results[0], pendingData = results[1];
         var items = C.arrOf(data);
@@ -638,6 +650,7 @@
         } }, '已检查订单，继续下单'));
       }).catch(function (e) {
         if (!current()) return;
+        if (silent) return;
         ordersReady = false; syncSubmitAfterOrders();
         historyHost.innerHTML = '';
         historyHost.appendChild(h('div', { class: 'notice warn section' }, '订单加载失败：' + e.message, ' ', h('button', { onclick: loadOrders }, '重试')));
@@ -645,23 +658,28 @@
         showOrders();
       });
     }
-    function loadSubscriptions() {
-      Api.subscriptions().then(function (data) {
+    function loadSubscriptions(silent) {
+      silent = silent === true && !!subscriptionsHost.firstElementChild;
+      return Api.subscriptions().then(function (data) {
         if (!current()) return;
         var list = C.arrOf(data); subscriptionsHost.innerHTML = '';
         subscriptionsHost.appendChild(section('我的订阅', null, null, list.length ? C.card(list.map(function (item) {
           var until = pick(item, 'expires_at', 'expired_at', 'end_at');
           return h('div', { class: 'list-item' }, h('div', { class: 'li-body' }, h('div', { class: 'li-title' }, pick(item, 'group_name', 'name') || (item.group && item.group.name) || '模型订阅'),
-            h('div', { class: 'li-sub' }, until ? '有效至 ' + U.date(until) : '有效订阅')), h('span', { class: 'badge ok' }, '生效中'));
+            h('div', { class: 'li-sub' }, until ? '有效至 ' + U.datetimeSeconds(until) : '有效订阅')), h('span', { class: 'badge ok' }, '生效中'));
         })) : h('div', { class: 'dashboard-empty' }, '暂无生效订阅')));
-      }).catch(function () { if (current()) subscriptionsHost.textContent = '订阅状态暂不可用'; });
+      }).catch(function () { if (current() && !silent) subscriptionsHost.textContent = '订阅状态暂不可用'; });
     }
     formHost.appendChild(h('div', { class: 'dashboard-loading' }, '正在加载充值信息…'));
     function loadConfig() {
-      Promise.all([Api.paymentInfo(), Api.paymentConfig()]).then(function (result) {
+      return Promise.all([Api.paymentInfo(), Api.paymentConfig()]).then(function (result) {
         if (!current()) return;
-        info = Object.assign({}, info || {}, result[0] || {});
-        config = Object.assign({}, config || {}, result[1] || {});
+        var nextInfo = result[0], nextConfig = result[1];
+        if (!nextInfo || typeof nextInfo !== 'object' || !nextConfig || typeof nextConfig !== 'object') {
+          throw new Error('充值配置返回不完整');
+        }
+        info = Object.assign({}, info || {}, nextInfo);
+        config = Object.assign({}, config || {}, nextConfig);
         if (methods().indexOf(method) < 0) method = methods()[0] || '';
         var list = plans();
         var stillListed = selectedPlan && list.filter(function (plan) {
@@ -681,7 +699,38 @@
         paintForm();
         loadAllCards();
         updateSubmit();
-      }).catch(function (e) { if (current()) { formHost.innerHTML = ''; formHost.appendChild(h('div', { class: 'notice warn section' }, '充值信息加载失败：' + e.message, ' ', h('button', { onclick: loadConfig }, '重试'))); } });
+      }).catch(function (e) {
+        if (!current() || (info && config)) return;
+        formHost.innerHTML = '';
+        formHost.appendChild(h('div', { class: 'notice warn section' }, '充值信息加载失败：' + e.message, ' ', h('button', { onclick: loadConfig }, '重试')));
+      });
+    }
+    var paymentTimer = null, paymentPending = false;
+    function refreshVisible() {
+      clearTimeout(paymentTimer);
+      if (!page.isConnected || !current() || document.hidden || paymentPending) {
+        schedulePaymentRefresh();
+        return;
+      }
+      paymentPending = true;
+      var tasks = [loadOrders(true, true), loadSubscriptions(true)];
+      if (info && config) {
+        tasks.push(Api.paymentInfo().then(function (latest) {
+          if (!current() || !page.isConnected) return;
+          if (!latest || typeof latest !== 'object') throw new Error('充值配置返回不完整');
+          info = Object.assign({}, info, latest);
+          mergeLivePlans(latest.plans);
+          paintForm();
+        }).catch(function () {}));
+      }
+      Promise.all(tasks).finally(function () {
+        paymentPending = false;
+        schedulePaymentRefresh();
+      });
+    }
+    function schedulePaymentRefresh() {
+      clearTimeout(paymentTimer);
+      if (page.isConnected && current() && !document.hidden) paymentTimer = setTimeout(refreshVisible, 10000);
     }
     function onVisible() {
       if (!page.isConnected || !current()) { document.removeEventListener('visibilitychange', onVisible); return; }
@@ -699,6 +748,7 @@
       }
       loadOrders();
       loadSubscriptions();
+      schedulePaymentRefresh();
     }
     function onOrderChange(event) {
       if (!page.isConnected || !current()) { global.removeEventListener('pp:payment-changed', onOrderChange); return; }
@@ -712,8 +762,18 @@
     global.addEventListener('hashchange', syncRouteView);
     if (activeOrder) setTimeout(function () { if (page.isConnected && current()) paintActiveOrder(); }, 0);
     activate();
-    page.addEventListener('pp:page-activate', activate);
+    page.addEventListener('pp:page-activate', function () {
+      activate();
+      schedulePaymentRefresh();
+    });
+    page.addEventListener('pp:page-deactivate', function () { clearTimeout(paymentTimer); });
+    page.addEventListener('pp:page-refresh', function () {
+      if (!current() || shared.submitting) return;
+      loadConfig(); loadOrders(); loadSubscriptions();
+    });
     page.addEventListener('pp:page-dispose', function () {
+      clearTimeout(paymentTimer);
+      document.removeEventListener('visibilitychange', onVisible);
       global.removeEventListener('hashchange', syncRouteView);
     });
     loadConfig(); loadOrders(true); loadSubscriptions();

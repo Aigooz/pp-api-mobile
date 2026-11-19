@@ -197,7 +197,7 @@
 
     function schedule() {
       clearTimeout(timer);
-      if (App.isPageActive(host)) timer = setTimeout(load, Math.max(0, 60000 - (Date.now() - updatedAt)));
+      if (App.isPageActive(host)) timer = setTimeout(load, Math.max(0, 10000 - (Date.now() - updatedAt)));
     }
 
     function load() {
@@ -227,10 +227,11 @@
     }
 
     host.addEventListener('pp:page-activate', function () {
-      if (!updatedAt || Date.now() - updatedAt >= 60000) load();
+      if (!updatedAt || Date.now() - updatedAt >= 10000) load();
       else schedule();
     });
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(timer); });
+    host.addEventListener('pp:page-refresh', load);
     host.addEventListener('pp:page-dispose', function () { clearTimeout(timer); });
     load();
     return host;

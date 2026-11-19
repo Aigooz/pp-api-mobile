@@ -199,6 +199,13 @@
     if (isNaN(d.getTime())) return String(v);
     return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
+  function datetimeSeconds(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+      pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
   function ago(v) {
     var t = new Date(v).getTime();
     if (!isFinite(t)) return '';
@@ -544,6 +551,7 @@
     },
     copy: copy, haptic: haptic, sleep: sleep,
     num: num, credits: credits, usd: usd, tokens: tokens, price: price, date: date, datetime: datetime,
+    datetimeSeconds: datetimeSeconds,
     ago: ago, maskKey: maskKey, ymd: ymd, pad: pad, store: store
   };
 })(window);

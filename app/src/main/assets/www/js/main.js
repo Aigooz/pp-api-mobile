@@ -17,7 +17,7 @@
   };
 
   var view, appbar, titleEl, subEl, actionsEl, tabbar, glassSurface;
-  var announcementBtn, accountBtn, themeBtn;
+  var refreshBtn, announcementBtn, themeBtn;
   var tabIndicator, tabButtons = [], tabDrag = null;
   var currentPath = '';
   var publicGeneration = 0;
@@ -27,7 +27,7 @@
   var AUTH_ROUTES = ['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/accounts', '/profile',
     '/redeem', '/purchase', '/orders', '/subscriptions', '/affiliate'];
   var routeHistory = [], routeHistoryIndex = -1, restoringAppHistory = false;
-  var LIVE_REFRESH_MS = 60000;
+  var LIVE_REFRESH_MS = 10000;
   var BALANCE_REFRESH_MS = 10000;
   var liveTimer = null, balanceTimer = null, livePending = false, balancePending = false, liveLastAt = 0;
   var THEMES = [
@@ -115,23 +115,11 @@
       title: '平台公告', 'aria-label': '平台公告', 'data-announcement-entry': 'true'
     });
     announcementBtn.addEventListener('click', function () { App.go('#/announcements'); });
-    accountBtn = U.el('button', {
-      class: 'icon-btn appbar-account', html: U.ic('user', 22),
-      title: '账号管理', 'aria-label': '账号管理', 'data-account-entry': 'true'
-    });
-    function paintAccountButton() {
-      var logged = Api.AUTH.isLogged();
-      accountBtn.classList.toggle('is-authenticated', logged);
-      accountBtn.title = logged ? '账号与切换' : '登录账号';
-      accountBtn.setAttribute('aria-label', accountBtn.title);
-    }
-    accountBtn.addEventListener('click', function () {
-      App.go(Api.AUTH.isLogged() ? '#/accounts' : '#/login');
-    });
-    global.addEventListener('pp:auth-changed', paintAccountButton);
-    global.addEventListener('pp:user-updated', paintAccountButton);
-
     themeBtn = U.el('button', { class: 'icon-btn', html: U.ic('moon', 22), title: '切换明暗', 'aria-label': '切换明暗', 'data-theme-toggle': 'true' });
+    refreshBtn = U.el('button', {
+      class: 'icon-btn appbar-refresh', html: U.ic('refresh', 22),
+      title: '刷新当前页面', 'aria-label': '刷新当前页面', 'data-refresh-entry': 'true'
+    });
     function paintThemeButton() {
       var dark = /(^|-)dark$/.test(document.documentElement.getAttribute('data-theme') || '');
       themeBtn.innerHTML = U.ic(dark ? 'sun' : 'moon', 22);
@@ -139,11 +127,19 @@
       themeBtn.setAttribute('aria-label', themeBtn.title);
     }
     themeBtn.addEventListener('click', function () { toggleLightDark(); paintThemeButton(); });
+    refreshBtn.addEventListener('click', function () {
+      if (refreshBtn.disabled) return;
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('is-refreshing');
+      App.refreshCurrent().finally(function () {
+        refreshBtn.classList.remove('is-refreshing');
+        refreshBtn.disabled = false;
+      });
+    });
     global.addEventListener('pp:theme-changed', paintThemeButton);
+    actionsEl.appendChild(refreshBtn);
     actionsEl.appendChild(announcementBtn);
-    actionsEl.appendChild(accountBtn);
     actionsEl.appendChild(themeBtn);
-    paintAccountButton();
     paintThemeButton();
 
     if (global.requestAnimationFrame) requestAnimationFrame(syncSpace); else setTimeout(syncSpace, 16);
@@ -451,13 +447,6 @@
       if (onAnnouncements) announcementBtn.setAttribute('aria-current', 'page');
       else announcementBtn.removeAttribute('aria-current');
     }
-    if (accountBtn) {
-      var onAccount = ['/accounts', '/profile', '/login', '/register', '/forgot'].indexOf(r.path) >= 0;
-      accountBtn.classList.toggle('route-active', onAccount);
-      if (onAccount) accountBtn.setAttribute('aria-current', 'page');
-      else accountBtn.removeAttribute('aria-current');
-    }
-
     titleEl.textContent = r.path === '/home' && S.user ? '仪表盘' : def.title;
     subEl.textContent = r.path === '/home' && !S.user ? 'AI API Gateway · 统一模型接入' : '';
     titleEl.appendChild(subEl);
@@ -565,6 +554,7 @@
       var publicTask = loadPublic();
       var userTask = Api.AUTH.isLogged() ? App.refreshUser() : Promise.resolve(null);
       var activeTask = Promise.resolve();
+      if (activePage) pageEvent(activePage, 'refresh');
       if (path === '/home' || path === '/dashboard') activeTask = global.__ppLiveRefresh ? global.__ppLiveRefresh('manual') : Promise.resolve();
       refreshInFlight = Promise.all([publicTask, userTask, activeTask]).catch(function () {
         return null;
@@ -635,16 +625,26 @@
         S.settings = s;
         document.title = (s && s.site_name) || 'Pp API';
         return { kind: 'settings', value: s };
-      }).catch(function () { shellRefreshFailed('settings'); return null; }),
+      }).catch(function (error) {
+        if (!cancelledRequest(error)) shellRefreshFailed('settings');
+        return null;
+      }),
       Api.plaza(true).then(function (p) {
         S.plaza = p;
         S.plazaLoading = false;
         if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
         return { kind: 'plaza', value: p };
-      }).catch(function () { S.plazaLoading = false; shellRefreshFailed('plaza'); return null; }),
+      }).catch(function (error) {
+        S.plazaLoading = false;
+        if (!cancelledRequest(error)) shellRefreshFailed('plaza');
+        return null;
+      }),
       Api.channelStatus().then(function (data) {
         return { kind: 'channel', value: data };
-      }).catch(function () { shellRefreshFailed('channel'); return null; })
+      }).catch(function (error) {
+        if (!cancelledRequest(error)) shellRefreshFailed('channel');
+        return null;
+      })
     ]).then(function (results) {
       liveLastAt = Date.now();
       var changed = {};
@@ -695,10 +695,15 @@
   function shellRefreshFailed(kind) {
     global.dispatchEvent(new CustomEvent('pp:live-refresh-failed', { detail: { kind: kind } }));
   }
+  function cancelledRequest(error) {
+    var message = String(error && (error.message || error) || '').toLowerCase();
+    return !!(error && (error.name === 'AbortError' || error.cancelled || error.code === 'REQUEST_CANCELLED')) ||
+      /access control checks|aborterror|request was cancelled|request canceled|load failed/.test(message);
+  }
 
   function scheduleLiveRefresh(delay) {
     clearTimeout(liveTimer);
-    var wait = delay === undefined ? LIVE_REFRESH_MS : Math.max(5000, delay);
+    var wait = delay === undefined ? LIVE_REFRESH_MS : Math.max(2000, delay);
     liveTimer = setTimeout(function () {
       liveTimer = null;
       if (!document.hidden) refreshLive('timer');
@@ -758,7 +763,7 @@
     global.addEventListener('online', function () { refreshLive('online'); refreshBalance(); });
     global.addEventListener('pp:keys-changed', function () { refreshLive('keys'); });
     scheduleBalanceRefresh();
-    scheduleLiveRefresh(12000);
+    scheduleLiveRefresh(LIVE_REFRESH_MS);
   }
   global.__ppLiveRefresh = function (reason) { return refreshLive(reason || 'manual'); };
   global.__ppBalanceRefresh = function () { return refreshBalance(); };

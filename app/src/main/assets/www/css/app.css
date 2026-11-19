@@ -174,33 +174,35 @@ body.scrolled .appbar { --glass-opacity: .72; --glass-line: .9; --glass-line-sca
 .appbar-leading { flex: 1; min-width: 0; }
 .appbar-title { font-size: 17px; font-weight: 700; flex: 1; min-width: 0; }
 .appbar-title small { display: block; font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
-.appbar-actions { display: flex; align-items: center; gap: 3px; }
+.appbar-actions { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .appbar-actions .icon-btn {
   appearance: none; -webkit-appearance: none; padding: 0;
   width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px;
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; flex-direction: row;
+  line-height: 0; text-align: center; vertical-align: middle;
   position: relative; transition: background .18s ease, color .18s ease, transform .18s ease;
 }
-.appbar-actions .icon-btn svg { display: block; flex: 0 0 22px; width: 22px; height: 22px; margin: auto; }
+.appbar-actions .icon-btn svg { display: block; position: static; flex: 0 0 22px; width: 22px; height: 22px; margin: 0; padding: 0; }
 .appbar-actions .icon-btn:active { transform: scale(.9); }
 .appbar-actions .icon-btn.route-active {
   background: color-mix(in srgb, var(--teal-soft) 74%, rgba(255, 255, 255, .18));
   color: var(--teal);
 }
-.appbar-account.is-authenticated::after {
-  content: ""; position: absolute; right: 6px; bottom: 6px; width: 7px; height: 7px;
-  border-radius: 50%; background: var(--ok);
-  box-shadow: 0 0 0 2px var(--bar-bg);
+.appbar-refresh.is-refreshing svg { animation: appbar-refresh-spin .8s linear infinite; }
+@keyframes appbar-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .icon-btn {
   appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;
   width: 36px; height: 36px; border-radius: 12px; border: 0;
   background: transparent; color: var(--ink-2);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; flex-direction: row;
+  text-align: center; vertical-align: middle;
   cursor: pointer;
 }
 .icon-btn:active { background: var(--surface-2); }
-.icon-btn svg { display: block; flex: 0 0 auto; width: 20px; height: 20px; }
+.icon-btn svg { display: block; position: static; flex: 0 0 auto; width: 20px; height: 20px; margin: 0; padding: 0; }
 .icon-btn:disabled { opacity: .4; pointer-events: none; }
 .update-indicator { position: relative; color: var(--teal); }
 .update-indicator::after { content: ''; position: absolute; width: 7px; height: 7px; top: 3px; right: 3px; border-radius: 50%; background: var(--danger); border: 1px solid var(--bg); }
@@ -1198,20 +1200,23 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
     linear-gradient(120deg, var(--teal-soft), color-mix(in srgb, var(--surface) 80%, transparent));
 }
 .payment-service-icon {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 34px;
   height: 34px;
+  flex: 0 0 34px;
+  align-self: center;
   line-height: 0;
   border-radius: 8px;
   background: var(--surface);
   color: var(--teal);
+  vertical-align: middle;
 }
 .payment-service-icon svg {
   display: block;
   width: 17px;
   height: 17px;
-  margin: auto;
+  margin: 8.5px;
+  flex: 0 0 17px;
 }
 .payment-service-strip strong,
 .payment-service-strip span { display: block; }
@@ -1623,10 +1628,12 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .tool-btn {
   appearance: none; -webkit-appearance: none; padding: 0; line-height: 0;
   width: 36px; height: 36px; flex: 0 0 auto; border-radius: 12px; border: 1px solid var(--line);
-  background: var(--surface); color: var(--ink-2); display: grid; place-items: center;
+  background: var(--surface); color: var(--ink-2);
+  display: inline-flex; align-items: center; justify-content: center; flex-direction: row;
+  text-align: center; vertical-align: middle; overflow: hidden;
 }
 .tool-btn:active { background: var(--surface-2); }
-.tool-btn svg { display: block; width: 18px; height: 18px; }
+.tool-btn svg { display: block; position: static; flex: 0 0 18px; width: 18px; height: 18px; margin: 0; padding: 0; }
 .suggests { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
 .suggest {
   text-align: left; padding: 11px 12px; border-radius: 14px; border: 1px solid var(--line);

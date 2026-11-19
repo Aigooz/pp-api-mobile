@@ -140,6 +140,7 @@ try {
   failStatus = false;
   await page.getByRole('button', { name: '重试' }).click();
   await page.locator('.channel-item').first().waitFor();
+  const channelRoute = await page.evaluate(() => location.hash);
   assert.ok(statusRequests >= 3);
   assert.equal(await page.locator('.tab.active').getAttribute('data-tab'), 'plaza');
   assert.equal(await page.locator('.channel-item').count(), 3);
@@ -153,7 +154,10 @@ try {
   assert.equal(await page.locator('.channel-item').count(), 1);
   await page.getByRole('button', { name: '查看 demo-model 的探测记录' }).click();
   assert.match(await page.locator('.sheet').innerText(), /偏慢[\s\S]*6\.00 s/);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  await page.waitForFunction(() => document.querySelectorAll('.sheet').length === 0);
+  assert.equal(await page.evaluate(() => location.hash), channelRoute);
+  assert.equal(await page.getByText('模型明细', { exact: true }).count(), 1);
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.evaluate(() => document.querySelector('#view').scrollWidth), await page.evaluate(() => document.querySelector('#view').clientWidth));
@@ -178,6 +182,8 @@ try {
   await page.getByText('账户余额').waitFor();
   await page.getByText('今日缓存命中率').waitFor();
   assert.equal(await page.locator('.dashboard-metric').count(), 7);
+  assert.match(await page.locator('.dashboard-quality-head').innerText(), /运行质量\s+请求、缓存与实时性能/);
+  assert.doesNotMatch(await page.locator('.dashboard-quality-head').innerText(), /令牌状态/);
   assert.match(await page.locator('.dashboard').innerText(), /80\.0%/);
   assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
   assert.match(await page.locator('.dashboard').innerText(), /今日出错 1/);

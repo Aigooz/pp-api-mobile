@@ -574,22 +574,27 @@
     page.appendChild(section(null, null, null, logTools));
     page.appendChild(logsHost);
 
-    function load() {
+    var refreshTimer = null, refreshPending = false, refreshReady = false;
+    function load(silent) {
+      silent = silent === true && refreshReady && !!statsHost.firstElementChild;
       var version = ++requestVersion, selected;
       try { selected = global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
-      catch (error) { U.toast(error.message, 'err'); return; }
+      catch (error) { U.toast(error.message, 'err'); return Promise.resolve(false); }
       var q = { start_date: selected.startDate, end_date: selected.endDate };
+      var tasks = [];
       var precise = selected.wholeDays ? null : global.UsageAnalysis.fetchRecords(selected).then(function (records) {
         return global.UsageAnalysis.aggregate(records, 'day');
       });
-      statsHost.innerHTML = '';
-      trendHost.innerHTML = ''; modelHost.innerHTML = ''; logsHost.innerHTML = '';
-      statsHost.appendChild(h('div', { class: 'grid-2' },
-        h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '花费')),
-        h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '请求'))
-      ));
+      if (!silent) {
+        statsHost.innerHTML = '';
+        trendHost.innerHTML = ''; modelHost.innerHTML = ''; logsHost.innerHTML = '';
+        statsHost.appendChild(h('div', { class: 'grid-2' },
+          h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '花费')),
+          h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '请求'))
+        ));
+      }
 
-      (precise ? precise.then(function (data) { return data.stats; }) : Api.usageStats(q)).then(function (d) {
+      tasks.push((precise ? precise.then(function (data) { return data.stats; }) : Api.usageStats(q)).then(function (d) {
         if (version !== requestVersion) return;
         var st = d || {};
         if (st.data && typeof st.data === 'object') st = st.data;
@@ -630,13 +635,14 @@
             usageMetric('缓存命中率', cacheRate === null || cacheRate === undefined ? '未知' : Number(cacheRate).toFixed(1) + '%', '缓存读取占比'))));
       }).catch(function (error) {
         if (version !== requestVersion) return;
+        if (silent) return;
         statsHost.innerHTML = '';
         statsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '用量统计暂不可用'));
-      });
+      }));
 
       var tq = Object.assign({}, q);
       tq.granularity = 'day';
-      (precise ? precise.then(function (data) { return { trend: data.trend }; }) : Api.usageTrend(tq)).then(function (d) {
+      tasks.push((precise ? precise.then(function (data) { return { trend: data.trend }; }) : Api.usageTrend(tq)).then(function (d) {
         if (version !== requestVersion) return;
         var list = arrOf(d);
         if (!list.length && d && Array.isArray(d.series)) list = d.series;
@@ -660,9 +666,11 @@
           h('div', { class: 'usage-chart-axis' },
             h('span', null, U.date(pick(list[0], 'date', 'day', 'bucket')) || ''),
             h('span', null, U.date(pick(list[list.length - 1], 'date', 'day', 'bucket')) || '')))));
-      }).catch(function (error) { if (version === requestVersion && !precise) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败')); });
+      }).catch(function (error) {
+        if (version === requestVersion && !precise && !silent) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败'));
+      }));
 
-      (precise ? precise.then(function (data) { return { models: data.models }; }) : Api.usageModels(q)).then(function (d) {
+      tasks.push((precise ? precise.then(function (data) { return { models: data.models }; }) : Api.usageModels(q)).then(function (d) {
         if (version !== requestVersion) return;
         var list = d && Array.isArray(d.models) ? d.models : arrOf(d);
         if (!list.length) { modelHost.innerHTML = ''; return; }
@@ -686,7 +694,9 @@
             );
           })
         )));
-      }).catch(function (error) { if (version === requestVersion && !precise) modelHost.appendChild(h('div', { class: 'notice warn' }, error.message || '模型统计加载失败')); });
+      }).catch(function (error) {
+        if (version === requestVersion && !precise && !silent) modelHost.appendChild(h('div', { class: 'notice warn' }, error.message || '模型统计加载失败'));
+      }));
 
       function renderLogs(list) {
         logsHost._logs = list;
@@ -727,11 +737,31 @@
               lat.tps ? h('span', null, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null);
         })));
       }
-      (precise ? precise.then(function (data) { return data.records.slice(0, 100); }) : Api.usageLogs(Object.assign({ page: 1, page_size: 100 }, q))).then(function (d) {
+      tasks.push((precise ? precise.then(function (data) { return data.records.slice(0, 100); }) : Api.usageLogs(Object.assign({ page: 1, page_size: 100 }, q))).then(function (d) {
         if (version !== requestVersion) return;
         renderLogs(arrOf(d));
-      }).catch(function (error) { if (version === requestVersion && !precise) logsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '调用记录加载失败')); });
+      }).catch(function (error) {
+        if (version === requestVersion && !precise && !silent) logsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '调用记录加载失败'));
+      }));
+      refreshReady = true;
+      return Promise.all(tasks).then(function () { return version === requestVersion; });
     }
+    function refreshVisible() {
+      clearTimeout(refreshTimer);
+      if (!App.isPageActive(page) || refreshPending) return;
+      refreshPending = true;
+      load(true).finally(function () {
+        refreshPending = false;
+        if (App.isPageActive(page)) refreshTimer = setTimeout(refreshVisible, 10000);
+      });
+    }
+    page.addEventListener('pp:page-activate', function () {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshVisible, 10000);
+    });
+    page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
+    page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); requestVersion++; });
+    page.addEventListener('pp:page-refresh', function () { load(); });
     load();
     return page;
   }

@@ -36,6 +36,7 @@ async function run(engine, name) {
       }] }));
       if (path === '/api/v1/auth/login') return route.fulfill(ok({ access_token: 'access-ui', refresh_token: 'refresh-ui', user: { email } }));
       if (path === '/api/v1/auth/me') return route.fulfill(ok({ email }));
+      if (path === '/api/v1/keys') return route.fulfill(ok({ items: [{ id: 1, name: '测试令牌', key: 'sk-test', status: 'active' }] }));
       return route.fulfill(ok([]));
     });
     await page.goto(base + '/#/login');
@@ -97,6 +98,42 @@ async function run(engine, name) {
     await page.getByRole('button', { name: '复制模型名称 gpt-5.6-sol', exact: true }).click();
     assert.equal(await page.evaluate(() => window.copied), 'gpt-5.6-sol');
     assert.equal(await page.locator('.sheet').count(), 0);
+
+    await page.getByRole('button', { name: '首页', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.appbar-actions .icon-btn').length === 3);
+    for (const width of [320, 390, 768]) {
+      await page.setViewportSize({ width, height: 844 });
+      const centers = await page.locator('.appbar-actions .icon-btn').evaluateAll(items => items.filter(item => getComputedStyle(item).display !== 'none').map(item => {
+        const box = item.getBoundingClientRect();
+        const icon = item.querySelector('svg').getBoundingClientRect();
+        return {
+          label: item.getAttribute('aria-label'),
+          width: box.width,
+          height: box.height,
+          offsetX: Math.abs((box.left + box.right - icon.left - icon.right) / 2),
+          offsetY: Math.abs((box.top + box.bottom - icon.top - icon.bottom) / 2)
+        };
+      }));
+      assert.equal(centers.length, width <= 350 ? 2 : 3, JSON.stringify(centers));
+      assert.ok(centers.every(item => item.width >= 44 && item.height >= 44 && item.offsetX < .5 && item.offsetY < .5), JSON.stringify(centers));
+    }
+    await page.evaluate(() => App.go('#/keys'));
+    await page.locator('.key-card-more').first().waitFor();
+    const keyIcon = await page.locator('.key-card-more').first().evaluate(item => {
+      const box = item.getBoundingClientRect();
+      const icon = item.querySelector('svg').getBoundingClientRect();
+      return { width: box.width, height: box.height, offsetX: Math.abs((box.left + box.right - icon.left - icon.right) / 2), offsetY: Math.abs((box.top + box.bottom - icon.top - icon.bottom) / 2) };
+    });
+    assert.ok(keyIcon.offsetX < .5 && keyIcon.offsetY < .5, JSON.stringify(keyIcon));
+    await page.evaluate(() => App.go('#/chat'));
+    await page.locator('.chat-toolbar .tool-btn').first().waitFor();
+    const chatCenters = await page.locator('.chat-toolbar .tool-btn').evaluateAll(items => items.map(item => {
+      const box = item.getBoundingClientRect();
+      const icon = item.querySelector('svg').getBoundingClientRect();
+      return { offsetX: Math.abs((box.left + box.right - icon.left - icon.right) / 2), offsetY: Math.abs((box.top + box.bottom - icon.top - icon.bottom) / 2) };
+    }));
+    assert.equal(chatCenters.length, 2);
+    assert.ok(chatCenters.every(item => item.offsetX < .5 && item.offsetY < .5), JSON.stringify(chatCenters));
     assert.deepEqual(errors, []);
     await context.close();
     console.log(`${name}: remember-password controls, account autofill, copy icons and responsive layouts passed`);
