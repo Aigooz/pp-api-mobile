@@ -1144,7 +1144,7 @@
         App.go('#/keys');
         return;
       }
-      var host = h('div');
+      var host = h('div', { class: 'chat-key-picker' });
       keys.forEach(function (key) {
         host.appendChild(h('button', {
           class: 'list-item', type: 'button',

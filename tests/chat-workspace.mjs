@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
 import { createPreviewServer, listenPreview } from '../preview.mjs';
 
@@ -8,6 +9,9 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 let completionCalls = 0;
 let requestGate = null;
+const screenshotDir = process.env.PP_TEST_SCREENSHOTS;
+if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
+const longModel = 'gpt-image-' + 'long-model-name-'.repeat(8);
 
 async function setup(engine) {
   const browser = await engine.launch({ headless: true });
@@ -37,6 +41,11 @@ async function setup(engine) {
             { role: 'user', content: '旧格式问题' },
             { role: 'assistant', content: '旧格式回答' }
           ]
+        }, {
+          id: 'long-title-session',
+          title: '这是一条用于检查窄屏和操作按钮布局的很长很长的历史对话标题',
+          model: 'demo-model', keyId: 1,
+          createdAt: now - 1000, updatedAt: now - 1000, messages: []
         }]
       }));
     }
@@ -52,13 +61,16 @@ async function setup(engine) {
       models: [{ name: 'demo-model', context_length: 8192 }]
     }] }));
     if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
-    if (path === '/api/v1/keys') return route.fulfill(ok({ items: [{
-      id: 1, name: '测试令牌', key: 'fake-key', status: 'active'
-    }] }));
+    if (path === '/api/v1/keys') return route.fulfill(ok({ items: [
+      { id: 1, name: '测试令牌', key: 'fake-key', status: 'active' },
+      { id: 2, name: '这是一个非常长的令牌名称用于测试布局', key: 'sk-012345678901234567890123456789', status: 'active' },
+      { id: 3, name: 'long-disabled-token-name-'.repeat(6), key: 'sk-disabled', status: 'disabled' },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 4, name: '其他令牌 ' + (i + 1), key: 'sk-other-' + i, status: 'active' }))
+    ] }));
     if (path === '/v1/models') return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ data: [{ id: 'demo-model', context_length: 16384 }] })
+      body: JSON.stringify({ data: [{ id: 'demo-model', context_length: 16384 }, { id: longModel }] })
     });
     if (path === '/v1/chat/completions') {
       completionCalls++;
@@ -99,6 +111,60 @@ async function openMessageMenu(page, text) {
   await page.locator('.sheet').waitFor();
 }
 
+async function checkPickerLayout(page, selector, label) {
+  const layout = await page.locator(selector).evaluate(host => {
+    const rect = node => node && node.getBoundingClientRect();
+    return {
+      horizontalOverflow: host.scrollWidth > host.clientWidth,
+      rows: Array.from(host.querySelectorAll('.list-item')).map(row => {
+        const box = rect(row);
+        const body = rect(row.querySelector('.li-body'));
+        const icon = row.querySelector('.li-icon');
+        const iconBox = rect(icon);
+        const svg = rect(icon.querySelector('svg'));
+        const tail = row.querySelector('.badge, .li-tail');
+        const tailBox = rect(tail);
+        const badge = rect(row.querySelector('.badge'));
+        const columns = Array.from(row.children).map(rect);
+        return {
+          left: box.left, right: box.right, width: box.width, height: box.height,
+          hostWidth: host.clientWidth,
+          bodyRight: body.right,
+          tailLeft: tailBox && tailBox.left,
+          tailRight: tailBox && tailBox.right,
+          titleOverflow: row.querySelector('.li-title').scrollWidth > row.querySelector('.li-title').clientWidth,
+          titleEllipsis: getComputedStyle(row.querySelector('.li-title')).textOverflow === 'ellipsis',
+          columnsOverlap: columns.some((column, index) => index > 0 && columns[index - 1].right > column.left + 1),
+          columnsOutside: columns.some(column => column.left < box.left || column.right > box.right + 1),
+          badgeOffsetY: badge && Math.abs((badge.top + badge.bottom - box.top - box.bottom) / 2),
+          iconOffsetX: Math.abs((iconBox.left + iconBox.right - svg.left - svg.right) / 2),
+          iconOffsetY: Math.abs((iconBox.top + iconBox.bottom - svg.top - svg.bottom) / 2)
+        };
+      })
+    };
+  });
+  assert.equal(layout.horizontalOverflow, false, label + ' overflows horizontally');
+  assert.ok(layout.rows.length > 0, label + ' has no rows');
+  for (const row of layout.rows) {
+    const detail = JSON.stringify({ label, ...row });
+    assert.ok(Math.abs(row.width - row.hostWidth) < 2, detail);
+    assert.ok(row.tailLeft === null || row.bodyRight <= row.tailLeft + 1, detail);
+    assert.ok(row.tailRight === null || row.tailRight <= row.right + 1, detail);
+    assert.ok(!row.titleOverflow || row.titleEllipsis, detail);
+    assert.equal(row.columnsOverlap, false, detail);
+    assert.equal(row.columnsOutside, false, detail);
+    assert.ok(row.height >= 56 && row.height <= 76, detail);
+    assert.ok(row.badgeOffsetY === null || row.badgeOffsetY < 1.1, detail);
+    assert.ok(row.iconOffsetX < 1.1 && row.iconOffsetY < 1.1, detail);
+  }
+  assert.equal(await page.locator('.sheet').evaluate(sheet => sheet.scrollWidth > sheet.clientWidth), false, label);
+}
+
+async function closeSheet(page) {
+  await page.evaluate(() => U.closeOverlay());
+  await page.locator('.sheet').waitFor({ state: 'detached' });
+}
+
 try {
   for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
     completionCalls = 0;
@@ -108,6 +174,43 @@ try {
     try {
       await page.goto(base + '/#/chat', { waitUntil: 'domcontentloaded' });
       await page.getByText('旧格式回答').waitFor();
+
+      // Cover long names, disabled tokens and scrolling on Android/iOS engines.
+      for (const width of [320, 390, 768]) {
+        await page.setViewportSize({ width, height: 844 });
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme);
+          await page.locator('.chat-toolbar .chip').nth(1).click();
+          await page.locator('.chat-key-picker').waitFor();
+          await checkPickerLayout(page, '.chat-key-picker', `${name} tokens ${width} ${theme}`);
+          assert.equal(await page.locator('.chat-key-picker').evaluate(host => host.scrollHeight > host.clientHeight), true);
+          await page.locator('.chat-key-picker .list-item').last().scrollIntoViewIfNeeded();
+          assert.ok(await page.locator('.chat-key-picker').evaluate(host => host.scrollTop > 0));
+          await page.locator('.chat-key-picker .list-item').first().scrollIntoViewIfNeeded();
+          if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/${name}-tokens-${width}-${theme}.png`, animations: 'disabled' });
+          await closeSheet(page);
+
+          await page.locator('.chat-toolbar .chip').first().click();
+          await page.locator('.chat-model-picker .list-item').nth(1).waitFor();
+          await checkPickerLayout(page, '.chat-model-picker', `${name} models ${width} ${theme}`);
+          if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/${name}-models-${width}-${theme}.png`, animations: 'disabled' });
+          await closeSheet(page);
+
+          await page.getByRole('button', { name: '历史对话', exact: true }).click();
+          await page.locator('.chat-history-list').waitFor();
+          await checkPickerLayout(page, '.chat-history-list', `${name} history ${width} ${theme}`);
+          if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/${name}-history-${width}-${theme}.png`, animations: 'disabled' });
+          await closeSheet(page);
+        }
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.locator('.chat-toolbar .chip').nth(1).click();
+      await page.locator('.chat-key-picker .list-item').nth(1).click();
+      await page.locator('.chat-toolbar .chip').nth(1).getByText('令牌 · 这是一个非常长的令牌名称用于测试布局').waitFor();
+      await page.reload();
+      await page.locator('.chat-toolbar .chip').nth(1).getByText('令牌 · 这是一个非常长的令牌名称用于测试布局').waitFor();
+      await page.locator('.chat-toolbar .chip').nth(1).click();
+      await page.locator('.chat-key-picker .list-item').first().click();
 
       // Existing messages migrate without losing their order or visible text.
       await page.locator('.composer textarea').fill('第一次提问');

@@ -1828,7 +1828,18 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-action-menu .list-item { width: 100%; min-height: 49px; border: 0; background: transparent; text-align: left; }
 .chat-action-menu .text-danger { color: var(--danger); }
 .chat-model-picker { max-height: 50vh; overflow-y: auto; }
-.chat-model-picker .list-item { width: 100%; border: 0; background: transparent; text-align: left; }
+.chat-key-picker { max-height: 50vh; overflow-y: auto; margin: 0 -16px; }
+.chat-model-picker .list-item,
+.chat-key-picker .list-item {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; min-width: 0; border: 0; background: transparent; text-align: left;
+}
+.chat-model-picker .li-title,
+.chat-key-picker .li-title, .chat-key-picker .li-sub {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-model-picker .badge,
+.chat-key-picker .badge { flex: 0 0 auto; }
 .chat-history-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .chat-history-head .btn { flex: 1; min-width: 0; }
 .chat-history-head .tool-btn { width: 40px; height: 40px; }
