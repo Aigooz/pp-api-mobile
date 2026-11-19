@@ -125,8 +125,46 @@ try {
   }));
   assert.ok(buttons.length >= 1);
   assert.ok(buttons.every(item => item.width >= 44 && item.height >= 44 && item.iconWidth >= 22 && item.iconHeight >= 22));
+
+  const routeBeforeBack = await page.evaluate(() => location.hash);
+  await page.evaluate(() => {
+    U.sheet({ title: '背景弹层' });
+    App.go('#/announcements/7');
+  });
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  await page.waitForFunction(() => location.hash === '#/announcements/7');
+  await page.waitForFunction(() => document.querySelector('#view').textContent.includes('公告不存在'));
+
+  await page.evaluate(() => {
+    U.sheet({ title: '下层详情', body: '第一层' });
+    U.sheet({ title: '上层详情', body: '第二层' });
+  });
+  assert.equal(await page.locator('.sheet').count(), 2);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  assert.equal(await page.locator('.sheet').count(), 1);
+  assert.match(await page.locator('.sheet').innerText(), /下层详情/);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  assert.equal(await page.locator('.sheet').count(), 0);
+  await page.waitForFunction(() => location.hash === '#/announcements/7');
+  assert.equal(await page.evaluate(() => location.hash), '#/announcements/7');
+  await page.evaluate(() => {
+    U.sheet({ title: '层级一', body: '外层' });
+    U.sheet({ title: '层级二', body: '中层' });
+    U.sheet({ title: '层级三', body: '内层' });
+  });
+  assert.equal(await page.locator('.sheet').count(), 3);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  assert.equal(await page.locator('.sheet').count(), 1);
+  assert.match(await page.locator('.sheet').innerText(), /层级一/);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  assert.equal(await page.locator('.sheet').count(), 0);
+  const hashBeforeLastBack = await page.evaluate(() => location.hash);
+  assert.equal(await page.evaluate(() => window.__ppBack()), true);
+  await page.waitForFunction(expected => location.hash === expected, routeBeforeBack);
+  assert.equal(await page.evaluate(() => location.hash), routeBeforeBack);
   assert.deepEqual(errors, []);
-  console.log('Navigation cache: preload, DOM reuse, scroll and draft retention, request reuse and header hit targets passed');
+  console.log('Navigation cache: preload, DOM reuse, scroll, drafts, layered back and header targets passed');
 } finally {
   await context.close();
   await browser.close();

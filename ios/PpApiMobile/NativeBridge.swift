@@ -72,6 +72,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
             if let on = body["on"] as? Bool {
                 DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = on }
             }
+        case "back":
+            DispatchQueue.main.async { self.webView?.evaluateJavaScript("window.__ppBack && window.__ppBack()") }
         case "updateCheck", "updateDownload", "updateInstall", "updateResume", "updateCancel":
             let action = action
             DispatchQueue.main.async { self.viewController?.handleUpdate(action) }

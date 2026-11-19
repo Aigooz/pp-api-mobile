@@ -118,6 +118,29 @@ try {
   await page.getByText('inside-a', { exact: true }).first().waitFor();
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
+  const yAxisLabels = await page.locator('.usage-trend-y-label').evaluateAll(nodes => nodes.map(node => node.textContent));
+  assert.equal(yAxisLabels.length, 5);
+  assert.equal(yAxisLabels.at(-1), '$0');
+  const chart = page.locator('.usage-trend-svg');
+  await chart.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    node.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, pointerType: 'mouse',
+      clientX: box.left + box.width * .52,
+      clientY: box.top + box.height * .35
+    }));
+  });
+  await page.locator('.usage-trend-tip:visible').waitFor();
+  assert.match(await page.locator('.usage-trend-tip').textContent(), /\d/);
+  const sectionLayout = await page.locator('.usage-summary').evaluate(node => {
+    const lead = node.querySelector('.usage-summary-lead').getBoundingClientRect();
+    const grid = node.querySelector('.usage-metric-grid').getBoundingClientRect();
+    const style = getComputedStyle(node.querySelector('.usage-summary-lead'));
+    return { leadLeft: lead.left, gridLeft: grid.left, leadRight: lead.right, gridRight: grid.right, border: parseFloat(style.borderBottomWidth) };
+  });
+  assert.ok(Math.abs(sectionLayout.leadLeft - sectionLayout.gridLeft) < .5);
+  assert.ok(Math.abs(sectionLayout.leadRight - sectionLayout.gridRight) < .5);
+  assert.equal(sectionLayout.border, 1);
   const usageView = await page.locator('#view').innerText();
   assert.match(usageView, /成功率\s*100\.0%/);
   assert.match(usageView, /缓存命中率\s*10\.0%/);
@@ -177,6 +200,32 @@ try {
   await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByRole('tab', { name: '商品', exact: true }).click();
   await page.locator('.payment-plan-choice').click();
+  assert.equal(await page.getByRole('heading', { name: '短期订阅', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('heading', { name: '长期订阅', exact: true }).count(), 0);
+  assert.equal(await page.getByText('订阅商品', { exact: true }).count(), 1);
+  const planLayout = await page.locator('.payment-plan-choice').evaluate(node => {
+    const control = node.getBoundingClientRect();
+    const copy = node.querySelector('.payment-plan-copy').getBoundingClientRect();
+    const label = node.querySelector('strong').getBoundingClientRect();
+    const input = node.querySelector('input').getBoundingClientRect();
+    return {
+      controlLeft: control.left,
+      selectorLeft: input.left,
+      selectorSize: input.width,
+      labelLeft: label.left,
+      labelRight: label.right,
+      copyLeft: copy.left,
+      copyRight: copy.right,
+      selectorOffset: parseFloat(getComputedStyle(node.querySelector('input')).left),
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth
+    };
+  });
+  assert.ok(planLayout.selectorLeft - planLayout.controlLeft > 0);
+  assert.equal(planLayout.selectorOffset, 13);
+  assert.ok(planLayout.labelLeft >= planLayout.copyLeft);
+  assert.ok(planLayout.labelRight <= planLayout.copyRight);
+  assert.ok(planLayout.scrollWidth <= planLayout.clientWidth);
   await page.getByText('余额支付', { exact: true }).waitFor();
   await page.getByText('微信支付', { exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();

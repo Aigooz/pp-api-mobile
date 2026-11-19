@@ -16,7 +16,7 @@
     theme: U.store.get('theme', 'auto')
   };
 
-    var view, appbar, titleEl, subEl, actionsEl, tabbar, glassSurface;
+  var view, appbar, titleEl, subEl, actionsEl, tabbar, glassSurface;
   var announcementBtn, accountBtn, themeBtn;
   var tabIndicator, tabButtons = [], tabDrag = null;
   var currentPath = '';
@@ -26,6 +26,7 @@
   var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
   var AUTH_ROUTES = ['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/accounts', '/profile',
     '/redeem', '/purchase', '/orders', '/subscriptions', '/affiliate'];
+  var routeHistory = [], routeHistoryIndex = -1, restoringAppHistory = false;
   var LIVE_REFRESH_MS = 60000;
   var BALANCE_REFRESH_MS = 10000;
   var liveTimer = null, balanceTimer = null, livePending = false, balancePending = false, liveLastAt = 0;
@@ -83,8 +84,8 @@
     titleEl = U.el('div', { class: 'appbar-title' });
     subEl = U.el('div', { class: 'small muted' });
     actionsEl = U.el('div', { class: 'appbar-actions' });
-    var backBtn = U.el('button', { class: 'icon-btn', html: U.ic('back', 20), style: { marginLeft: '-6px' } });
-    backBtn.addEventListener('click', function () { history.back(); });
+    var backBtn = U.el('button', { class: 'icon-btn', html: U.ic('back', 20), title: '返回', 'aria-label': '返回', style: { marginLeft: '-6px' } });
+    backBtn.addEventListener('click', function () { App.back(); });
     var leading = U.el('div', { class: 'row appbar-leading', style: { gap: '8px' } }, U.el('span', { class: 'brand-orb', html: mark }), titleEl);
     appbar = U.el('header', { class: 'appbar' },
       leading,
@@ -397,6 +398,19 @@
     var r = parseHash();
     var def = ROUTES[r.path];
     if (!def) { def = ROUTES['/home']; r.path = '/home'; }
+    var routeKey = r.path + (r.path === '/announcements' && r.param ? '/' + r.param : '');
+    if (restoringAppHistory) {
+      restoringAppHistory = false;
+    } else if (!force) {
+      if (!routeHistory.length) {
+        routeHistory = [routeKey];
+        routeHistoryIndex = 0;
+      } else if (routeHistory[routeHistoryIndex] !== routeKey) {
+        routeHistory = routeHistory.slice(0, routeHistoryIndex + 1);
+        routeHistory.push(routeKey);
+        routeHistoryIndex = routeHistory.length - 1;
+      }
+    }
 
     if (!force && activePage && activePage.path === r.path && activePage.param === r.param && currentPath === r.path) {
       pageEvent(activePage, 'activate');
@@ -502,16 +516,29 @@
       if (node.isConnected) return true;
       return Object.keys(pageCache).some(function (path) { return pageCache[path].slot.contains(node); });
     },
+    back: function () {
+      if (U.closeTop && U.closeTop()) return true;
+      var previousRoute = restorePreviousRoute();
+      if (previousRoute) {
+        location.hash = '#' + previousRoute;
+      }
+      return !!previousRoute;
+    },
     isPageActive: function (node) { return !!(node && activePage && activePage.slot.contains(node) && activePage.slot.isConnected); },
     invalidatePages: clearPages,
     switchAccount: function (id) {
       var pending = Api.AUTH.switchTo(id);
-      if (Api.AUTH.currentId() === id) {
+      return pending.then(function (saved) {
+        if (!saved || Api.AUTH.currentId() !== id) return saved;
         App.go('#/home', true);
-        App.refreshPublic();
-        App.refreshUser();
-      }
-      return pending;
+        routeHistory = ['/home'];
+        routeHistoryIndex = 0;
+        restoringAppHistory = false;
+        return Promise.all([App.refreshPublic(), App.refreshUser()]).then(function () { return saved; });
+      }).catch(function (error) {
+        if (Api.AUTH.currentId() !== id) U.toast('账号切换失败', 'err');
+        throw error;
+      });
     },
     refreshPublic: function () { return loadPublic(); },
     refreshUser: function () {
@@ -548,6 +575,23 @@
       });
       return refreshInFlight;
     }
+  };
+
+  function restorePreviousRoute() {
+    if (routeHistoryIndex <= 0 || !routeHistory.length) return '';
+    routeHistoryIndex--;
+    restoringAppHistory = true;
+    return routeHistory[routeHistoryIndex];
+  }
+
+  global.__ppBack = function () { return App.back(); };
+  global.__ppHasBack = function () {
+    return !!(U.hasOverlay && U.hasOverlay()) || routeHistoryIndex > 0;
+  };
+  global.__ppCloseOverlay = function () { return !!(U.closeTop && U.closeTop()); };
+  global.__ppBackOrExit = function () {
+    if (global.__ppBack()) return true;
+    return false;
   };
 
   global.addEventListener('pp:auth-changed', function (event) {
@@ -769,13 +813,13 @@
     if (isRefresh) clearPages();
     renderRoute(isRefresh);
     loadPublic();
+    preloadPages();
     if (Api.AUTH.isLogged()) {
       App.refreshUser();
     }
     if (!isRefresh && global.Updates && global.Updates.supported()) {
       global.Updates.check(false);
     }
-    preloadPages();
     // insets
     if (global.__insetTop) applyInsets(global.__insetTop, global.__insetBottom || 0);
   }

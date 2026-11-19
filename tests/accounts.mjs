@@ -140,6 +140,24 @@ try {
   await login(page, 'a@example.test');
   await page.waitForFunction(() => Api.AUTH.currentId() === 'email:a@example.test');
   await sendChat(page, 'private-message-a');
+  await page.getByRole('button', { name: '我的', exact: true }).click();
+  const accountSwitchLayout = await page.locator('.me-account-switch').evaluate(node => {
+    const style = getComputedStyle(node);
+    return {
+      label: node.textContent.trim(),
+      display: style.display,
+      alignItems: style.alignItems,
+      justifyContent: style.justifyContent,
+      textAlign: style.textAlign
+    };
+  });
+  assert.deepEqual(accountSwitchLayout, {
+    label: '个人资料',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textAlign: 'center'
+  });
   await openAccounts(page);
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });

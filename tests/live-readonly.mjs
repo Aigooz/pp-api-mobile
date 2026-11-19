@@ -21,10 +21,12 @@ try {
   await page.locator('input[type=password]').fill(password);
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('账户余额').waitFor({ timeout: 30000 });
-  await page.getByText('API 令牌', { exact: true }).waitFor({ timeout: 30000 });
+  await page.getByText('实时性能', { exact: true }).waitFor({ timeout: 30000 });
+  assert.equal(await page.getByText('API 令牌', { exact: true }).count(), 0);
   await page.getByText('今日请求').waitFor({ timeout: 30000 });
   await page.getByText('今日 Tokens').waitFor({ timeout: 30000 });
   await page.getByText('平均响应').waitFor({ timeout: 30000 });
+  await page.getByText(/当前并发 .* 路 · 累计/).waitFor({ timeout: 30000 });
   await page.getByText('Token 使用趋势').waitFor({ timeout: 30000 });
   await page.getByText('模型分布').waitFor({ timeout: 30000 });
   await page.getByText('最近调用').waitFor({ timeout: 30000 });

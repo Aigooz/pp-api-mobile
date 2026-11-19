@@ -314,14 +314,18 @@
   }
 
   // ---------- overlays ----------
-  var activePicker = null;
+  var overlayStack = [];
+  function removeOverlay(close) {
+    var index = overlayStack.indexOf(close);
+    if (index >= 0) overlayStack.splice(index, 1);
+  }
   function closeOverlay() {
-    if (activePicker) activePicker();
+    var pending = overlayStack.slice();
+    for (var i = pending.length - 1; i >= 0; i--) pending[i]();
     var s = $('.scrim'); if (s) s.parentNode.removeChild(s);
     var sh = $('.sheet'); if (sh) sh.parentNode.removeChild(sh);
   }
   function picker(opts) {
-    if (activePicker) activePicker();
     var previous = document.activeElement;
     var shade = el('div', { class: 'picker-scrim' });
     var box = el('div', { class: 'picker-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.title, tabindex: '-1' });
@@ -343,10 +347,10 @@
       document.removeEventListener('keydown', keydown);
       if (shade.parentNode) shade.remove();
       if (box.parentNode) box.remove();
-      if (activePicker === close) activePicker = null;
+      removeOverlay(close);
       if (previous && previous.isConnected && typeof previous.focus === 'function') previous.focus();
     }
-    activePicker = close;
+    overlayStack.push(close);
     shade.addEventListener('click', close);
     document.addEventListener('keydown', keydown);
     document.body.appendChild(shade);
@@ -446,9 +450,20 @@
     return field;
   }
   function sheet(opts) {
-    closeOverlay();
-    var scrim = el('div', { class: 'scrim', onclick: closeOverlay });
-    var box = el('div', { class: 'sheet' }, [
+    var previous = document.activeElement;
+    var closed = false, scrim = null, box = null;
+    function close() {
+      if (closed) return;
+      closed = true;
+      if (scrim && scrim.parentNode) scrim.remove();
+      if (box && box.parentNode) box.remove();
+      removeOverlay(close);
+      if (previous && previous.isConnected && typeof previous.focus === 'function') {
+        try { previous.focus({ preventScroll: true }); } catch (e) { try { previous.focus(); } catch (e2) {} }
+      }
+    }
+    scrim = el('div', { class: 'scrim', onclick: close });
+    box = el('div', { class: 'sheet' }, [
       el('div', { class: 'sheet-handle' }),
       opts.title ? el('h3', { text: opts.title }) : null,
       opts.body
@@ -464,7 +479,7 @@
               var r = a.onClick();
               if (r === false) return;
             }
-            closeOverlay();
+            close();
           }
         }));
       });
@@ -472,7 +487,8 @@
     }
     document.body.appendChild(scrim);
     document.body.appendChild(box);
-    return { close: closeOverlay, box: box };
+    overlayStack.push(close);
+    return { close: close, box: box };
   }
   function confirm(title, message, okLabel, danger) {
     return new Promise(function (resolve) {
@@ -512,9 +528,21 @@
   }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+  function overlayItem() {
+    return overlayStack.length ? overlayStack[overlayStack.length - 1] : null;
+  }
+
   global.U = {
     el: el, $: $, esc: esc, cleanHtml: cleanHtml, ic: ic, toast: toast, sheet: sheet, confirm: confirm, picker: picker, dateTimeField: dateTimeField,
-    closeOverlay: closeOverlay, copy: copy, haptic: haptic, sleep: sleep,
+    closeOverlay: closeOverlay,
+    hasOverlay: function () { return !!overlayItem(); },
+    closeTop: function () {
+      var close = overlayItem();
+      if (!close) return false;
+      close();
+      return true;
+    },
+    copy: copy, haptic: haptic, sleep: sleep,
     num: num, credits: credits, usd: usd, tokens: tokens, price: price, date: date, datetime: datetime,
     ago: ago, maskKey: maskKey, ymd: ymd, pad: pad, store: store
   };

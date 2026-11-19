@@ -253,13 +253,9 @@
             h('div', { class: 'dashboard-hero-secondary' },
               metric('今日费用', money(stats.today_actual_cost), ['实际 ' + money(stats.today_actual_cost), '标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost)], 'card'),
               metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'))),
-          h('div', { class: 'dashboard-live-strip' },
-            h('span', { class: 'dashboard-live-mark' }, h('i'), '实时'),
-            h('strong', null, U.num(number(stats.rpm)) + ' RPM'),
-            h('span', null, U.num(number(stats.tpm)) + ' TPM · 平均响应 ' +
-              (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms') +
-              ' · 当前并发 ' + concurrencyText + ' 路 · 累计 ' + token(stats.total_tokens)),
-            h('time', { class: 'dashboard-updated', datetime: new Date(refreshedAt).toISOString() }, '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
+          h('div', { class: 'dashboard-refresh-time' },
+            h('time', { datetime: new Date(refreshedAt).toISOString() },
+              '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
         h('section', { class: 'card dashboard-quality' },
           h('div', { class: 'dashboard-quality-head' },
             h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与令牌状态')),
@@ -268,7 +264,13 @@
             metric('今日请求', U.num(number(stats.today_requests)), requestDetail, 'chart'),
             successValue == null ? null : metric(successLabel, percentText(successValue), successDetail, 'shield'),
             metric('今日缓存命中率', percentText(todayHit), '累计 ' + percentText(totalHit) + ' · 缓存读 ' + token(stats.total_cache_read_tokens), 'bolt'),
-            metric('API 令牌', U.num(number(stats.total_api_keys)), U.num(number(stats.active_api_keys)) + ' 个启用', 'key', function () { App.go('#/keys'); })))));
+            h('div', { class: 'card dashboard-metric dashboard-quality-item dashboard-live-quality' },
+              h('div', { class: 'dashboard-metric-label' }, h('i', { class: 'dashboard-live-mark' }, h('b')), '实时性能'),
+              h('strong', null, U.num(number(stats.rpm)) + ' RPM'),
+              h('div', { class: 'dashboard-metric-detail' },
+                h('div', null, U.num(number(stats.tpm)) + ' TPM'),
+                h('div', null, '平均响应 ' + (duration >= 1000 ? (duration / 1000).toFixed(2) + ' s' : Math.round(duration) + ' ms')),
+                h('div', { class: 'dashboard-live-concurrency' }, '当前并发 ' + concurrencyText + ' 路 · 累计 ' + token(stats.total_tokens))))))));
       summaryHost.appendChild(h('div', { class: 'dashboard-overview-actions' },
         h('button', { class: 'btn', onclick: function () { App.go('#/keys'); } }, h('span', { html: U.ic('key', 16) }), '管理令牌'),
         h('button', { class: 'btn', onclick: function () { App.go('#/usage'); } }, h('span', { html: U.ic('chart', 16) }), '用量明细'),

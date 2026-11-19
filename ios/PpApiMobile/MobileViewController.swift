@@ -23,6 +23,11 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         updater.onStatus = { [weak self] status, payload in self?.pushUpdate(status, payload) }
         updater.onTick = { [weak self] payload in self?.pushUpdateTick(payload) }
         updater.onExport = { [weak self] url in self?.presentUpdateFile(url) }
+        let edgeBack = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgeBack(_:)))
+        edgeBack.edges = .left
+        edgeBack.maximumNumberOfTouches = 1
+        edgeBack.cancelsTouchesInView = false
+        view.addGestureRecognizer(edgeBack)
 
         let controller = WKUserContentController()
         controller.add(bridge, name: "ppNative")
@@ -102,6 +107,12 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
             return
         }
         webView.loadFileURL(entry, allowingReadAccessTo: www)
+    }
+
+    @objc private func handleEdgeBack(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        if gesture.state == .ended {
+            webView.evaluateJavaScript("window.__ppBack && window.__ppBack()")
+        }
     }
 
     func refreshSecureScripts() {
@@ -283,6 +294,7 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
         device: () => JSON.stringify({ model: 'iPhone', brand: 'Apple', release: navigator.userAgent, app: window.__ppVersion, platform: 'ios' }),
         statusBar: (color, darkIcons) => send({ action: 'statusBar', color, darkIcons }),
         keepAwake: on => send({ action: 'keepAwake', on }),
+          back: () => send({ action: 'back' }),
           updateCheck: () => send({ action: 'updateCheck' }),
           updateDownload: () => send({ action: 'updateDownload' }),
           updateInstall: () => send({ action: 'updateInstall' }),

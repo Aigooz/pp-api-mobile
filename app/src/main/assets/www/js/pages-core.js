@@ -808,17 +808,18 @@
           } });
         listHost.appendChild(h('section', { class: 'plaza-group' + (isExpanded ? ' expanded' : '') },
           h('div', { class: 'plaza-group-head' },
-            h('div', { class: 'row between' }, h('h2', null, group.name || '未命名分组'),
+            h('div', { class: 'plaza-group-head-main' },
+              h('h2', null, group.name || '未命名分组'),
               h('div', { class: 'plaza-group-actions' }, h('span', { class: 'badge teal' }, groupRate(group) + 'x'), toggle)),
             h('div', { class: 'plaza-group-meta' },
               group.platform ? h('span', null, group.platform) : null,
               group.subscription_type === 'subscription' ? h('span', { class: 'badge warn' }, '订阅') : null,
               group.is_exclusive ? h('span', { class: 'badge' }, '专属') : null,
-              h('span', null, item.models.length + ' 个模型'))),
-          group.description ? h('p', null, group.description) : null,
-          group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
-          group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
-          group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null,
+              h('span', null, item.models.length + ' 个模型')),
+            group.description ? h('p', null, group.description) : null,
+            group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
+            group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
+            group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null),
           groupBody
         ));
       });

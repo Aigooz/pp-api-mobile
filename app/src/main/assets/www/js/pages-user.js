@@ -361,7 +361,15 @@
       h('span', null, label), h('strong', null, value), hint ? h('small', null, hint) : null);
   }
 
-  function usageTrendSvg(list) {
+  function usageCurrency(value) {
+    var n = Math.max(0, Number(value) || 0);
+    if (n === 0) return '$0';
+    if (n < 0.01) return '$' + n.toPrecision(3);
+    if (n < 100) return '$' + n.toFixed(2);
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
+
+  function usageTrendChart(list) {
     var rows = list.map(function (item) {
       return {
         date: String(pick(item, 'date', 'day', 'bucket') || ''),
@@ -369,40 +377,125 @@
         tokens: Number(pick(item, 'total_tokens', 'tokens') || 0)
       };
     });
-    var max = Math.max.apply(null, rows.map(function (row) { return row.value; }).concat([0.000001]));
+    var rawMax = Math.max.apply(null, rows.map(function (row) { return row.value; }).concat([0]));
+    var magnitude = Math.pow(10, Math.floor(Math.log(Math.max(rawMax, 0.000001)) / Math.LN10));
+    var scale = rawMax / magnitude;
+    var max = (scale <= 1 ? 1 : scale <= 2 ? 2 : scale <= 5 ? 5 : 10) * magnitude;
+    var steps = [1, .75, .5, .25, 0];
+    var left = 45, right = 10, top = 12, bottom = 28, width = 320, height = 176;
+    var plotWidth = width - left - right, plotHeight = height - top - bottom;
+    var baseline = top + plotHeight;
     var NS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 320 126');
-    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     svg.setAttribute('class', 'usage-trend-svg');
-    svg.setAttribute('role', 'img');
+    svg.setAttribute('role', 'group');
     svg.setAttribute('aria-label', '所选时段消耗趋势');
-    [20, 55, 90].forEach(function (y) {
+    var gradientId = 'usage-trend-fill-' + String(Date.now()) + '-' + String(Math.random()).slice(2);
+    var defs = document.createElementNS(NS, 'defs');
+    var gradient = document.createElementNS(NS, 'linearGradient');
+    gradient.setAttribute('id', gradientId);
+    gradient.setAttribute('x1', '0'); gradient.setAttribute('y1', '0');
+    gradient.setAttribute('x2', '0'); gradient.setAttribute('y2', '1');
+    var topStop = document.createElementNS(NS, 'stop');
+    topStop.setAttribute('offset', '0%'); topStop.setAttribute('stop-color', '#4f7cf7'); topStop.setAttribute('stop-opacity', '.32');
+    var bottomStop = document.createElementNS(NS, 'stop');
+    bottomStop.setAttribute('offset', '100%'); bottomStop.setAttribute('stop-color', '#4f7cf7'); bottomStop.setAttribute('stop-opacity', '0');
+    gradient.appendChild(topStop); gradient.appendChild(bottomStop); defs.appendChild(gradient); svg.appendChild(defs);
+    steps.forEach(function (step) {
+      var y = top + plotHeight * (1 - step);
       var line = document.createElementNS(NS, 'line');
-      line.setAttribute('x1', '8'); line.setAttribute('x2', '314');
+      line.setAttribute('x1', String(left)); line.setAttribute('x2', String(left + plotWidth));
       line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
-      line.setAttribute('class', 'usage-trend-grid');
+      line.setAttribute('class', step === 0 ? 'usage-trend-baseline' : 'usage-trend-grid');
       svg.appendChild(line);
+      var label = document.createElementNS(NS, 'text');
+      label.setAttribute('x', String(left - 8)); label.setAttribute('y', String(y + 3.5));
+      label.setAttribute('text-anchor', 'end'); label.setAttribute('class', 'usage-trend-y-label');
+      label.textContent = usageCurrency(max * step);
+      svg.appendChild(label);
     });
     if (!rows.length) return svg;
-    function xAt(index) { return rows.length === 1 ? 160 : 8 + index * 306 / (rows.length - 1); }
-    function yAt(row) { return 102 - Math.max(0, row.value) / max * 82; }
-    var area = 'M8 102 ' + rows.map(function (row, index) { return 'L' + xAt(index).toFixed(1) + ' ' + yAt(row).toFixed(1); }).join(' ') + ' L314 102 Z';
+    function xAt(index) { return rows.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (rows.length - 1); }
+    function yAt(row) { return top + plotHeight - Math.min(1, Math.max(0, row.value) / max) * plotHeight; }
+    var linePoints = rows.map(function (row, index) { return xAt(index).toFixed(2) + ',' + yAt(row).toFixed(2); });
+    var area = 'M' + left + ' ' + baseline + ' ' + rows.map(function (row, index) {
+      return 'L' + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2);
+    }).join(' ') + ' L' + (left + plotWidth) + ' ' + baseline + ' Z';
     var fill = document.createElementNS(NS, 'path');
-    fill.setAttribute('d', area); fill.setAttribute('class', 'usage-trend-area');
+    fill.setAttribute('d', area); fill.setAttribute('fill', 'url(#' + gradientId + ')');
     svg.appendChild(fill);
     var path = document.createElementNS(NS, 'path');
-    path.setAttribute('d', rows.map(function (row, index) { return (index ? 'L' : 'M') + xAt(index).toFixed(1) + ' ' + yAt(row).toFixed(1); }).join(' '));
+    path.setAttribute('d', rows.map(function (row, index) { return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2); }).join(' '));
     path.setAttribute('class', 'usage-trend-line');
     svg.appendChild(path);
+    var guide = document.createElementNS(NS, 'line');
+    guide.setAttribute('class', 'usage-trend-guide'); guide.style.display = 'none';
+    svg.appendChild(guide);
+    var active = document.createElementNS(NS, 'circle');
+    active.setAttribute('r', '4.5'); active.setAttribute('class', 'usage-trend-active'); active.style.display = 'none';
+    svg.appendChild(active);
+    var tip = document.createElementNS(NS, 'g');
+    tip.setAttribute('class', 'usage-trend-tip'); tip.style.display = 'none';
+    var tipBox = document.createElementNS(NS, 'rect');
+    tipBox.setAttribute('height', '38'); tipBox.setAttribute('rx', '7');
+    var tipDate = document.createElementNS(NS, 'text');
+    tipDate.setAttribute('x', '9'); tipDate.setAttribute('y', '15'); tipDate.setAttribute('class', 'usage-trend-tip-date');
+    var tipValue = document.createElementNS(NS, 'text');
+    tipValue.setAttribute('x', '9'); tipValue.setAttribute('y', '30'); tipValue.setAttribute('class', 'usage-trend-tip-value');
+    tip.appendChild(tipBox); tip.appendChild(tipDate); tip.appendChild(tipValue); svg.appendChild(tip);
+    var lastIndex = -1;
+    function activate(event) {
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width) return;
+      var pointer = event.touches && event.touches[0] ? event.touches[0] : event;
+      var chartX = (pointer.clientX - rect.left) * width / rect.width;
+      var index = rows.length === 1 ? 0 : Math.round((chartX - left) / plotWidth * (rows.length - 1));
+      index = Math.max(0, Math.min(rows.length - 1, index));
+      if (index === lastIndex && guide.style.display !== 'none') return;
+      lastIndex = index;
+      var row = rows[index], x = xAt(index), y = yAt(row);
+      guide.style.display = '';
+      guide.setAttribute('x1', String(x)); guide.setAttribute('x2', String(x));
+      guide.setAttribute('y1', String(top)); guide.setAttribute('y2', String(baseline));
+      active.style.display = '';
+      active.setAttribute('cx', String(x)); active.setAttribute('cy', String(y));
+      var boxWidth = Math.min(148, Math.max(94, row.date.length * 6 + 18));
+      var boxX = Math.max(left, Math.min(left + plotWidth - boxWidth, x - boxWidth / 2));
+      tip.style.display = '';
+      tipBox.setAttribute('x', String(boxX)); tipBox.setAttribute('y', '2');
+      tipBox.setAttribute('width', String(boxWidth));
+      tipDate.setAttribute('x', String(boxX + 8));
+      tipValue.setAttribute('x', String(boxX + 8));
+      tipDate.textContent = U.date(row.date) || row.date;
+      tipValue.textContent = usageCurrency(row.value) + (row.tokens ? ' · ' + U.tokens(row.tokens) : '');
+      svg.setAttribute('aria-label', row.date + ' 消耗 ' + usageCurrency(row.value));
+    }
+    function hide() {
+      lastIndex = -1; guide.style.display = 'none'; active.style.display = 'none'; tip.style.display = 'none';
+      svg.setAttribute('aria-label', '所选时段消耗趋势');
+    }
+    svg.addEventListener('pointermove', activate);
+    svg.addEventListener('pointerdown', activate);
+    svg.addEventListener('pointerup', hide);
+    svg.addEventListener('pointercancel', hide);
+    svg.addEventListener('pointerleave', hide);
     rows.forEach(function (row, index) {
+      var focus = document.createElementNS(NS, 'circle');
+      focus.setAttribute('cx', String(xAt(index))); focus.setAttribute('cy', String(yAt(row)));
+      focus.setAttribute('r', '9'); focus.setAttribute('class', 'usage-trend-hit');
       var dot = document.createElementNS(NS, 'circle');
       dot.setAttribute('cx', String(xAt(index))); dot.setAttribute('cy', String(yAt(row)));
-      dot.setAttribute('r', '2.8'); dot.setAttribute('class', 'usage-trend-dot');
-      var title = document.createElementNS(NS, 'title');
-      title.textContent = row.date + ' · $' + U.credits(row.value) + (row.tokens ? ' · ' + U.tokens(row.tokens) + ' tokens' : '');
-      dot.appendChild(title); svg.appendChild(dot);
+      dot.setAttribute('r', '2.6'); dot.setAttribute('class', 'usage-trend-dot');
+      svg.appendChild(dot);
+      focus.addEventListener('pointerenter', function () {
+        var rect = svg.getBoundingClientRect();
+        activate({ clientX: xAt(index) / width * rect.width + rect.left });
+      });
+      svg.appendChild(focus);
     });
+    svg.setAttribute('data-points', linePoints.join(' '));
     return svg;
   }
 
@@ -563,7 +656,7 @@
         trendHost.appendChild(section('消耗趋势', null, null, h('div', { class: 'usage-chart-card card' },
           h('div', { class: 'usage-chart-head' }, h('strong', null, '时段消耗'),
             h('span', null, '峰值 $' + U.price(max))),
-          usageTrendSvg(list),
+          usageTrendChart(list),
           h('div', { class: 'usage-chart-axis' },
             h('span', null, U.date(pick(list[0], 'date', 'day', 'bucket')) || ''),
             h('span', null, U.date(pick(list[list.length - 1], 'date', 'day', 'bucket')) || '')))));

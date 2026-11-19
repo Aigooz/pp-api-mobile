@@ -32,6 +32,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.ValueCallback;
 import android.widget.Toast;
 
 import org.json.JSONObject;
@@ -74,6 +75,7 @@ public class MainActivity extends Activity {
     private final Map<String, HttpURLConnection> active = new ConcurrentHashMap<String, HttpURLConnection>();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private long lastBackPress = 0L;
+    private long backNavigationPendingUntil = 0L;
     private boolean openUpdatesOnLoad;
 
     @Override
@@ -269,10 +271,24 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack()) {
-            web.goBack();
+        if (web != null) {
+            long now = System.currentTimeMillis();
+            if (now < backNavigationPendingUntil) {
+                return;
+            }
+            backNavigationPendingUntil = now + 120L;
+            web.evaluateJavascript("window.__ppBack ? window.__ppBack() : false", new ValueCallback<String>() {
+                @Override public void onReceiveValue(String handled) {
+                    if ("true".equals(handled)) return;
+                    exitAfterBack();
+                }
+            });
             return;
         }
+        exitAfterBack();
+    }
+
+    private void exitAfterBack() {
         long now = System.currentTimeMillis();
         if (now - lastBackPress < 2000) {
             super.onBackPressed();
@@ -344,15 +360,24 @@ public class MainActivity extends Activity {
     }
 
     static void notifyDownloadFinished(Context context, JSONObject release, String message) {
-        ((MainActivity) context).ui.post(new Runnable() {
+        MainActivity activity = mainActivity(context);
+        if (activity == null) return; // The page polls a service progress snapshot.
+        activity.ui.post(new Runnable() {
             @Override public void run() {
-                if (release != null) ((MainActivity) context).updateCallback("ready", release);
-                else ((MainActivity) context).updateError(message == null ? "下载失败" : message);
+                if (release != null) activity.updateCallback("ready", release);
+                else activity.updateError(message == null ? "下载失败" : message);
             }
         });
     }
 
-    static void notifyDownloadCancelled(Context context) { ((MainActivity) context).updateError("已取消下载"); }
+    static void notifyDownloadCancelled(Context context) {
+        MainActivity activity = mainActivity(context);
+        if (activity != null) activity.updateError("已取消下载");
+    }
+
+    private static MainActivity mainActivity(Context context) {
+        return context instanceof MainActivity ? (MainActivity) context : null;
+    }
 
     private void downloadUpdate() {
         try {
@@ -369,7 +394,11 @@ public class MainActivity extends Activity {
             Intent service = new Intent(this, UpdateService.class)
                     .setAction(UpdateService.ACTION_START)
                     .putExtra(UpdateService.EXTRA_RELEASE, release.toString());
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(service);
+            } else {
+                startService(service);
+            }
             updateCallback("downloading", release);
         } catch (Exception e) { updateError(e.getMessage() == null ? "下载失败" : e.getMessage()); }
     }
@@ -409,7 +438,14 @@ public class MainActivity extends Activity {
                     grantUriPermission("com.android.packageinstaller", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     grantUriPermission("com.google.android.packageinstaller", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     ui.post(new Runnable() { @Override public void run() {
-                        try { startActivity(install); }
+                        try {
+                            startActivity(install);
+                            // The installer is a separate task; keep the app task out of
+                            // the foreground until the user returns to it explicitly.
+                            // This prevents Android from recreating a blank activity when
+                            // the package replacement completes.
+                            moveTaskToBack(true);
+                        }
                         catch (Exception e) { updateError("无法打开系统安装器"); }
                     } });
                 } catch (Exception e) { updateError(e.getMessage() == null ? "无法打开安装器" : e.getMessage()); }

@@ -212,32 +212,6 @@
       });
     }
     function plans() { return info && Array.isArray(info.plans) ? info.plans : []; }
-    function planCategory(plan) {
-      var days = Number(plan && plan.validity_days);
-      if (isFinite(days) && days > 0) {
-        if (days <= 1) return 'day';
-        if (days <= 7) return 'week';
-        if (days <= 31) return 'month';
-        return 'long';
-      }
-      var text = String(plan && (plan.name + ' ' + plan.description) || '');
-      if (/天卡|日卡|24\s*小时|1\s*天/i.test(text)) return 'day';
-      if (/周卡|7\s*天|一周/i.test(text)) return 'week';
-      if (/月卡|30\s*天/i.test(text)) return 'month';
-      return 'long';
-    }
-    function planGroups(list) {
-      var meta = [
-        { key: 'day', label: '短期订阅', hint: '24 小时短期体验' },
-        { key: 'week', label: '一周订阅', hint: '7 天灵活订阅' },
-        { key: 'month', label: '月度订阅', hint: '30 天持续使用' },
-        { key: 'long', label: '长期订阅', hint: '按平台有效期提供' }
-      ];
-      return meta.map(function (group) {
-        group.plans = list.filter(function (plan) { return planCategory(plan) === group.key; });
-        return group;
-      }).filter(function (group) { return group.plans.length > 0; });
-    }
     function planSignature() {
       return plans().map(function (plan) {
         return [plan.id, plan.group_id, plan.name, plan.price, plan.validity_days, plan.description].join(':');
@@ -309,12 +283,12 @@
           paintForm();
         } }),
         h('span', null, h('strong', null, '充值余额'), h('small', null, '自定义金额'))));
-      planGroups(list).forEach(function (category) {
+      if (list.length) {
         choices.appendChild(h('div', { class: 'payment-product-group' },
           h('div', { class: 'payment-product-group-head' },
-            h('strong', null, category.label),
-            h('span', null, category.hint)),
-          h('div', { class: 'payment-product-grid' }, category.plans.map(function (plan) {
+            h('strong', null, '订阅商品'),
+            h('span', null, '价格与上架状态跟随站内实时同步')),
+          h('div', { class: 'payment-product-grid' }, list.map(function (plan) {
             var gid = groupOf(plan), card = cardFor(gid);
             var payable = card && card.state === 'ready' && String(card.data.plan.group_id) === String(gid);
             return h('label', { class: 'payment-choice payment-plan-choice' + (selectedPlan && String(selectedPlan.id) === String(plan.id) ? ' selected' : '') },
@@ -328,12 +302,12 @@
                 } }),
               h('span', { class: 'payment-plan-copy' },
                 h('strong', null, plan.name || '订阅套餐'),
+                plan.group_name ? h('em', null, plan.group_name) : null,
                 h('span', { class: 'payment-plan-price-row' },
                   h('small', null, '¥' + money(plan.price) + (plan.validity_days ? ' · ' + plan.validity_days + ' 天' : '')),
-                  payable ? h('span', { class: 'badge ok payment-plan-payable' }, '可余额支付') : null),
-                plan.group_name ? h('em', null, plan.group_name) : null));
+                  payable ? h('span', { class: 'badge ok payment-plan-payable' }, '可余额支付') : null)));
           }))));
-      });
+      }
       formHost.appendChild(section('选择商品', null, null, choices));
       productHost.innerHTML = '';
       productHost.appendChild(h('div', { class: 'payment-service-strip' },
