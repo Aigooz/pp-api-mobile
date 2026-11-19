@@ -519,7 +519,7 @@
               h('div', { class: 'dashboard-recent-info' }, h('strong', null, item.model || '请求'),
                 h('small', null, U.datetime(item.created_at)),
                 h('small', { class: 'recent-tokens' }, '↓' + token(tok.input) + ' ↑' + token(tok.output) + ' ⚙' + token(tok.cache)),
-                lat && (lat.first != null || lat.tps) ? h('small', { class: 'recent-latency' },
+                lat && (lat.first != null || lat.tps) ? h('small', { class: 'recent-latency latency-' + (global.UsageAnalysis.latencyLevel(lat) || 'unknown') },
                   '首字 ' + global.UsageAnalysis.ms(lat.first) + ' · 总耗时 ' + global.UsageAnalysis.ms(lat.total) +
                   (lat.tps ? ' · ' + lat.tps.toFixed(1) + ' tok/s' : '')) : null),
               h('div', { class: 'dashboard-recent-price' }, h('b', null, money(item.actual_cost)), h('small', null, '标准 ' + money(item.total_cost))));

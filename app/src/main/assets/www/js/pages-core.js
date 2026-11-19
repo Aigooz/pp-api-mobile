@@ -790,12 +790,10 @@
                       U.copy(m.name);
                     }, html: U.ic('copy', 17) }))),
               h('div', { class: 'plaza-model-summary' },
-                m.mode === 'token' ? h('span', { class: 'plaza-price-pill plaza-price-pair' },
-                  h('span', null, h('small', null, '输入'), h('b', null, priceText(m.input))),
-                  h('i'),
-                  h('span', null, h('small', null, '输出'), h('b', null, priceText(m.output)))) :
-                  h('span', { class: 'plaza-price-pill' }, priceLabel(m)),
-                m.cacheRead != null ? h('span', { class: 'plaza-cache-price' }, '缓存读 ' + priceText(m.cacheRead)) : null,
+                m.mode === 'token' ? h('div', { class: 'plaza-price-pair' },
+                  h('span', { class: 'plaza-price-chip plaza-price-input' }, h('small', null, '输入'), h('b', null, priceText(m.input))),
+                  h('span', { class: 'plaza-price-chip plaza-price-output' }, h('small', null, '输出'), h('b', null, priceText(m.output)))) :
+                  h('span', { class: 'plaza-price-chip plaza-price-single' }, priceLabel(m)),
                 detailToggle),
               details
             );

@@ -137,6 +137,16 @@
     var tps = streaming ? output / ((total - first) / 1000) : null;
     return { first: first, total: total, output: output, tps: tps && isFinite(tps) && tps > 0 ? tps : null };
   }
+  // Latency bands are intentionally conservative: green means genuinely fast,
+  // amber means usable but noticeable, and red flags a request that needs attention.
+  function latencyLevel(latency) {
+    if (!latency || !isFinite(Number(latency.total)) || Number(latency.total) <= 0) return '';
+    var first = Number(latency.first);
+    var tps = Number(latency.tps);
+    if ((isFinite(first) && first >= 3000) || latency.total >= 15000 || (isFinite(tps) && tps > 0 && tps < 8)) return 'bad';
+    if ((isFinite(first) && first >= 1200) || latency.total >= 6000 || (isFinite(tps) && tps > 0 && tps < 20)) return 'warn';
+    return 'good';
+  }
   function tokenBreakdown(row) {
     var input = metricNumber(row, ['input_tokens']) || 0;
     var output = metricNumber(row, ['output_tokens']) || 0;
@@ -154,5 +164,5 @@
   }
 
   global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate, values: values,
-    isErrorRecord: isErrorRecord, latency: latency, tokenBreakdown: tokenBreakdown, ms: ms };
+    isErrorRecord: isErrorRecord, latency: latency, latencyLevel: latencyLevel, tokenBreakdown: tokenBreakdown, ms: ms };
 })(window);

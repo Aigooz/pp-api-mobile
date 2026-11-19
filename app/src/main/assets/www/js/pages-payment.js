@@ -286,14 +286,6 @@
       if (!selectedPlan && !canBalance && list.length) selectedPlan = list[0];
       if (method === 'daycard_balance' && cardState() !== 'loading' && !isDaycardPlan()) method = methods()[0] || '';
       var choices = h('div', { class: 'payment-products' });
-      if (canBalance) choices.appendChild(h('label', { class: 'payment-choice' },
-        h('input', { type: 'radio', name: 'payment-product', checked: !selectedPlan, onchange: function () {
-          if (!selectedPlan) return;
-          selectedPlan = null;
-          formDirty = true;
-          paintForm();
-        } }),
-        h('span', null, h('strong', null, '充值余额'), h('small', null, '自定义金额'))));
       if (list.length) {
         choices.appendChild(h('div', { class: 'payment-product-group' },
           h('div', { class: 'payment-product-group-head' },

@@ -1063,6 +1063,7 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 }
 .payment-plan-choice {
   position: relative;
+  display: flex;
   align-items: center;
   min-height: 68px;
   padding: 11px 13px 11px 13px;
@@ -1094,8 +1095,8 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   padding-left: 0;
 }
 .payment-plan-choice > .payment-plan-copy {
-  padding-top: 26px;
-  padding-right: 28px;
+  padding-top: 0;
+  padding-right: 30px;
 }
 .payment-plan-choice::before {
   content: "";
@@ -1122,10 +1123,7 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   flex: 1 1 auto;
   min-width: 0;
   padding-right: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 3px 12px;
+  display: block;
 }
 .payment-plan-copy strong {
   display: block;
@@ -1137,11 +1135,9 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   line-height: 1.35;
 }
 .payment-plan-price-row {
-  grid-column: 1 / -1;
-  grid-row: auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: 3px;
 }
@@ -1153,8 +1149,10 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   font-weight: 700;
   white-space: nowrap;
 }
+.payment-plan-payable {
+  margin-left: 6px;
+}
 .payment-plan-copy em {
-  grid-column: 1 / -1;
   display: block;
   margin-top: 1px;
   overflow: hidden;
@@ -2514,57 +2512,51 @@ button.dashboard-quality-item:active {
   padding-left: 17px;
   min-height: 25px;
 }
-.plaza-price-pill {
-  min-width: 0;
-  overflow: hidden;
-  padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--ink) 5%, var(--line));
-  background: color-mix(in srgb, var(--surface-2) 72%, var(--surface));
-  color: var(--ink-2);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .plaza-price-pair {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 0 1 auto;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
-.plaza-price-pair > span {
+.plaza-price-chip {
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
-}
-.plaza-price-pair small {
-  color: var(--muted);
-  font-size: 8px;
-}
-.plaza-price-pair b {
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--teal-soft) 50%, var(--surface));
   color: var(--ink-2);
-  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.plaza-price-chip small {
+  flex: 0 0 auto;
+  color: var(--teal);
+  font-size: 8px;
   font-weight: 650;
 }
-.plaza-price-pair > i {
-  width: 1px;
-  height: 11px;
-  flex: 0 0 1px;
-  background: var(--line);
-}
-.plaza-cache-price {
+.plaza-price-chip b {
   min-width: 0;
   overflow: hidden;
-  padding: 4px 7px;
-  border: 1px solid color-mix(in srgb, var(--teal) 16%, var(--line));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--teal-soft) 44%, var(--surface));
-  color: var(--teal);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-size: 9.5px;
+  font-weight: 700;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.plaza-price-output {
+  border-color: color-mix(in srgb, var(--info) 20%, var(--line));
+  background: color-mix(in srgb, var(--info) 9%, var(--surface));
+}
+.plaza-price-output small {
+  color: var(--info);
+}
+.plaza-price-single {
+  flex: 0 1 auto;
 }
 .plaza-sort-row {
   display: grid;
@@ -2998,6 +2990,19 @@ button.dashboard-quality-item:active {
 .usage-token-strip .usage-token-total b { color: var(--teal); }
 .usage-latency-strip { margin-top: 5px; }
 .usage-latency-strip span { background: transparent; padding: 1px 2px; }
+.latency-good { color: var(--ok); }
+.latency-warn { color: var(--warn); }
+.latency-bad { color: var(--danger); }
+.latency-unknown { color: var(--muted); }
+.dashboard-recent-info .recent-latency.latency-good,
+.usage-latency-strip.latency-good span,
+.usage-latency-strip.latency-good b { color: var(--ok); }
+.dashboard-recent-info .recent-latency.latency-warn,
+.usage-latency-strip.latency-warn span,
+.usage-latency-strip.latency-warn b { color: var(--warn); }
+.dashboard-recent-info .recent-latency.latency-bad,
+.usage-latency-strip.latency-bad span,
+.usage-latency-strip.latency-bad b { color: var(--danger); }
 
 /* Key card action menu */
 .key-card-tools {
@@ -3136,21 +3141,17 @@ button.dashboard-quality-item:active {
   .plaza-model-heading { flex-direction: column; align-items: flex-start; gap: 3px; }
   .plaza-model-context { max-width: 100%; }
   .plaza-model-summary { padding-left: 17px; }
-  .plaza-price-pill { max-width: calc(100% - 108px); }
+  .plaza-model-summary { gap: 5px; }
   .plaza-price-pair { max-width: calc(100% - 63px); }
+  .plaza-price-chip { padding: 4px 6px; }
+  .plaza-price-chip small { font-size: 7.5px; }
+  .plaza-price-chip b { font-size: 9px; }
   .usage-summary { padding: 12px; }
   .usage-summary-lead { gap: 8px; }
   .usage-summary-lead .usage-metric + .usage-metric { padding-left: 8px; }
   .usage-status-seg button { padding: 0 6px; }
   .usage-log-tools-head { gap: 6px; }
-  .payment-plan-copy { grid-template-columns: minmax(0, 1fr); }
-  .payment-plan-price-row {
-    grid-column: 1;
-    grid-row: auto;
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-  }
+  .payment-plan-price-row { flex-wrap: wrap; }
 }
 @media (min-width: 700px) {
   .dashboard-overview { grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr); }

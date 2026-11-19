@@ -98,6 +98,16 @@ try {
   const plaza = page.locator('.plaza-page');
   assert.equal(await plaza.locator('.plaza-group').count(), 2);
   const firstGroup = plaza.locator('.plaza-group').first();
+  assert.equal(await plaza.locator('.plaza-cache-price').count(), 0,
+    'cache pricing belongs in the expanded pricing details');
+  assert.equal(await plaza.locator('.plaza-price-input').count(), 1);
+  assert.equal(await plaza.locator('.plaza-price-output').count(), 1);
+  const prices = await plaza.locator('.plaza-price-chip').evaluateAll(nodes => nodes.map(node => ({
+    text: node.textContent,
+    background: getComputedStyle(node).backgroundColor,
+    border: getComputedStyle(node).borderTopColor
+  })));
+  assert.ok(prices.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.border !== 'rgba(0, 0, 0, 0)'), JSON.stringify(prices));
   await firstGroup.locator('.plaza-group-toggle').click();
   assert.equal(await firstGroup.locator('.plaza-group-description').count(), 0,
     'the group description shown in the header must not be repeated in the expanded body');
@@ -111,6 +121,8 @@ try {
   assert.equal(await page.locator('.sheet').count(), 0);
   await plaza.getByRole('button', { name: '价格明细' }).click();
   assert.match(await plaza.innerText(), /\$0\.01/);
+  assert.match(await plaza.innerText(), /缓存读取/);
+  assert.equal(await plaza.locator('.plaza-model-details .plaza-cache-price').count(), 0);
   assert.match(await plaza.innerText(), /订阅/);
   await plaza.getByRole('button', { name: '筛选模型' }).click();
   await page.locator('.plaza-filter-group').filter({ hasText: '倍率' }).getByRole('button', { name: '0.5x' }).click();
@@ -286,8 +298,10 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   if (process.env.PP_TEST_SCREENSHOTS) {
     await page.waitForTimeout(3600);
+    await page.locator('.dashboard-models').scrollIntoViewIfNeeded();
     await page.locator('.tabbar').evaluate(el => { el.style.visibility = 'hidden'; });
     await page.locator('.dashboard-models').screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-dashboard-models-390.png', animations: 'disabled' });
+    await page.locator('.dashboard-chart').scrollIntoViewIfNeeded();
     await page.locator('.dashboard-chart').screenshot({ path: process.env.PP_TEST_SCREENSHOTS + '/pp-dashboard-trend-390.png', animations: 'disabled' });
     await page.locator('.tabbar').evaluate(el => { el.style.visibility = ''; });
   }

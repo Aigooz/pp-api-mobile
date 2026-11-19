@@ -166,13 +166,20 @@ try {
     normalized: UsageAnalysis.values({ total_requests: 4, success_rate: 0.75, cache_hit_rate: 0.5 }),
     failed: UsageAnalysis.isErrorRecord({ status_code: 429 }),
     success: UsageAnalysis.isErrorRecord({ status_code: 200 }),
-    failedText: UsageAnalysis.isErrorRecord({ status: 'upstream_error' })
+    failedText: UsageAnalysis.isErrorRecord({ status: 'upstream_error' }),
+    latency: {
+      fast: UsageAnalysis.latencyLevel({ first: 500, total: 2500, tps: 35 }),
+      medium: UsageAnalysis.latencyLevel({ first: 1500, total: 7000, tps: 16 }),
+      slow: UsageAnalysis.latencyLevel({ first: 3500, total: 18000, tps: 5 }),
+      unknown: UsageAnalysis.latencyLevel(null)
+    }
   }));
   assert.deepEqual(metrics.backend, { successRate: 80, cacheHitRate: 16.666666666666664, errors: 2 });
   assert.deepEqual(metrics.normalized, { successRate: 75, cacheHitRate: 50, errors: null });
   assert.equal(metrics.failed, true);
   assert.equal(metrics.success, false);
   assert.equal(metrics.failedText, true);
+  assert.deepEqual(metrics.latency, { fast: 'good', medium: 'warn', slow: 'bad', unknown: '' });
 
   ordersFail = true;
   await page.goto(base + '/#/orders');
@@ -236,12 +243,16 @@ try {
     const copy = node.querySelector('.payment-plan-copy').getBoundingClientRect();
     const label = node.querySelector('strong').getBoundingClientRect();
     const input = node.querySelector('input').getBoundingClientRect();
+    const selector = getComputedStyle(node, '::before');
     return {
       controlLeft: control.left,
       selectorLeft: input.left,
       selectorSize: input.width,
+      selectorTop: parseFloat(selector.top),
       labelLeft: label.left,
       labelRight: label.right,
+      labelCenterY: (label.top + label.bottom) / 2,
+      selectorCenterY: control.top + parseFloat(selector.top) + parseFloat(selector.height) / 2,
       copyLeft: copy.left,
       copyRight: copy.right,
       selectorRight: parseFloat(getComputedStyle(node.querySelector('input')).right),
@@ -255,7 +266,11 @@ try {
   assert.equal(planLayout.selectorRight, 13);
   assert.ok(planLayout.labelLeft >= planLayout.copyLeft);
   assert.ok(planLayout.labelRight <= planLayout.copyRight);
+  assert.ok(Math.abs(planLayout.labelCenterY - planLayout.selectorCenterY) < 4,
+    'the subscription title and selector must share a visual center line');
   assert.ok(planLayout.scrollWidth <= planLayout.clientWidth);
+  assert.equal(await page.getByText('自定义金额', { exact: true }).count(), 0,
+    'balance top-up must not appear as a duplicate subscription-like product');
   if (process.env.PP_TEST_SCREENSHOTS) await page.locator('.payment-plan-choice').screenshot({
     path: process.env.PP_TEST_SCREENSHOTS + '/pp-payment-plan-selected-390.png', animations: 'disabled'
   });
