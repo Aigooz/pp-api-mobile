@@ -105,6 +105,9 @@ try {
   assert.equal(await plaza.getByRole('button', { name: '综合', exact: true }).count(), 0);
   assert.match(await plaza.locator('.plaza-overview-stats').innerText(), /分组[\s\S]*收藏[\s\S]*最低输入/);
   assert.doesNotMatch(await plaza.locator('.plaza-overview-stats').innerText(), /厂商/);
+  assert.equal(await plaza.locator('.plaza-recent').count(), 0);
+  assert.equal(await plaza.getByText('最近使用', { exact: true }).count(), 0);
+  assert.equal(await plaza.getByText('快速继续', { exact: true }).count(), 0);
   assert.equal(await plaza.locator('.plaza-cache-price').count(), 0,
     'cache pricing belongs in the expanded pricing details');
   assert.equal(await plaza.locator('.plaza-price-input').count(), 1);
@@ -121,6 +124,7 @@ try {
   assert.doesNotMatch(await firstGroup.locator('.plaza-group-meta').innerText(), /openai/i);
   assert.match(await firstGroup.locator('.plaza-model-context').first().innerText(), /128K 上下文/);
   assert.doesNotMatch(await firstGroup.locator('.plaza-model-context').first().innerText(), /openai/i);
+  assert.doesNotMatch(await firstGroup.locator('.plaza-model-context').first().innerText(), /详情/);
   await firstGroup.locator('.plaza-group-toggle').click();
   assert.equal(await plaza.locator('.plaza-model-copy').count(), 2);
   assert.equal(await plaza.locator('.plaza-model-copy svg').count(), 2);
@@ -142,6 +146,7 @@ try {
   const imageGroup = plaza.locator('.plaza-group').filter({ hasText: '图片分组' });
   await imageGroup.locator('.plaza-group-toggle').click();
   assert.match(await imageGroup.innerText(), /demo-image/);
+  assert.equal(await imageGroup.locator('.plaza-model-context').count(), 0);
   await imageGroup.locator('.plaza-group-toggle').click();
   await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('openai');
   assert.equal(await plaza.locator('.plaza-group').count(), 0);

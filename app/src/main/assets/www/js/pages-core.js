@@ -338,16 +338,6 @@
   }
 
   function showModelDetail(m) {
-    var accountKey = 'shared';
-    try { accountKey = Api.AUTH && Api.AUTH.currentId ? String(Api.AUTH.currentId() || 'shared') : 'shared'; } catch (e) {}
-    var recentStoreKey = 'plaza_recent:' + accountKey;
-    var recent = U.store.get(recentStoreKey, []);
-    if (!Array.isArray(recent)) recent = [];
-    recent = recent.filter(function (item) {
-      return !(item && item.model === m.name && String(item.group) === String(m.group));
-    });
-    recent.unshift({ model: m.name, group: String(m.group), groupName: m.group, at: Date.now() });
-    U.store.set(recentStoreKey, recent.slice(0, 12));
     var pl = platformKey(m.platform);
     var body = h('div', null,
       h('div', { class: 'row', style: { marginBottom: '12px' } },
@@ -461,11 +451,8 @@
       accountKey = Api.AUTH && Api.AUTH.currentId ? String(Api.AUTH.currentId() || 'shared') : 'shared';
     } catch (e) {}
     var favoriteStoreKey = 'plaza_favorites:' + accountKey;
-    var recentStoreKey = 'plaza_recent:' + accountKey;
     var favorites = U.store.get(favoriteStoreKey, []);
     if (!Array.isArray(favorites)) favorites = [];
-    var recent = U.store.get(recentStoreKey, []);
-    if (!Array.isArray(recent)) recent = [];
     var host = h('div', { class: 'page plaza-page' });
     host.appendChild(modelTabs('plaza'));
 
@@ -476,7 +463,6 @@
 
     var groupsRow = h('div', { class: 'chips' });
     var rateRow = h('div', { class: 'chips' });
-    var recentRow = h('div', { class: 'plaza-recent' });
     var listHost = h('div', { class: 'plaza-groups' });
     var statusByModel = Object.create(null), statusTimer = null, statusPending = false, statusUpdated = 0;
     var description = h('div', { class: 'plaza-description' });
@@ -500,7 +486,6 @@
     }
     function savePlazaStore() {
       U.store.set(favoriteStoreKey, favorites);
-      U.store.set(recentStoreKey, recent.slice(0, 12));
     }
     function toggleFavorite(model, group) {
       var key = favoriteKey(model, group);
@@ -510,12 +495,6 @@
       savePlazaStore();
       paint();
       U.toast(index >= 0 ? '已取消收藏' : '已收藏模型', 'ok');
-    }
-    function markRecent(model, group) {
-      var key = favoriteKey(model, group);
-      recent = recent.filter(function (item) { return favoriteKey(item.model || '', item.group || '') !== key; });
-      recent.unshift({ model: model, group: group, groupName: groupName(group), at: Date.now() });
-      savePlazaStore();
     }
     function modelStatus(model, group) {
       var item = statusByModel[statusKey(model, group)];
@@ -755,11 +734,9 @@
                     h('span', { class: 'plaza-status unknown', role: 'img', 'data-model': m.name, 'data-group': m.group,
                       title: '渠道状态：未知', 'aria-label': '渠道状态：未知' }),
                     h('button', { class: 'plaza-model-title', type: 'button', onclick: function () {
-                      markRecent(m.name, m.group);
                       showModelDetail(m);
-                      paint();
                     } }, m.name)),
-                  h('span', { class: 'plaza-model-context' }, (m.context ? U.tokens(m.context) + ' 上下文' : '详情') + ' ›')),
+                  m.context ? h('span', { class: 'plaza-model-context' }, U.tokens(m.context) + ' 上下文') : null),
                 h('div', { class: 'plaza-model-actions' },
                   h('button', { class: 'plaza-model-favorite' + (isFavorite(m.name, m.group) ? ' active' : ''), type: 'button',
                     title: isFavorite(m.name, m.group) ? '取消收藏' : '收藏模型',
@@ -771,7 +748,6 @@
                   h('button', { class: 'plaza-model-copy', type: 'button', title: '复制模型名称', 'aria-label': '复制模型名称 ' + m.name,
                     onclick: function (event) {
                       event.stopPropagation();
-                      markRecent(m.name, m.group);
                       U.copy(m.name);
                     }, html: U.ic('copy', 17) }))),
               h('div', { class: 'plaza-model-summary' },
@@ -813,7 +789,6 @@
     host.appendChild(h('div', { class: 'plaza-search-row' }, h('div', { class: 'plaza-search-wrap' }, h('span', { class: 'plaza-search-icon', html: U.ic('search', 18) }), searchInput), filterButton));
     host.appendChild(sortRow);
     host.appendChild(overview);
-    host.appendChild(recentRow);
     host.appendChild(activeFilters);
     host.appendChild(listHost);
     function updatePlaza() {
@@ -821,22 +796,6 @@
       description.textContent = plaza && plaza.description || '';
       description.hidden = !description.textContent;
       paintOverview(plazaModels(plaza));
-      recentRow.innerHTML = '';
-      if (recent.length) {
-        recentRow.appendChild(h('div', { class: 'plaza-recent-head' }, h('strong', null, '最近使用'), h('span', null, '快速继续')));
-        recentRow.appendChild(h('div', { class: 'plaza-recent-list' }, recent.slice(0, 5).map(function (item) {
-          return h('button', { class: 'plaza-recent-chip', type: 'button', title: '查看 ' + item.model,
-            onclick: function () {
-              var model = plazaModels(plaza).filter(function (m) {
-                return m.name === item.model && (String(m.groupId) === String(item.group) || String(m.group) === String(item.group));
-              })[0];
-              markRecent(item.model, item.group);
-              if (model) showModelDetail(model);
-              paint();
-            } }, h('span', { class: 'plaza-recent-model' }, item.model), h('small', null, item.groupName || '模型'));
-        })));
-      }
-      recentRow.hidden = !recent.length;
       paint();
     }
     host.addEventListener('pp:page-plaza-updated', updatePlaza);
