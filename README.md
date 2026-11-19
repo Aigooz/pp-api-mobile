@@ -34,6 +34,8 @@ Android 更新器校验 Release 资产名称、版本、SHA-256、包名和签�
 - `tests/`：界面、业务流程和更新验证。
 - `.github/workflows/`：iOS 云端构建及模拟器检查。
 
+对话数据使用 `chat-store.js` 管理。旧版线性 `messages` 会在首次打开时迁移为消息节点；每个助手节点保存多个回答版本和 `selectIndex`。请求上下文始终根据当前选中的节点组装，因此切换回答版本不会改写原始消息，编辑用户消息也会保留旧分支。
+
 ## 本地开发与测试
 
 需要 Node.js、npm，以及 Playwright 所需的浏览器：
@@ -58,3 +60,5 @@ iOS 需要 macOS、Xcode 16 或更新版本；打开 `ios/PpApiMobile.xcodeproj`
 ## 数据与第三方组件
 
 会话由 Android Keystore 或 iOS 钥匙串保护；浏览器预览不等同于原生安全存储。请勿提交账号、令牌、签名密钥或构建产物。随应用分发的第三方组件许可证位于 `app/src/main/assets/www/vendor/licenses/` 和 `app/src/main/assets/www/js/THIRD-PARTY-LICENSES.txt`。
+
+聊天记录存放在按账号隔离的 WebView 本地存储，不会上传到项目仓库。应用不会持久化明文密码；聊天存储达到容量限制时会优先保留最近会话，并支持从对话设置导出 JSON 备份。
