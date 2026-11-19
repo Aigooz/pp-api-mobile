@@ -243,18 +243,19 @@
         onclick: function () { App.go('#/purchase'); }
       },
         h('span', { class: 'dashboard-metric-label' }, h('i', { html: U.ic('card', 16) }), '账户余额'),
-        h('strong', { class: 'dashboard-balance-value' }, balanceValue),
-        h('span', { class: 'dashboard-balance-hint' }, '可用余额 · 点击充值'));
+        h('strong', { class: 'dashboard-balance-value' }, balanceValue));
       summaryHost.appendChild(h('div', { class: 'dashboard-overview' },
         h('section', { class: 'card dashboard-hero-card' },
           h('div', { class: 'dashboard-hero-top' },
-            h('div', { class: 'dashboard-balance-wrap' }, h('div', { class: 'dashboard-eyebrow' }, '账户概览'), balanceCard),
+            h('div', { class: 'dashboard-balance-wrap' },
+              h('div', { class: 'dashboard-overview-head' },
+                h('div', { class: 'dashboard-eyebrow' }, '账户概览'),
+                h('time', { class: 'dashboard-refresh-time', datetime: new Date(refreshedAt).toISOString() },
+                  '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))),
+              balanceCard),
             h('div', { class: 'dashboard-hero-secondary' },
               metric('今日费用', money(stats.today_actual_cost), ['实际 ' + money(stats.today_actual_cost), '标准 ' + money(stats.today_cost), '累计实际 ' + money(stats.total_actual_cost)], 'card'),
-              metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt'))),
-          h('div', { class: 'dashboard-refresh-time' },
-            h('time', { datetime: new Date(refreshedAt).toISOString() },
-              '更新于 ' + new Date(refreshedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })))),
+              metric('今日 Tokens', token(stats.today_tokens), ['输入 ' + token(stats.today_input_tokens), '输出 ' + token(stats.today_output_tokens), '缓存 ' + token(todayCache)], 'bolt')))),
         h('section', { class: 'card dashboard-quality' },
           h('div', { class: 'dashboard-quality-head' },
             h('div', null, h('strong', null, '运行质量'), h('span', null, '请求、缓存与实时性能')),
@@ -277,12 +278,10 @@
     }
 
     function loadConcurrency() {
-      var cached = global.S.keys;
-      var request = cached && cached.length ? Promise.resolve({ items: cached }) : Api.keys(1, 100);
-      return request.then(function (result) {
+      return Api.keys(1, 100).then(function (result) {
         if (!current()) return;
         var items = arrOf(result), sum = 0, known = 0;
-        if (items.length) global.S.keys = items;
+        global.S.keys = items;
         items.forEach(function (key) {
           var value = pick(key, 'current_concurrency');
           if (value === undefined || value === null || value === '' || !isFinite(Number(value)) || Number(value) < 0) return;
@@ -568,12 +567,12 @@
       refreshedAt = Date.now();
       loadSummary(true);
       loadCharts(true);
-      refreshTimer = setTimeout(refreshVisible, 10000);
+      refreshTimer = setTimeout(refreshVisible, 5000);
     }
     function scheduleRefresh() {
       clearTimeout(refreshTimer);
       if (!current() || !App.isPageActive(page) || document.hidden) return;
-      var remaining = 10000 - Math.max(0, Date.now() - refreshedAt);
+      var remaining = 5000 - Math.max(0, Date.now() - refreshedAt);
       if (remaining <= 0) refreshVisible();
       else refreshTimer = setTimeout(refreshVisible, remaining);
     }

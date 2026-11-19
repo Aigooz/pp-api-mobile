@@ -119,9 +119,10 @@ try {
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
   const yAxisLabels = await page.locator('.usage-trend-y-label').evaluateAll(nodes => nodes.map(node => node.textContent));
-  assert.equal(yAxisLabels.length, 5);
-  assert.equal(yAxisLabels.at(-1), '$0');
-  const chart = page.locator('.usage-trend-svg');
+  assert.equal(yAxisLabels.length, 10);
+  assert.equal(yAxisLabels[4], '$0');
+  assert.equal(yAxisLabels.at(-1), '0');
+  const chart = page.locator('.usage-trend-svg:not(.usage-token-area-svg)');
   await chart.evaluate((node) => {
     const box = node.getBoundingClientRect();
     node.dispatchEvent(new PointerEvent('pointermove', {
@@ -131,7 +132,21 @@ try {
     }));
   });
   await page.locator('.usage-trend-tip:visible').waitFor();
-  assert.match(await page.locator('.usage-trend-tip').textContent(), /\d/);
+  assert.match(await page.locator('.usage-trend-tip:not(.usage-token-area-tip)').textContent(), /\d/);
+  assert.equal(await page.locator('.usage-token-area-svg').count(), 1);
+  assert.equal(await page.getByText('Token 消耗面积', { exact: true }).count(), 1);
+  assert.match(await page.locator('.usage-chart-card').innerText(), /峰值 [\d.]+[kM]?/);
+  assert.equal(await page.locator('.usage-token-area-line').count(), 1);
+  await page.locator('.usage-token-area-svg').evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    node.dispatchEvent(new PointerEvent('pointermove', {
+      bubbles: true, pointerType: 'mouse',
+      clientX: box.left + box.width * .52,
+      clientY: box.top + box.height * .35
+    }));
+  });
+  await page.locator('.usage-token-area-tip:visible').waitFor();
+  assert.match(await page.locator('.usage-token-area-tip').textContent(), /Tokens/);
   const sectionLayout = await page.locator('.usage-summary').evaluate(node => {
     const lead = node.querySelector('.usage-summary-lead').getBoundingClientRect();
     const grid = node.querySelector('.usage-metric-grid').getBoundingClientRect();
@@ -229,16 +244,21 @@ try {
       labelRight: label.right,
       copyLeft: copy.left,
       copyRight: copy.right,
-      selectorOffset: parseFloat(getComputedStyle(node.querySelector('input')).left),
+      selectorRight: parseFloat(getComputedStyle(node.querySelector('input')).right),
       scrollWidth: node.scrollWidth,
       clientWidth: node.clientWidth
     };
   });
-  assert.ok(planLayout.selectorLeft - planLayout.controlLeft > 0);
-  assert.equal(planLayout.selectorOffset, 13);
+  assert.ok(planLayout.selectorLeft - planLayout.controlLeft > planLayout.clientWidth * .7);
+  assert.ok(planLayout.labelRight <= planLayout.selectorLeft,
+    'the subscription title must not overlap the top-right selector');
+  assert.equal(planLayout.selectorRight, 13);
   assert.ok(planLayout.labelLeft >= planLayout.copyLeft);
   assert.ok(planLayout.labelRight <= planLayout.copyRight);
   assert.ok(planLayout.scrollWidth <= planLayout.clientWidth);
+  if (process.env.PP_TEST_SCREENSHOTS) await page.locator('.payment-plan-choice').screenshot({
+    path: process.env.PP_TEST_SCREENSHOTS + '/pp-payment-plan-selected-390.png', animations: 'disabled'
+  });
   await page.getByText('余额支付', { exact: true }).waitFor();
   await page.getByText('微信支付', { exact: true }).click();
   await page.getByRole('button', { name: '确认订单' }).click();

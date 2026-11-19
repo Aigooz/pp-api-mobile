@@ -15,8 +15,9 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
-const calls = { plaza: 0, status: 0, dashboard: 0, trend: 0, me: 0 };
+const calls = { plaza: 0, status: 0, dashboard: 0, trend: 0, me: 0, keys: 0 };
 let balance = 3;
+let concurrency = 2;
 let plazaGeneration = 1;
 let channelGeneration = 1;
 
@@ -42,7 +43,10 @@ await page.route('**/__proxy/**', async route => {
   if (path === '/api/v1/model-plaza') { calls.plaza++; return route.fulfill(ok(plaza())); }
   if (path === '/api/public/channel-status') { calls.status++; return route.fulfill(ok(channels())); }
   if (path === '/api/v1/auth/me') { calls.me++; return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: balance })); }
-  if (path === '/api/v1/keys') return route.fulfill(ok({ items: [] }));
+  if (path === '/api/v1/keys') {
+    calls.keys++;
+    return route.fulfill(ok({ items: [{ id: 1, name: 'live-key', current_concurrency: concurrency }] }));
+  }
   if (path === '/api/v1/usage/dashboard/stats') { calls.dashboard++; return route.fulfill(ok({ total_api_keys: 1, active_api_keys: 1, today_requests: calls.dashboard, total_requests: 10, total_tokens: 100 })); }
   if (path === '/api/v1/user/platform-quotas') return route.fulfill(ok({ platform_quotas: [] }));
   if (path === '/api/v1/usage/dashboard/trend') { calls.trend++; return route.fulfill(ok({ trend: [] })); }
@@ -65,8 +69,13 @@ try {
     window.__homeRefreshNode = document.querySelector('.dashboard');
     return !!window.__homeRefreshNode;
   }), true);
-  await page.waitForTimeout(10500);
-  assert.ok(calls.dashboard > homeBeforeTimer.dashboard, 'dashboard should refresh after ten seconds');
+  await page.waitForTimeout(5500);
+  assert.ok(calls.dashboard > homeBeforeTimer.dashboard, 'dashboard should refresh after five seconds');
+  assert.ok(calls.keys > homeBeforeTimer.keys, 'dashboard concurrency should request fresh keys after five seconds');
+  concurrency = 6;
+  await page.waitForTimeout(5500);
+  assert.ok(calls.keys > homeBeforeTimer.keys + 1, 'dashboard concurrency should continue refreshing every five seconds');
+  assert.match(await page.locator('.dashboard-live-concurrency').textContent(), /当前并发 6 路/);
   assert.equal(await page.evaluate(() => window.__homeRefreshNode === document.querySelector('.dashboard')), true,
     'silent refresh must keep the current dashboard visible');
   const initialMe = calls.me;
@@ -75,8 +84,8 @@ try {
   assert.equal(Number(refreshed.balance), 7.25);
   assert.ok(calls.me > initialMe, 'balance refresh should request the account endpoint');
   assert.equal(await page.getByText('$7.25').count() > 0, true);
-  await page.waitForTimeout(10000);
-  assert.ok(calls.me > initialMe, 'balance refresh should run on the ten-second interval');
+  await page.waitForTimeout(5500);
+  assert.ok(calls.me > initialMe, 'balance refresh should run on the five-second interval');
   const initial = { ...calls };
   plazaGeneration = 2;
   channelGeneration = 2;
@@ -102,7 +111,7 @@ try {
   await page.getByRole('tab', { name: '订阅', exact: true }).click();
   assert.equal(await page.getByText(/有效至 \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('Live refresh: ten-second no-flicker updates, discovery, foreground refresh and second-level expiry passed');
+  console.log('Live refresh: five-second no-flicker updates, discovery, foreground refresh and second-level expiry passed');
 } finally {
   await context.close();
   await browser.close();

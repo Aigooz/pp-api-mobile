@@ -10,8 +10,8 @@ android {
         applicationId 'com.ppapi.mobile'
         minSdk 23
         targetSdk 34
-        versionCode 32
-        versionName '1.29.0'
+        versionCode 33
+        versionName '1.30.0'
     }
 
     buildTypes {

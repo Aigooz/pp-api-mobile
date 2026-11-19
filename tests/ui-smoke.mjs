@@ -97,6 +97,11 @@ try {
   assert.equal(await page.locator('.tab.active').getAttribute('data-tab'), 'plaza');
   const plaza = page.locator('.plaza-page');
   assert.equal(await plaza.locator('.plaza-group').count(), 2);
+  const firstGroup = plaza.locator('.plaza-group').first();
+  await firstGroup.locator('.plaza-group-toggle').click();
+  assert.equal(await firstGroup.locator('.plaza-group-description').count(), 0,
+    'the group description shown in the header must not be repeated in the expanded body');
+  await firstGroup.locator('.plaza-group-toggle').click();
   assert.equal(await plaza.locator('.plaza-model-copy').count(), 2);
   assert.equal(await plaza.locator('.plaza-model-copy svg').count(), 2);
   assert.equal(await plaza.locator('.plaza-model-copy').first().textContent(), '');
@@ -110,9 +115,12 @@ try {
   await plaza.getByRole('button', { name: '筛选模型' }).click();
   await page.locator('.plaza-filter-group').filter({ hasText: '倍率' }).getByRole('button', { name: '0.5x' }).click();
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
-  assert.match(await plaza.innerText(), /demo-image/);
   await page.locator('.plaza-filter-group').filter({ hasText: '倍率' }).getByRole('button', { name: '全部' }).click();
   await page.getByRole('button', { name: '完成', exact: true }).click();
+  const imageGroup = plaza.locator('.plaza-group').filter({ hasText: '图片分组' });
+  await imageGroup.locator('.plaza-group-toggle').click();
+  assert.match(await imageGroup.innerText(), /demo-image/);
+  await imageGroup.locator('.plaza-group-toggle').click();
   await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('demo-model');
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
   await plaza.getByRole('button', { name: 'demo-model', exact: true }).click();
@@ -181,6 +189,20 @@ try {
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.getByText('账户余额').waitFor();
   await page.getByText('今日缓存命中率').waitFor();
+  assert.equal(await page.getByText('可用余额 · 点击充值', { exact: true }).count(), 0);
+  const refreshTimeBox = await page.locator('.dashboard-refresh-time').boundingBox();
+  const balanceBox = await page.locator('.dashboard-balance-block').boundingBox();
+  assert.ok(refreshTimeBox && balanceBox && refreshTimeBox.y < balanceBox.y,
+    'the update timestamp should sit at the top-right of the overview');
+  await page.getByText('Token 使用趋势').waitFor();
+  const granularityButtons = page.locator('.dashboard-granularity-inline button');
+  const granularityLayout = await granularityButtons.evaluateAll(nodes => nodes.map(node => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return { lines: range.getClientRects().length, overflow: node.scrollWidth > node.clientWidth };
+  }));
+  assert.deepEqual(granularityLayout.map(item => item.lines), [1, 1]);
+  assert.deepEqual(granularityLayout.map(item => item.overflow), [false, false]);
   assert.equal(await page.locator('.dashboard-metric').count(), 7);
   assert.match(await page.locator('.dashboard-quality-head').innerText(), /运行质量\s+请求、缓存与实时性能/);
   assert.doesNotMatch(await page.locator('.dashboard-quality-head').innerText(), /令牌状态/);
@@ -188,6 +210,14 @@ try {
   assert.match(await page.locator('.dashboard').innerText(), /33\.3%/);
   assert.match(await page.locator('.dashboard').innerText(), /今日出错 1/);
   assert.match(await page.locator('.dashboard').innerText(), /当前并发 5 路/);
+  if (process.env.PP_TEST_SCREENSHOTS) {
+    await page.evaluate(() => {
+      document.querySelectorAll('.toast').forEach(node => node.remove());
+    });
+    await page.locator('.dashboard-overview').screenshot({
+      path: process.env.PP_TEST_SCREENSHOTS + '/pp-dashboard-overview-390.png', animations: 'disabled'
+    });
+  }
   const metricDetails = page.locator('.dashboard-metric-detail');
   assert.equal(await metricDetails.nth(0).locator(':scope > div').count(), 3);
   assert.equal(await metricDetails.nth(1).locator(':scope > div').count(), 3);

@@ -27,8 +27,8 @@
   var AUTH_ROUTES = ['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/accounts', '/profile',
     '/redeem', '/purchase', '/orders', '/subscriptions', '/affiliate'];
   var routeHistory = [], routeHistoryIndex = -1, restoringAppHistory = false;
-  var LIVE_REFRESH_MS = 10000;
-  var BALANCE_REFRESH_MS = 10000;
+  var LIVE_REFRESH_MS = 5000;
+  var BALANCE_REFRESH_MS = 5000;
   var liveTimer = null, balanceTimer = null, livePending = false, balancePending = false, liveLastAt = 0;
   var THEMES = [
     { key: 'auto', name: '跟随系统', sub: '自动切换海蓝浅色与深色', colors: ['#0873ca', '#0e1113'] },

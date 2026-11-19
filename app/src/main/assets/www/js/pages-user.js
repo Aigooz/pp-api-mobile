@@ -5,8 +5,8 @@
   var C = global.PagesCore;
   var h = C.h, section = C.section, listItem = C.listItem, emptyState = C.emptyState, card = C.card;
   var arrOf = C.arrOf, pick = C.pick, balanceOf = C.balanceOf, open = C.open;
-  // Live cards (keys, concurrency, today's usage) share the app-wide 10s balance beat.
-  var KEY_LIVE_MS = 10000;
+  // Live cards (keys, concurrency, today's usage) share the app-wide 5s balance beat.
+  var KEY_LIVE_MS = 5000;
 
   function needLogin() {
     var box = h('div', { class: 'page' },
@@ -200,7 +200,7 @@
         }
         for (var i = 0; i < Math.min(4, cards.length); i++) loadNext();
         // Concurrency for every key arrives in one request; per-key usage rotates so a
-        // long key list never turns the 10s beat into a burst of calls.
+        // long key list never turns the 5s beat into a burst of calls.
         var statsCursor = 0;
         function refreshLive() {
           if (!current() || !App.isPageActive(page)) return;
@@ -238,7 +238,7 @@
       });
     }
     page.addEventListener('pp:page-activate', function () {
-      // Re-entering the tab only restarts the 10s live beat; a full reload waits until the
+      // Re-entering the tab only restarts the 5s live beat; a full reload waits until the
       // cached list is genuinely stale so cached navigation stays instant.
       if (loadedAt && Date.now() - loadedAt >= 30000) reload(true);
       else if (restartLive) { clearTimeout(concurrencyTimer); restartLive(); }
@@ -499,6 +499,141 @@
     return svg;
   }
 
+  function usageTokenAreaChart(list) {
+    var rows = list.map(function (item) {
+      var total = Number(pick(item, 'total_tokens', 'tokens'));
+      if (!isFinite(total) || total < 0) {
+        total = ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens'].reduce(function (sum, key) {
+          return sum + Math.max(0, Number(item && item[key]) || 0);
+        }, 0);
+      }
+      return {
+        date: String(pick(item, 'date', 'day', 'bucket') || ''),
+        value: total
+      };
+    });
+    var rawMax = Math.max.apply(null, rows.map(function (row) { return row.value; }).concat([0]));
+    var magnitude = Math.pow(10, Math.floor(Math.log(Math.max(rawMax, 1)) / Math.LN10));
+    var scale = rawMax / magnitude;
+    var max = Math.max(1, (scale <= 1 ? 1 : scale <= 2 ? 2 : scale <= 5 ? 5 : 10) * magnitude);
+    var steps = [1, .75, .5, .25, 0];
+    var left = 48, right = 10, top = 12, bottom = 28, width = 320, height = 176;
+    var plotWidth = width - left - right, plotHeight = height - top - bottom;
+    var baseline = top + plotHeight;
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('class', 'usage-trend-svg usage-token-area-svg');
+    svg.setAttribute('role', 'group');
+    svg.setAttribute('aria-label', '所选时段 Token 消耗面积趋势');
+    var gradientId = 'usage-token-area-fill-' + String(Date.now()) + '-' + String(Math.random()).slice(2);
+    var defs = document.createElementNS(NS, 'defs');
+    var gradient = document.createElementNS(NS, 'linearGradient');
+    gradient.setAttribute('id', gradientId);
+    gradient.setAttribute('x1', '0'); gradient.setAttribute('y1', '0');
+    gradient.setAttribute('x2', '0'); gradient.setAttribute('y2', '1');
+    var topStop = document.createElementNS(NS, 'stop');
+    topStop.setAttribute('offset', '0%'); topStop.setAttribute('stop-color', '#11a978'); topStop.setAttribute('stop-opacity', '.36');
+    var bottomStop = document.createElementNS(NS, 'stop');
+    bottomStop.setAttribute('offset', '100%'); bottomStop.setAttribute('stop-color', '#11a978'); bottomStop.setAttribute('stop-opacity', '0');
+    gradient.appendChild(topStop); gradient.appendChild(bottomStop); defs.appendChild(gradient); svg.appendChild(defs);
+    steps.forEach(function (step) {
+      var y = top + plotHeight * (1 - step);
+      var line = document.createElementNS(NS, 'line');
+      line.setAttribute('x1', String(left)); line.setAttribute('x2', String(left + plotWidth));
+      line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
+      line.setAttribute('class', step === 0 ? 'usage-trend-baseline' : 'usage-trend-grid');
+      svg.appendChild(line);
+      var label = document.createElementNS(NS, 'text');
+      label.setAttribute('x', String(left - 8)); label.setAttribute('y', String(y + 3.5));
+      label.setAttribute('text-anchor', 'end'); label.setAttribute('class', 'usage-trend-y-label');
+      label.textContent = U.tokens(max * step);
+      svg.appendChild(label);
+    });
+    if (!rows.length) return svg;
+    function xAt(index) { return rows.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (rows.length - 1); }
+    function yAt(row) { return top + plotHeight - Math.min(1, Math.max(0, row.value) / max) * plotHeight; }
+    var linePoints = rows.map(function (row, index) { return xAt(index).toFixed(2) + ',' + yAt(row).toFixed(2); });
+    var area = 'M' + left + ' ' + baseline + ' ' + rows.map(function (row, index) {
+      return 'L' + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2);
+    }).join(' ') + ' L' + (left + plotWidth) + ' ' + baseline + ' Z';
+    var fill = document.createElementNS(NS, 'path');
+    fill.setAttribute('d', area); fill.setAttribute('fill', 'url(#' + gradientId + ')');
+    svg.appendChild(fill);
+    var path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', rows.map(function (row, index) { return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2); }).join(' '));
+    path.setAttribute('class', 'usage-token-area-line');
+    svg.appendChild(path);
+    var guide = document.createElementNS(NS, 'line');
+    guide.setAttribute('class', 'usage-trend-guide usage-token-area-guide'); guide.style.display = 'none';
+    svg.appendChild(guide);
+    var active = document.createElementNS(NS, 'circle');
+    active.setAttribute('r', '4.5'); active.setAttribute('class', 'usage-token-area-active'); active.style.display = 'none';
+    svg.appendChild(active);
+    var tip = document.createElementNS(NS, 'g');
+    tip.setAttribute('class', 'usage-trend-tip usage-token-area-tip'); tip.style.display = 'none';
+    var tipBox = document.createElementNS(NS, 'rect');
+    tipBox.setAttribute('height', '38'); tipBox.setAttribute('rx', '7');
+    var tipDate = document.createElementNS(NS, 'text');
+    tipDate.setAttribute('x', '9'); tipDate.setAttribute('y', '15'); tipDate.setAttribute('class', 'usage-trend-tip-date');
+    var tipValue = document.createElementNS(NS, 'text');
+    tipValue.setAttribute('x', '9'); tipValue.setAttribute('y', '30'); tipValue.setAttribute('class', 'usage-trend-tip-value');
+    tip.appendChild(tipBox); tip.appendChild(tipDate); tip.appendChild(tipValue); svg.appendChild(tip);
+    var lastIndex = -1;
+    function activate(event) {
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width) return;
+      var pointer = event.touches && event.touches[0] ? event.touches[0] : event;
+      var chartX = (pointer.clientX - rect.left) * width / rect.width;
+      var index = rows.length === 1 ? 0 : Math.round((chartX - left) / plotWidth * (rows.length - 1));
+      index = Math.max(0, Math.min(rows.length - 1, index));
+      if (index === lastIndex && guide.style.display !== 'none') return;
+      lastIndex = index;
+      var row = rows[index], x = xAt(index), y = yAt(row);
+      guide.style.display = '';
+      guide.setAttribute('x1', String(x)); guide.setAttribute('x2', String(x));
+      guide.setAttribute('y1', String(top)); guide.setAttribute('y2', String(baseline));
+      active.style.display = '';
+      active.setAttribute('cx', String(x)); active.setAttribute('cy', String(y));
+      var boxWidth = Math.min(148, Math.max(94, row.date.length * 6 + 18));
+      var boxX = Math.max(left, Math.min(left + plotWidth - boxWidth, x - boxWidth / 2));
+      tip.style.display = '';
+      tipBox.setAttribute('x', String(boxX)); tipBox.setAttribute('y', '2');
+      tipBox.setAttribute('width', String(boxWidth));
+      tipDate.setAttribute('x', String(boxX + 8));
+      tipValue.setAttribute('x', String(boxX + 8));
+      tipDate.textContent = U.date(row.date) || row.date;
+      tipValue.textContent = U.tokens(row.value) + ' Tokens';
+      svg.setAttribute('aria-label', row.date + ' Token 消耗 ' + U.tokens(row.value));
+    }
+    function hide() {
+      lastIndex = -1; guide.style.display = 'none'; active.style.display = 'none'; tip.style.display = 'none';
+      svg.setAttribute('aria-label', '所选时段 Token 消耗面积趋势');
+    }
+    svg.addEventListener('pointermove', activate);
+    svg.addEventListener('pointerdown', activate);
+    svg.addEventListener('pointerup', hide);
+    svg.addEventListener('pointercancel', hide);
+    svg.addEventListener('pointerleave', hide);
+    rows.forEach(function (row, index) {
+      var focus = document.createElementNS(NS, 'circle');
+      focus.setAttribute('cx', String(xAt(index))); focus.setAttribute('cy', String(yAt(row)));
+      focus.setAttribute('r', '9'); focus.setAttribute('class', 'usage-trend-hit');
+      var dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('cx', String(xAt(index))); dot.setAttribute('cy', String(yAt(row)));
+      dot.setAttribute('r', '2.6'); dot.setAttribute('class', 'usage-token-area-dot');
+      svg.appendChild(dot);
+      focus.addEventListener('pointerenter', function () {
+        var rect = svg.getBoundingClientRect();
+        activate({ clientX: xAt(index) / width * rect.width + rect.left });
+      });
+      svg.appendChild(focus);
+    });
+    svg.setAttribute('data-points', linePoints.join(' '));
+    return svg;
+  }
+
   function renderUsage() {
     if (!Api.AUTH.isLogged()) return needLogin();
     var page = h('div', { class: 'page' });
@@ -658,14 +793,23 @@
         if (!list.length) { trendHost.innerHTML = ''; return; }
         trendHost.innerHTML = '';
         var vals = list.map(function (x) { return Number(pick(x, 'actual_cost', 'cost', 'total_cost', 'credits', 'value') || 0); });
+        var tokenVals = list.map(function (x) {
+          var total = Number(pick(x, 'total_tokens', 'tokens'));
+          return isFinite(total) && total >= 0 ? total : ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens']
+            .reduce(function (sum, key) { return sum + Math.max(0, Number(x && x[key]) || 0); }, 0);
+        });
         var max = Math.max.apply(null, vals.concat([0.000001]));
+        var tokenMax = Math.max.apply(null, tokenVals.concat([0]));
         trendHost.appendChild(section('消耗趋势', null, null, h('div', { class: 'usage-chart-card card' },
           h('div', { class: 'usage-chart-head' }, h('strong', null, '时段消耗'),
             h('span', null, '峰值 $' + U.price(max))),
           usageTrendChart(list),
           h('div', { class: 'usage-chart-axis' },
             h('span', null, U.date(pick(list[0], 'date', 'day', 'bucket')) || ''),
-            h('span', null, U.date(pick(list[list.length - 1], 'date', 'day', 'bucket')) || '')))));
+            h('span', null, U.date(pick(list[list.length - 1], 'date', 'day', 'bucket')) || '')),
+          h('div', { class: 'usage-chart-head usage-token-chart-head' }, h('strong', null, 'Token 消耗面积'),
+            h('span', null, '峰值 ' + U.tokens(tokenMax))),
+          usageTokenAreaChart(list))));
       }).catch(function (error) {
         if (version === requestVersion && !precise && !silent) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败'));
       }));
@@ -752,12 +896,12 @@
       refreshPending = true;
       load(true).finally(function () {
         refreshPending = false;
-        if (App.isPageActive(page)) refreshTimer = setTimeout(refreshVisible, 10000);
+        if (App.isPageActive(page)) refreshTimer = setTimeout(refreshVisible, 5000);
       });
     }
     page.addEventListener('pp:page-activate', function () {
       clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshVisible, 10000);
+      refreshTimer = setTimeout(refreshVisible, 5000);
     });
     page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
     page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); requestVersion++; });

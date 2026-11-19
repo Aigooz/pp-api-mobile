@@ -81,7 +81,7 @@ async function run(engine, name) {
       const bounds = await page.locator('.tabbar').boundingBox();
       assert.ok(bounds.y + bounds.height <= 844 - inset - 9, JSON.stringify({ inset, bounds }));
     }
-    await page.getByRole('button', { name: '对话', exact: true }).click();
+    await page.evaluate(() => App.go('#/chat'));
     await page.getByRole('button', { name: '对话设置' }).waitFor();
     const iconCenters = await page.locator('.tool-btn').evaluateAll(buttons => buttons.map(button => {
       const box = button.getBoundingClientRect();

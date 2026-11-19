@@ -551,7 +551,7 @@
         if (!statusUpdated) { statusByModel = Object.create(null); updateStatusDots(); }
       }).then(function () {
         statusPending = false;
-        if (App.isPageActive(host)) statusTimer = setTimeout(loadStatus, 10000);
+        if (App.isPageActive(host)) statusTimer = setTimeout(loadStatus, 5000);
       });
     }
     loadStatus();
@@ -747,11 +747,12 @@
         var groupKey = String(group.id);
         var isExpanded = !!expandedGroups[groupKey] || Object.keys(expandedGroups).length === 0 && listHost.childElementCount <= 1;
         var groupBody = h('div', { class: 'plaza-group-body', hidden: !isExpanded },
-          h('div', { class: 'plaza-group-description' },
-            group.description ? h('p', null, group.description) : null,
-            group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
-            group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
-            group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null),
+          group.peak_rate_enabled || group.image_rate_independent || group.video_rate_independent
+            ? h('div', { class: 'plaza-group-description' },
+                group.peak_rate_enabled ? h('p', null, '高峰 ' + (group.peak_start || '') + '–' + (group.peak_end || '') + ' · ' + group.peak_rate_multiplier + 'x') : null,
+                group.image_rate_independent ? h('p', null, '图片倍率 ' + group.image_rate_multiplier + 'x') : null,
+                group.video_rate_independent ? h('p', null, '视频倍率 ' + group.video_rate_multiplier + 'x') : null)
+            : null,
           item.models.map(function (m) {
             var details = h('div', { class: 'plaza-model-details', hidden: true },
               m.desc ? h('p', { class: 'plaza-model-description' }, m.desc) : null,
@@ -860,8 +861,8 @@
     host.addEventListener('pp:page-activate', function () {
       if (String(gid) !== String(S2.plazaGroup || 0)) { gid = S2.plazaGroup || 0; paint(); }
       clearTimeout(statusTimer);
-      if (!statusUpdated || Date.now() - statusUpdated >= 10000) loadStatus();
-      else statusTimer = setTimeout(loadStatus, 10000 - (Date.now() - statusUpdated));
+      if (!statusUpdated || Date.now() - statusUpdated >= 5000) loadStatus();
+      else statusTimer = setTimeout(loadStatus, 5000 - (Date.now() - statusUpdated));
     });
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(statusTimer); });
     host.addEventListener('pp:page-refresh', function () {
@@ -925,7 +926,7 @@
         timer = null;
         if (!page.isConnected || !App.isPageActive(page) || document.hidden) return;
         load(true).finally(schedule);
-      }, 10000);
+      }, 5000);
     }
     page.addEventListener('pp:page-activate', function () {
       clearTimeout(timer);

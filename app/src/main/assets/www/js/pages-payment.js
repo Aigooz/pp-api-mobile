@@ -730,7 +730,7 @@
     }
     function schedulePaymentRefresh() {
       clearTimeout(paymentTimer);
-      if (page.isConnected && current() && !document.hidden) paymentTimer = setTimeout(refreshVisible, 10000);
+      if (page.isConnected && current() && !document.hidden) paymentTimer = setTimeout(refreshVisible, 5000);
     }
     function onVisible() {
       if (!page.isConnected || !current()) { document.removeEventListener('visibilitychange', onVisible); return; }

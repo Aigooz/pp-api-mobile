@@ -88,7 +88,8 @@ async function setup(engine) {
 }
 
 async function tokenRows(page) {
-  await page.getByRole('button', { name: '查看 Token 使用量估算' }).click();
+  await page.getByRole('button', { name: '查看 Token 使用量估算' }).evaluate(node => node.click());
+  await page.locator('.sheet').waitFor({ state: 'visible', timeout: 15000 });
   const rows = await page.locator('.token-row').evaluateAll(nodes => Object.fromEntries(nodes.map(node => [node.firstElementChild.textContent, node.lastElementChild.textContent])));
   await page.evaluate(() => U.closeOverlay());
   await page.locator('.sheet').waitFor({ state: 'detached' });

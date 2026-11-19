@@ -53,7 +53,7 @@ Android 需要 JDK 17 或 21、Android SDK 35 和 Gradle 8.9。在配置 SDK 后
 
 iOS 需要 macOS、Xcode 16 或更新版本；打开 `ios/PpApiMobile.xcodeproj`，或手动运行 `Build iOS package` 工作流。工作流生成未签名 IPA，并构建和启动模拟器。签名分发需要相应 Apple 开发者配置。
 
-发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.29.0` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.29.0 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
+发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.30.0` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.30.0 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
 
 ## 数据与第三方组件
 
