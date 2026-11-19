@@ -2615,7 +2615,7 @@ button.dashboard-quality-item:active {
 }
 .plaza-overview-copy > strong,
 .plaza-overview-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plaza-overview-copy > strong { font-size: 13px; }
+.plaza-overview-copy > strong { width: fit-content; font-size: 13px; }
 .plaza-overview-copy > span:last-child { margin-top: 2px; color: var(--muted); font-size: 9px; }
 .plaza-overview-stats { display: flex; align-items: stretch; }
 .plaza-overview-stats > div {

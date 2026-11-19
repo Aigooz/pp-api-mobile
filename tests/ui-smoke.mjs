@@ -24,7 +24,7 @@ await page.route('**/__proxy/**', async route => {
   if (p === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
   if (p === '/api/v1/model-plaza') return route.fulfill(ok({ description: '测试价格目录', groups: [
     { id: 1, name: '测试分组', description: '主力模型', platform: 'openai', rate_multiplier: 0.1, models: [
-      { name: 'demo-model', platform: 'openai', pricing: { billing_mode: 'token', input_price: 0.000001, output_price: 0.000004, cache_read_price: 0.0000001 }, official_pricing: { input_price: 0.000001, output_price: 0.000004, cache_read_price: 0.0000001 } }
+      { name: 'demo-model', platform: 'openai', context_length: 128000, pricing: { billing_mode: 'token', input_price: 0.000001, output_price: 0.000004, cache_read_price: 0.0000001 }, official_pricing: { input_price: 0.000001, output_price: 0.000004, cache_read_price: 0.0000001 } }
     ] },
     { id: 2, name: '图片分组', platform: 'image-platform', rate_multiplier: 0.5, image_rate_independent: true, image_rate_multiplier: 0.25, subscription_type: 'subscription', models: [
       { name: 'demo-image', pricing: { billing_mode: 'image', per_request_price: 2 }, official_pricing: { per_request_price: 2 } }
@@ -98,6 +98,13 @@ try {
   const plaza = page.locator('.plaza-page');
   assert.equal(await plaza.locator('.plaza-group').count(), 2);
   const firstGroup = plaza.locator('.plaza-group').first();
+  assert.doesNotMatch(await plaza.innerText(), /openai|image-platform|厂商/i,
+    'model vendors stay out of the model plaza interface');
+  assert.equal(await plaza.getByText('平台', { exact: true }).count(), 0);
+  assert.equal(await plaza.getByRole('button', { name: '名称', exact: true }).count(), 1);
+  assert.equal(await plaza.getByRole('button', { name: '综合', exact: true }).count(), 0);
+  assert.match(await plaza.locator('.plaza-overview-stats').innerText(), /分组[\s\S]*收藏[\s\S]*最低输入/);
+  assert.doesNotMatch(await plaza.locator('.plaza-overview-stats').innerText(), /厂商/);
   assert.equal(await plaza.locator('.plaza-cache-price').count(), 0,
     'cache pricing belongs in the expanded pricing details');
   assert.equal(await plaza.locator('.plaza-price-input').count(), 1);
@@ -111,6 +118,9 @@ try {
   await firstGroup.locator('.plaza-group-toggle').click();
   assert.equal(await firstGroup.locator('.plaza-group-description').count(), 0,
     'the group description shown in the header must not be repeated in the expanded body');
+  assert.doesNotMatch(await firstGroup.locator('.plaza-group-meta').innerText(), /openai/i);
+  assert.match(await firstGroup.locator('.plaza-model-context').first().innerText(), /128K 上下文/);
+  assert.doesNotMatch(await firstGroup.locator('.plaza-model-context').first().innerText(), /openai/i);
   await firstGroup.locator('.plaza-group-toggle').click();
   assert.equal(await plaza.locator('.plaza-model-copy').count(), 2);
   assert.equal(await plaza.locator('.plaza-model-copy svg').count(), 2);
@@ -133,6 +143,8 @@ try {
   await imageGroup.locator('.plaza-group-toggle').click();
   assert.match(await imageGroup.innerText(), /demo-image/);
   await imageGroup.locator('.plaza-group-toggle').click();
+  await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('openai');
+  assert.equal(await plaza.locator('.plaza-group').count(), 0);
   await plaza.getByRole('searchbox', { name: '搜索模型' }).fill('demo-model');
   assert.equal(await plaza.locator('.plaza-group').count(), 1);
   await plaza.getByRole('button', { name: 'demo-model', exact: true }).click();

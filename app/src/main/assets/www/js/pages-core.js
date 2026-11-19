@@ -327,7 +327,7 @@
       h('div', { class: 'model-avatar ' + pl.k }, (m.name || '?').slice(0, 2)),
       h('div', { style: { flex: '1', minWidth: '0' } },
         h('div', { class: 'model-name nowrap' }, m.name),
-        h('div', { class: 'model-sub nowrap' }, (m.group || pl.t) + (m.context ? ' · ' + U.tokens(m.context) + ' ctx' : ''))
+        h('div', { class: 'model-sub nowrap' }, (m.group || '模型') + (m.context ? ' · ' + U.tokens(m.context) + ' ctx' : ''))
       ),
       h('div', { class: 'price' },
         m.mode === 'token'
@@ -450,7 +450,6 @@
     var plaza = S2.plaza;
     var search = '';
     var gid = S2.plazaGroup || 0;
-    var platform = '';
     var rate = '';
     var onlyStatus = '';
     var onlySubscriptions = false;
@@ -471,11 +470,10 @@
     host.appendChild(modelTabs('plaza'));
 
     var searchInput = h('input', {
-      class: 'input', placeholder: '搜索模型名称、分组或厂商', type: 'search', 'aria-label': '搜索模型',
+      class: 'input', placeholder: '搜索模型名称或分组', type: 'search', 'aria-label': '搜索模型',
       oninput: function (e) { search = e.target.value.trim().toLowerCase(); paint(); }
     });
 
-    var platformRow = h('div', { class: 'chips' });
     var groupsRow = h('div', { class: 'chips' });
     var rateRow = h('div', { class: 'chips' });
     var recentRow = h('div', { class: 'plaza-recent' });
@@ -563,23 +561,19 @@
 
     function paintOverview(all) {
       var groups = (plaza && plaza.groups) || [];
-      var platforms = [];
-      groups.forEach(function (group) {
-        var label = platformKey(group.platform).t;
-        if (label && platforms.indexOf(label) < 0) platforms.push(label);
-      });
       var priced = all.filter(function (model) { return model.mode === 'token' && model.input !== null && isFinite(model.input); });
       priced.sort(function (a, b) { return a.input - b.input; });
       var best = priced[0];
       var totalModels = groups.reduce(function (sum, group) { return sum + ((group.models || []).length); }, 0);
+      var favoriteCount = all.filter(function (model) { return isFavorite(model.name, model.group); }).length;
       overview.innerHTML = '';
       overview.appendChild(h('div', { class: 'plaza-overview-copy' },
         h('span', { class: 'plaza-overview-eyebrow' }, 'LIVE MODEL CATALOG'),
         h('strong', null, totalModels + ' 个模型，一处接入'),
-        h('span', null, platforms.length ? platforms.slice(0, 4).join(' · ') : '模型与价格跟随网站实时同步')));
+        h('span', null, '价格、上下文与渠道状态跟随网站实时同步')));
       var stats = h('div', { class: 'plaza-overview-stats' },
         h('div', null, h('b', null, String(groups.length)), h('span', null, '分组')),
-        h('div', null, h('b', null, String(platforms.length || totalModels ? platforms.length : 0)), h('span', null, '厂商')),
+        h('div', null, h('b', null, String(favoriteCount)), h('span', null, '收藏')),
         h('div', null, h('b', null, best ? priceText(best.input) : '—'), h('span', null, '最低输入')));
       overview.appendChild(stats);
     }
@@ -599,7 +593,7 @@
     function paintSort() {
       sortRow.innerHTML = '';
       [
-        { key: 'recommended', label: '综合' },
+        { key: 'recommended', label: '名称' },
         { key: 'price', label: '价格' },
         { key: 'context', label: '上下文' }
       ].forEach(function (item) {
@@ -620,14 +614,13 @@
     }
 
     function selectedFilterCount() {
-      return (platform ? 1 : 0) + (gid ? 1 : 0) + (rate !== '' ? 1 : 0) +
+      return (gid ? 1 : 0) + (rate !== '' ? 1 : 0) +
         (onlyStatus ? 1 : 0) + (onlySubscriptions ? 1 : 0) + (onlyFavorites ? 1 : 0);
     }
 
     function paintActiveFilters() {
       activeFilters.innerHTML = '';
       var items = [];
-      if (platform) items.push({ label: platform, clear: function () { platform = ''; } });
       if (gid) {
         var selectedGroup = ((plaza && plaza.groups) || []).filter(function (group) { return String(group.id) === String(gid); })[0];
         items.push({ label: selectedGroup ? selectedGroup.name : '分组 ' + gid, clear: function () { gid = 0; global.S.plazaGroup = 0; } });
@@ -652,7 +645,6 @@
 
     function filterPanel() {
       filterSheet.innerHTML = '';
-      filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '平台'), platformRow));
       filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '分组'), groupsRow));
       filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '倍率'), rateRow));
       filterSheet.appendChild(h('div', { class: 'plaza-filter-group' }, h('strong', null, '状态'),
@@ -668,7 +660,7 @@
         h('span', null, '仅显示收藏模型')));
       filterSheet.appendChild(h('div', { class: 'plaza-filter-actions' },
         h('button', { class: 'btn btn-sm', onclick: function () {
-          platform = ''; gid = 0; global.S.plazaGroup = 0; rate = ''; onlyStatus = ''; onlySubscriptions = false; onlyFavorites = false;
+          gid = 0; global.S.plazaGroup = 0; rate = ''; onlyStatus = ''; onlySubscriptions = false; onlyFavorites = false;
           paint(); filterPanel();
         } }, '重置'),
         h('button', { class: 'btn btn-primary btn-sm', onclick: function () { U.closeOverlay(); } }, '查看结果')));
@@ -680,19 +672,12 @@
 
     function paint() {
       var groups = (plaza && plaza.groups) || [];
-      platformRow.innerHTML = '';
       groupsRow.innerHTML = '';
       rateRow.innerHTML = '';
-      var platforms = [];
       var rates = [];
       groups.forEach(function (g) {
-        if (g.platform && platforms.indexOf(g.platform) < 0) platforms.push(g.platform);
         var value = groupRate(g);
         if (rates.indexOf(value) < 0) rates.push(value);
-      });
-      chip(platformRow, '全部', !platform, function () { platform = ''; paint(); });
-      platforms.sort().forEach(function (value) {
-        chip(platformRow, value, platform === value, function () { platform = value; paint(); });
       });
       chip(groupsRow, '全部', !gid, function () { gid = 0; global.S.plazaGroup = 0; paint(); });
       groups.forEach(function (g) {
@@ -706,11 +691,11 @@
       var all = plazaModels(plaza);
       paintOverview(all);
       var filtered = groups.filter(function (g) {
-        return (!gid || String(gid) === String(g.id)) && (!platform || g.platform === platform) && (rate === '' || groupRate(g) === rate) &&
+        return (!gid || String(gid) === String(g.id)) && (rate === '' || groupRate(g) === rate) &&
           (!onlySubscriptions || g.subscription_type === 'subscription');
       }).map(function (g) {
         return { group: g, models: all.filter(function (m) {
-          if (String(m.groupId) !== String(g.id) || (search && (m.name + ' ' + m.group + ' ' + (m.platform || '')).toLowerCase().indexOf(search) < 0)) return false;
+          if (String(m.groupId) !== String(g.id) || (search && (m.name + ' ' + m.group).toLowerCase().indexOf(search) < 0)) return false;
           if (onlyFavorites && !isFavorite(m.name, m.group)) return false;
           if (!onlyStatus) return true;
           var state = modelStatus(m.name, m.group).kind;
@@ -774,7 +759,7 @@
                       showModelDetail(m);
                       paint();
                     } }, m.name)),
-                  h('span', { class: 'plaza-model-context' }, (m.platform || '') + (m.context ? ' · ' + U.tokens(m.context) + ' 上下文' : '') + ' ›')),
+                  h('span', { class: 'plaza-model-context' }, (m.context ? U.tokens(m.context) + ' 上下文' : '详情') + ' ›')),
                 h('div', { class: 'plaza-model-actions' },
                   h('button', { class: 'plaza-model-favorite' + (isFavorite(m.name, m.group) ? ' active' : ''), type: 'button',
                     title: isFavorite(m.name, m.group) ? '取消收藏' : '收藏模型',
@@ -811,7 +796,6 @@
               h('h2', null, group.name || '未命名分组'),
               h('div', { class: 'plaza-group-actions' }, h('span', { class: 'badge teal' }, groupRate(group) + 'x'), toggle)),
             h('div', { class: 'plaza-group-meta' },
-              group.platform ? h('span', null, group.platform) : null,
               group.subscription_type === 'subscription' ? h('span', { class: 'badge warn' }, '订阅') : null,
               group.is_exclusive ? h('span', { class: 'badge' }, '专属') : null,
               h('span', null, item.models.length + ' 个模型')),

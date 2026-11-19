@@ -302,6 +302,14 @@
       return /(gpt-image|dall-?e|flux|seedream|imagen|wanx|qwen-image|nano-banana|midjourney|ideogram|recraft)/i.test(String(name || ''));
     }
 
+    function imageDataUri(value) {
+      var b64 = String(value || '').replace(/\s+/g, '');
+      var mime = /^\/9j\//.test(b64) ? 'image/jpeg' :
+        /^R0lGOD/.test(b64) ? 'image/gif' :
+        /^UklGR/.test(b64) ? 'image/webp' : 'image/png';
+      return 'data:' + mime + ';base64,' + b64;
+    }
+
     function extractImage(d) {
       var arr = (d && (d.data || d.images || d.output || d.results)) || [];
       if (!Array.isArray(arr)) arr = [arr];
@@ -313,7 +321,7 @@
         }
         if (!it) continue;
         var b64 = it.b64_json || it.base64 || it.image_base64 || it.b64;
-        if (b64) return String(b64).indexOf('data:') === 0 ? b64 : 'data:image/png;base64,' + b64;
+        if (b64) return String(b64).indexOf('data:') === 0 ? b64 : imageDataUri(b64);
         var u = it.url || it.image_url || it.image || (it.image && it.image.url);
         if (u) return u;
       }

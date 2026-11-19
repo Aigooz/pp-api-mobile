@@ -16,6 +16,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 let mode = 'stream';
+let imageMode = 'url';
 await page.route('**/__proxy/**', async route => {
   const p = new URL(route.request().url()).pathname.replace(/^\/__proxy\/(site|model)/, '');
   if (p === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
@@ -23,7 +24,9 @@ await page.route('**/__proxy/**', async route => {
   if (p === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 3 }));
   if (p === '/api/v1/keys') return route.fulfill(ok({ items: [{ id: 1, name: '测试令牌', key: 'fake-key', status: 'active' }] }));
   if (p === '/v1/models') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'demo-model' }, { id: 'gpt-image-2' }] }) });
-  if (p === '/v1/images/generations') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ url: base + '/img/pp-logo.jpg' }] }) });
+  if (p === '/v1/images/generations') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    data: [imageMode === 'base64' ? { b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' } : { url: base + '/img/pp-logo.jpg' }]
+  }) });
   if (p === '/v1/chat/completions') {
     const body = route.request().postDataJSON();
     if (body.stream === false) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: '非流式回复' } }] }) });
@@ -54,6 +57,11 @@ try {
   const generated = page.locator('.bubble img.gen');
   await generated.waitFor();
   assert.match(await generated.getAttribute('src'), /\/img\/pp-logo\.jpg$/);
+  imageMode = 'base64';
+  await page.locator('.composer textarea').fill('再来一张');
+  await page.locator('.send-btn').click();
+  await page.waitForFunction(() => document.querySelectorAll('.bubble img.gen').length === 2);
+  assert.match(await page.locator('.bubble img.gen').last().getAttribute('src'), /^data:image\/png;base64,iVBORw0KGgo/);
   const chunkTest = await page.evaluate(async () => {
     const savedFetch = window.fetch;
     const encoder = new TextEncoder();
