@@ -15,6 +15,15 @@
     } catch (e) { return ''; }
   }
   function money(value) { return Number(value).toFixed(2); }
+  function subscriptionExpiry(subscription) {
+    var value = pick(subscription, 'expires_at', 'expired_at', 'end_at');
+    var instant = value ? new Date(value).getTime() : NaN;
+    return isFinite(instant) ? instant : null;
+  }
+  function validityDays(plan) {
+    var days = Number(plan && plan.validity_days);
+    return Number.isSafeInteger(days) && days > 0 ? days : null;
+  }
   function orderRequestMessage(error, fallback) {
     var message = String(error && (error.message || error) || '');
     return /access control checks|aborterror|request was cancelled|request canceled|load failed/i.test(message)
@@ -121,8 +130,8 @@
         String(card.plan.group_id) === String(gid);
     }
     function daycardUncertain() { var gid = currentGroup(); return !!(gid && uncertainGroups[gid]); }
-    function setDaycardUncertain(value) {
-      var gid = currentGroup();
+    function setDaycardUncertain(value, groupId) {
+      var gid = groupId || currentGroup();
       if (!gid) return;
       uncertainGroups[gid] = !!value;
       if (value) U.store.set(storageKey(gid), true); else U.store.del(storageKey(gid));
@@ -184,10 +193,6 @@
     }
     function applyDaycard(groupId, data) {
       cards[groupId] = { state: 'ready', data: data, error: '' };
-      if (data.subscription && uncertainGroups[groupId]) {
-        uncertainGroups[groupId] = false;
-        U.store.del(storageKey(groupId));
-      }
       if (info && config) paintForm();
     }
     function loadDaycard(groupId) {
@@ -463,15 +468,30 @@
         if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() || Number(fresh.plan.price) !== displayedPrice) {
           U.toast('订阅信息已变化，请重新确认', 'err'); return;
         }
-        if (Number(fresh.user.balance) < Number(fresh.plan.price)) { U.toast('账户余额不足，请先充值', 'err'); return; }
         if (daycardUncertain()) { U.toast('上次支付结果未确认，请先核对', 'err'); return; }
         shared.submitting = false; updateSubmit(); notifyOrder();
-        U.confirm('确认余额支付', '订阅：' + fresh.plan.name + '\n支付金额：¥' + money(fresh.plan.price) +
-          '\n有效期：' + (Number(fresh.plan.validity_days) > 0 ? fresh.plan.validity_days + ' 天' : '以平台为准') +
-          (fresh.subscription && fresh.subscription.expires_at ? '\n当前到期：' + U.datetimeSeconds(fresh.subscription.expires_at) + '\n续费后将在当前到期时间上叠加。' : '') +
-          '\n账户余额：¥' + money(fresh.user.balance) + '\n免支付通道费，确认后将立即扣款并开通。', fresh.subscription ? '确认续费' : '确认支付').then(function (ok) {
+        var price = Number(fresh.plan.price), available = Number(fresh.user.balance);
+        var expiry = subscriptionExpiry(fresh.subscription), checkedAt = Date.now();
+        var renewing = expiry !== null && expiry > checkedAt;
+        var days = validityDays(fresh.plan) || validityDays(chosenPlan);
+        var estimate = days && (!fresh.subscription || expiry !== null) ? new Date((renewing ? expiry : checkedAt) + days * 86400000) : null;
+        function line(label, value, tone) {
+          return h('div', null, h('dt', null, label), h('dd', tone ? { class: tone } : null, value));
+        }
+        var summary = h('div', { class: 'payment-confirm-summary' }, h('strong', null, fresh.plan.name),
+          h('dl', null, line('应付金额', '¥' + money(price)), line('账户余额', '¥' + U.usd(available)),
+            line('余额状态', available >= price ? '余额足够' : '余额不足', available >= price ? 'latency-good' : 'latency-bad'),
+            line('增加时长', days ? days + ' 天' : '以平台为准'),
+            expiry !== null ? line('当前到期', U.datetimeSeconds(expiry)) : null,
+            line('预计到期', estimate && isFinite(estimate.getTime()) ? U.datetimeSeconds(estimate) : '以平台为准')),
+          h('p', { class: 'small muted' }, available >= price ? '确认后立即扣款，实际有效期以平台到账结果为准。' : '余额不足，本次不会扣款。'));
+        if (available < price) {
+          U.sheet({ title: '确认余额支付', body: summary, actions: [{ label: '关闭' }] });
+          return;
+        }
+        U.confirm('确认余额支付', summary, fresh.subscription && (renewing || expiry === null) ? '确认续费' : '确认支付').then(function (ok) {
           if (!ok || !current() || !page.isConnected || shared.submitting || daycardUncertain() || shared.uncertain || shared.order ||
-              method !== 'daycard_balance' || selectedPlan !== chosenPlan || currentCard() !== fresh) return;
+              method !== 'daycard_balance' || selectedPlan !== chosenPlan) return;
           shared.submitting = true;
           var confirmedRevision = cardRevisions[gid] = (cardRevisions[gid] || 0) + 1;
           updateSubmit(); notifyOrder();
@@ -479,10 +499,13 @@
             if (!current() || !page.isConnected || confirmedRevision !== cardRevisions[gid]) return null;
             applyDaycard(gid, latest);
             if (method !== 'daycard_balance' || selectedPlan !== chosenPlan || !isDaycardPlan() ||
-                latest.plan.name !== fresh.plan.name || Number(latest.plan.price) !== displayedPrice || Number(latest.user.balance) < displayedPrice) {
+                latest.plan.name !== fresh.plan.name || Number(latest.plan.price) !== displayedPrice || Number(latest.user.balance) !== available ||
+                (validityDays(latest.plan) || validityDays(chosenPlan)) !== days ||
+                !!latest.subscription !== !!fresh.subscription || subscriptionExpiry(latest.subscription) !== expiry ||
+                (expiry !== null && (expiry > Date.now()) !== renewing)) {
               U.toast('订阅价格、余额或状态已变化，请重新确认', 'err'); return null;
             }
-            setDaycardUncertain(true);
+            setDaycardUncertain(true, gid);
             return Api.daycardBuy(gid);
           }).then(function (result) {
             if (result === null) return;
@@ -490,8 +513,8 @@
             if (paid === null || paid === undefined || paid === '' || !isFinite(Number(paid)) || Number(paid) < 0) {
               throw new Error('支付结果不完整');
             }
-            setDaycardUncertain(false);
-            if (current()) U.toast((fresh.subscription ? '续费成功' : '订阅开通成功') + '，已扣 ¥' + money(paid), 'ok');
+            setDaycardUncertain(false, gid);
+            if (current()) U.toast((fresh.subscription && (renewing || expiry === null) ? '续费成功' : '订阅开通成功') + '，已扣 ¥' + money(paid), 'ok');
             if (current()) {
               loadDaycard(gid); loadSubscriptions(); loadOrders();
               App.refreshUser().then(function (user) {
@@ -502,7 +525,7 @@
           }).catch(function (error) {
             var definite = error.final === true ||
               (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429);
-            if (definite) { setDaycardUncertain(false); }
+            if (definite) { setDaycardUncertain(false, gid); }
             if (current()) {
               U.toast(orderRequestMessage(error, '余额支付失败') + (daycardUncertain() ? '。请先核对订阅状态和余额。' : ''), 'err');
               loadDaycard(gid); loadSubscriptions();

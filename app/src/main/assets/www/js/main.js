@@ -587,9 +587,9 @@
   global.addEventListener('pp:auth-changed', function (event) {
     if (!event.detail) return;
     App.resetAccountState();
-    if (event.detail.reason !== 'expired') return;
+    if (event.detail.reason !== 'expired' && event.detail.reason !== 'agreement') return;
     App.refreshPublic();
-    U.toast('登录已过期，请重新登录', 'err');
+    U.toast(event.detail.reason === 'agreement' ? '服务条款已更新，请确认后重新登录' : '登录已过期，请重新登录', 'err');
     if (AUTH_ROUTES.indexOf(currentPath) >= 0) {
       App.go('#/accounts', true);
     }
@@ -775,14 +775,20 @@
   //  * WebView is overlaid by the IME: visualViewport shrinks, --kb = overlap.
   function bindKeyboard() {
     var vv = global.visualViewport;
+    var keyboardBaseHeight = global.innerHeight;
+    var focusedField = null;
     function update() {
-      var kb = 0;
-      if (vv) {
-        kb = Math.round(global.innerHeight - vv.height - (vv.offsetTop || 0));
-      }
-      if (kb < 80) kb = 0;
-      document.documentElement.style.setProperty('--kb', kb + 'px');
-      document.body.classList.toggle('kb-open', kb > 0);
+      var layoutHeight = global.innerHeight;
+      if (layoutHeight > keyboardBaseHeight + 80) keyboardBaseHeight = layoutHeight;
+      var overlayKb = vv ? Math.round(layoutHeight - vv.height - (vv.offsetTop || 0)) : 0;
+      if (overlayKb < 80) overlayKb = 0;
+      var resizedKb = focusedField ? keyboardBaseHeight - layoutHeight : 0;
+      if (resizedKb < 80) resizedKb = 0;
+      var keyboardOpen = overlayKb > 0 || resizedKb > 0;
+      // A resized WebView already places fixed controls above the IME; only
+      // compensate when the keyboard overlays the original viewport.
+      document.documentElement.style.setProperty('--kb', overlayKb + 'px');
+      document.body.classList.toggle('kb-open', keyboardOpen);
     }
     if (vv) {
       vv.addEventListener('resize', update);
@@ -794,6 +800,10 @@
     document.addEventListener('focusin', function (e) {
       var t = e.target;
       if (!t || !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      if (!focusedField) keyboardBaseHeight = global.innerHeight;
+      focusedField = t;
+      update();
+      if (t.closest && t.closest('.composer')) return;
       setTimeout(function () {
         try {
           t.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -801,6 +811,15 @@
           try { t.scrollIntoView(); } catch (e2) {}
         }
       }, 320);
+    });
+    document.addEventListener('focusout', function (e) {
+      if (e.target !== focusedField) return;
+      setTimeout(function () {
+        if (document.activeElement === focusedField) return;
+        focusedField = null;
+        keyboardBaseHeight = global.innerHeight;
+        update();
+      }, 250);
     });
   }
 

@@ -40,7 +40,7 @@ await page.route('**/__proxy/**', async route => {
       user: { id: 1, balance: daycardBalance }, subscription }));
     if (gid !== 13) return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, currency: 'CNY', group_id: 13 },
       user: { id: 1, balance: daycardBalance }, subscription }));
-    return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, currency: 'CNY', group_id: 13 },
+    return route.fulfill(raw({ plan: { id: 1, name: '日卡', price: daycardPrice, validity_days: 1, currency: 'CNY', group_id: 13 },
       user: { id: 1, balance: daycardBalance }, subscription }));
   }
   if (path === '/api/daycard/buy') {
@@ -160,15 +160,24 @@ try {
   assert.match(firstExpiry, /有效至 2026-12-02 10:00:00/);
   await page.getByRole('button', { name: '叠加续费' }).click();
   await page.getByRole('heading', { name: '确认余额支付' }).waitFor();
+  assert.match(await page.locator('.payment-confirm-summary').innerText(), /余额足够/);
+  assert.match(await page.locator('.payment-confirm-summary').innerText(), /预计到期\s*2026-12-03 10:00:00/);
+  subscription = { expires_at: '2026-12-02T10:01:27+08:00' };
+  await page.getByRole('button', { name: '确认续费', exact: true }).click();
+  await page.getByText('订阅价格、余额或状态已变化，请重新确认').last().waitFor();
+  assert.equal(buys.length, 3);
+  await page.getByRole('button', { name: '叠加续费' }).click();
+  await page.getByRole('heading', { name: '确认余额支付' }).waitFor();
+  assert.match(await page.locator('.payment-confirm-summary').innerText(), /预计到期\s*2026-12-03 10:01:27/);
   await page.getByRole('button', { name: '确认续费', exact: true }).click();
   await page.getByText('续费成功，已扣 ¥3.66').waitFor();
   assert.equal(buys.length, 4);
   assert.match(await page.locator('.payment-balance-note').innerText(), /有效至 2026-12-03 10:00:00/);
-  await page.locator('.payment-balance').getByText('$6.34').waitFor();
+  await page.locator('.payment-balance').getByText('$6.3400', { exact: true }).waitFor();
   await page.getByRole('navigation').getByRole('button', { name: '我的', exact: true }).click();
-  await page.locator('#view').getByText('$6.34').waitFor();
+  await page.locator('#view').getByText('$6.3400', { exact: true }).waitFor();
   await page.getByRole('button', { name: '首页', exact: true }).click();
-  await page.locator('.dashboard').getByText('$6.34').waitFor();
+  await page.locator('.dashboard').getByText('$6.3400', { exact: true }).waitFor();
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);

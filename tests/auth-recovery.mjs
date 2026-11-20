@@ -20,6 +20,7 @@ function fixture({ mode = 'sync', initial = '' } = {}) {
       const path = new URL(url).pathname;
       const body = options.body && JSON.parse(options.body);
       const token = (options.headers.Authorization || '').replace('Bearer ', '');
+      if (path === '/api/v1/settings/public') return response(200, state.settings || {});
       if (path === '/api/v1/auth/login') {
         state.logins++;
         if (state.holdLogin) await state.holdLogin;
@@ -176,5 +177,20 @@ for (const failure of ['2fa', 'challenge', 'invalid']) {
   const { api } = fixture({ mode: 'none' });
   await signIn(api);
   assert.equal(api.AUTH.remembered('a@example.test').enabled, false);
+}
+{
+  const { api, state } = fixture();
+  state.settings = { login_agreement_enabled: true, login_agreement_revision: 'r1', login_agreement_documents: [{ id: 'terms', title: 'Terms' }] };
+  assert.equal(await code(signIn(api)), 'LOGIN_AGREEMENT_REQUIRED');
+  assert.equal(state.logins, 0);
+  api.acceptLoginAgreement(await api.loginAgreement());
+  await signIn(api);
+  state.settings.login_agreement_revision = 'r2';
+  state.tokens.clear(); state.refresh = 'expired';
+  assert.equal(await code(api.base('/protected')), 'LOGIN_AGREEMENT_REQUIRED');
+  assert.equal(state.logins, 1);
+  assert.equal(api.AUTH.isLogged(), false);
+  assert.equal(api.AUTH.remembered('a@example.test').enabled, true);
+  assert.equal(state.events.at(-1), 'agreement');
 }
 console.log('Remember password: secure persistence, account isolation, deduplicated recovery, failures, 2FA and logout passed');

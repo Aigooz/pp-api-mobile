@@ -306,6 +306,7 @@ try {
   await registration.page.locator('input[inputmode=numeric]').fill('123456');
   await registration.page.locator('input[type=password]').nth(0).fill('correct-test-password');
   await registration.page.locator('input[type=password]').nth(1).fill('correct-test-password');
+  await registration.page.getByRole('checkbox', { name: /我已阅读并同意/ }).check();
   await registration.page.getByRole('button', { name: '创建账号', exact: true }).click();
   await registration.page.waitForFunction(() => Api.AUTH.currentId() === 'email:a@example.test');
   await registration.page.reload();

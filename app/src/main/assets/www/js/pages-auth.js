@@ -47,6 +47,21 @@
     );
   }
 
+  function agreementSheet(agreement, onAccept) {
+    var md = global.markdownit ? global.markdownit({ html: false, linkify: false }) : null;
+    var docs = agreement.documents.map(function (doc) {
+      var url = Api.ORIGIN + '/legal/' + doc.id;
+      return h('details', { class: 'auth-agreement-doc' }, h('summary', null, doc.title),
+        typeof doc.content_md === 'string' && md ? h('div', { class: 'auth-agreement-text', html: U.cleanHtml(md.render(doc.content_md)) }) :
+          h('a', { href: url, onclick: function (event) { event.preventDefault(); C.open(url); } }, '查看原文'));
+    });
+    return U.sheet({ title: '服务条款确认', body: h('div', { class: 'auth-agreement-docs' },
+      agreement.updated ? h('p', { class: 'small muted' }, '更新日期：' + agreement.updated) : null, docs),
+      actions: [{ label: '暂不同意' }, { label: '同意并继续', kind: 'primary', onClick: function () {
+        Api.acceptLoginAgreement(agreement); onAccept();
+      } }] });
+  }
+
   function renderLogin() {
     var email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', autocomplete: 'username', inputmode: 'email', value: App.loginEmail || '' });
     App.loginEmail = '';
@@ -55,6 +70,41 @@
     var remember = h('input', { type: 'checkbox', checked: remembered.enabled, disabled: !Api.AUTH.secureAvailable(), 'aria-label': '记住密码，失效后自动登录' });
     if (remembered.enabled) pass.value = remembered.password;
     var btn = h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '6px', height: '48px' } }, '登录');
+    var gate = h('div', { class: 'auth-agreement-gate', hidden: true });
+    var page, agreement = null, agreementPanel, checking = false, ready = false, busy = false, disposed = false;
+
+    function syncGate() {
+      var accepted = ready && Api.hasLoginAgreement(agreement);
+      email.disabled = pass.disabled = !accepted;
+      remember.disabled = !accepted || !Api.AUTH.secureAvailable();
+      btn.disabled = !accepted || busy;
+      gate.hidden = ready && !agreement;
+      gate.replaceChildren();
+      if (checking) gate.textContent = '正在核对服务条款…';
+      else if (!ready) gate.append(h('span', null, '服务条款暂不可用'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: checkAgreement }, '重试'));
+      else if (agreement) gate.append(h('span', null, accepted ? '已确认服务条款' : '登录前请确认最新版服务条款'),
+        h('button', { type: 'button', class: 'btn btn-sm', onclick: openAgreement }, '查看条款'));
+    }
+    function openAgreement() {
+      if (!agreement || disposed || (agreementPanel && agreementPanel.box.isConnected)) return;
+      agreementPanel = agreementSheet(agreement, syncGate);
+    }
+    function requireReview(error) {
+      if (error.code !== 'LOGIN_AGREEMENT_REQUIRED' || disposed) return false;
+      agreement = error.agreement;
+      syncGate(); openAgreement();
+      return true;
+    }
+    function checkAgreement() {
+      if (checking) return;
+      checking = true; ready = false; syncGate();
+      Api.loginAgreement().then(function (next) {
+        if (disposed) return;
+        agreement = next; ready = true;
+        if (agreement && agreement.mode !== 'checkbox' && !Api.hasLoginAgreement(agreement) && page.isConnected) openAgreement();
+      }).catch(function () {}).finally(function () { checking = false; if (!disposed) syncGate(); });
+    }
 
     email.addEventListener('change', function () {
       var saved = Api.AUTH.remembered(email.value.trim());
@@ -78,19 +128,20 @@
       if (btn.disabled) return;
       if (!email.value.trim() || !pass.value) { U.toast('请填写邮箱和密码', 'err'); return; }
       var credentials = { email: email.value.trim(), password: pass.value, remember: remember.checked };
-      btn.disabled = true;
+      busy = true; syncGate();
       btn.textContent = '登录中…';
       Api.login(credentials.email, credentials.password, null, credentials.remember).then(function (result) {
         completeLogin(result, '登录成功');
       }).catch(function (e) {
         var msg = e.message || '登录失败';
+        if (requireReview(e)) return;
         if (/2fa|two.factor|两步|验证码/i.test(msg)) {
           open2fa(credentials);
         } else {
           U.toast(msg, 'err');
         }
       }).then(function () {
-        btn.disabled = false;
+        busy = false; syncGate();
         btn.textContent = '登录';
       });
     }
@@ -99,7 +150,7 @@
       var code = h('input', { class: 'input', placeholder: '6 位动态验证码', inputmode: 'numeric' });
       var verifying = false;
       var secondFactorPayload = { email: credentials.email, password: credentials.password, code: '', totp_code: '' };
-      U.sheet({
+      var twoFactorPanel = U.sheet({
         title: '两步验证',
         body: h('div', null, h('p', { class: 'small muted' }, '该账号开启了两步验证，请输入验证器中的 6 位验证码。'), code),
         actions: [
@@ -113,7 +164,10 @@
               secondFactorPayload.totp_code = code.value.trim();
               Api.login2fa(secondFactorPayload, credentials.remember)
                 .then(function (result) { completeLogin(result, '登录成功'); })
-                .catch(function (e) { U.toast(e.message, 'err'); })
+                .catch(function (e) {
+                  if (e.code === 'LOGIN_AGREEMENT_REQUIRED') twoFactorPanel.close();
+                  if (!requireReview(e)) U.toast(e.message, 'err');
+                })
                 .then(function () { verifying = false; });
               return false;
             }
@@ -126,6 +180,7 @@
     pass.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
 
     var body = h('div', null,
+      gate,
       field('邮箱', email),
       pwField('密码', pass),
       h('label', { class: 'remember-password' },
@@ -144,20 +199,22 @@
       }, h('span', { html: U.ic('users', 16) }), '返回账号管理') : null
     );
 
-    return authShell('欢迎回来', '登录后管理令牌、用量与余额', body,
-      h('div', { class: 'footer-note' }, '登录即表示同意《服务条款》与《隐私政策》'));
+    page = authShell('欢迎回来', '登录后管理令牌、用量与余额', body);
+    page.addEventListener('pp:page-dispose', function () { disposed = true; if (agreementPanel) agreementPanel.close(); });
+    checkAgreement();
+    return page;
   }
 
   function renderRegister() {
-    var settings = global.S.settings || {};
     var email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', inputmode: 'email' });
     var code = h('input', { class: 'input', placeholder: '邮箱验证码', inputmode: 'numeric' });
     var pass = h('input', { class: 'input', type: 'password', placeholder: '至少 8 位，建议混合字母数字' });
     var pass2 = h('input', { class: 'input', type: 'password', placeholder: '再次输入密码' });
-    var agree = h('input', { type: 'checkbox', checked: true, style: { width: '16px', height: '16px', accentColor: 'var(--teal)' } });
+    var agree = h('input', { type: 'checkbox', style: { width: '16px', height: '16px', accentColor: 'var(--teal)' } });
     var sendBtn = h('button', { class: 'btn', style: { height: '46px', minWidth: '104px' } }, '发送验证码');
     var countdown = 0;
     var timer = null;
+    var page, agreementPanel;
 
     function tick() {
       countdown--;
@@ -188,6 +245,42 @@
     });
 
     var btn = h('button', { class: 'btn btn-primary btn-block', style: { marginTop: '8px', height: '48px' } }, '创建账号');
+    function register(payload) {
+      btn.disabled = true;
+      btn.textContent = '创建中…';
+      Api.loginAgreement().then(function (agreement) {
+        if (!page.isConnected) return null;
+        if (agreement && !Api.hasLoginAgreement(agreement)) {
+          agreementPanel = agreementSheet(agreement, function () {
+            Api.acceptLoginAgreement(agreement);
+            setTimeout(function () { if (page.isConnected) register(payload); }, 0);
+          });
+          return false;
+        }
+        return Api.register(payload);
+      }).then(function (result) {
+        if (!result) return false;
+        pass.value = '';
+        pass2.value = '';
+        if (result.saved) U.toast('注册成功', 'ok');
+        else U.toast(Api.AUTH.storageWarning() || '安全保存失败，关闭应用后账号无法保留。', 'err');
+        App.refreshPublic();
+        return App.refreshUser().catch(function () {}).then(function () { return true; });
+      }).then(function (registered) {
+        if (registered) App.go('#/home', true);
+      }).catch(function (err) {
+        if (!page.isConnected) return;
+        if (err.code === 'LOGIN_AGREEMENT_REQUIRED') {
+          agreementPanel = agreementSheet(err.agreement, function () {
+            Api.acceptLoginAgreement(err.agreement);
+            setTimeout(function () { if (page.isConnected) register(payload); }, 0);
+          });
+        } else U.toast(err.message, 'err');
+      }).then(function () {
+        btn.disabled = false;
+        btn.textContent = '创建账号';
+      });
+    }
     btn.addEventListener('click', function () {
       var e = email.value.trim();
       if (!e || e.indexOf('@') < 0) { U.toast('请输入有效邮箱', 'err'); return; }
@@ -195,29 +288,7 @@
       if (pass.value.length < 8) { U.toast('密码至少 8 位', 'err'); return; }
       if (pass.value !== pass2.value) { U.toast('两次密码不一致', 'err'); return; }
       if (!agree.checked) { U.toast('请先同意服务条款', 'err'); return; }
-      btn.disabled = true;
-      btn.textContent = '创建中…';
-      Api.register({
-        email: e,
-        password: pass.value,
-        verify_code: code.value.trim(),
-        agreement_accepted: true,
-        agreement_revision: settings.login_agreement_revision
-      }).then(function (result) {
-        pass.value = '';
-        pass2.value = '';
-        if (result.saved) U.toast('注册成功', 'ok');
-        else U.toast(Api.AUTH.storageWarning() || '安全保存失败，关闭应用后账号无法保留。', 'err');
-        App.refreshPublic();
-        return App.refreshUser().catch(function () {});
-      }).then(function () {
-        App.go('#/home', true);
-      }).catch(function (err) {
-        U.toast(err.message, 'err');
-      }).then(function () {
-        btn.disabled = false;
-        btn.textContent = '创建账号';
-      });
+      register({ email: e, password: pass.value, verify_code: code.value.trim() });
     });
 
     var body = h('div', null,
@@ -236,8 +307,10 @@
       btn
     );
 
-    return authShell('创建账号', '注册后即可使用统一 API 接入', body,
+    page = authShell('创建账号', '注册后即可使用统一 API 接入', body,
       h('div', { class: 'footer-note' }, '已有账号？', h('a', { href: '#/login' }, '直接登录')));
+    page.addEventListener('pp:page-dispose', function () { clearInterval(timer); if (agreementPanel) agreementPanel.close(); });
+    return page;
   }
 
   function renderForgot() {

@@ -230,6 +230,11 @@
     var runSeq = 0;
     var currentRun = null;
     var currentController = null;
+    var testOverlay = null;
+    var testStream = null;
+    var testSettle = null;
+    var testBusy = false;
+    var stopTest = false;
     var storageWarningShown = false;
 
     function isCurrent() {
@@ -256,6 +261,7 @@
     function abortGeneration(markStopped) {
       runSeq++;
       currentRun = null;
+      stopChatTest();
       if (currentController) {
         try { currentController.abort(); } catch (e) {}
         currentController = null;
@@ -306,9 +312,13 @@
     var keyChip = h('button', { class: 'chip', type: 'button' }, h('span', null, '令牌'));
     var settingBtn = pageIconButton('settings', '对话设置', openSettings);
     var historyBtn = pageIconButton('clock', '历史对话', openHistory);
+    var testBtn = h('button', {
+      class: 'chat-test-trigger', type: 'button', title: '一键测试', 'aria-label': '一键测试',
+      html: U.ic('activity', 17), onclick: openChatTest
+    });
 
     page.appendChild(h('div', { class: 'chat-toolbar' },
-      h('div', { class: 'chips' }, modelChip, keyChip), settingBtn, historyBtn));
+      h('div', { class: 'chips' }, modelChip, keyChip), testBtn, settingBtn, historyBtn));
     page.appendChild(msgsHost);
 
     var input = h('textarea', {
@@ -330,6 +340,287 @@
       })[0] || keys.filter(function (key) {
         return String(key.status) === 'active';
       })[0] || keys[0] || null;
+    }
+
+    function stopChatTest() {
+      stopTest = true;
+      if (testStream && testStream.abort) testStream.abort();
+      testStream = null;
+      if (testSettle) {
+        var settle = testSettle;
+        testSettle = null;
+        settle({ cancelled: true });
+      }
+      if (testOverlay && testOverlay.close) testOverlay.close();
+      testOverlay = null;
+    }
+
+    function openChatTest() {
+      if (testBusy || testOverlay) return;
+      var key = activeKey();
+      if (!key || !key.key) { U.toast('请先选择可用令牌', 'err'); return; }
+      if (String(key.status || 'active') !== 'active') { U.toast('当前令牌不可用', 'err'); return; }
+
+      var groupKey = key.group_id == null || key.group_id === '' ? null : String(key.group_id);
+      var groupNameKey = String((key.group && key.group.name) || pick(key, 'group_name') || '').trim().toLowerCase();
+      var models = C.plazaModels(global.S.plaza).filter(function (model) {
+        var sameGroup = groupKey !== null ? String(model.groupId || '') === groupKey :
+          !!groupNameKey && String(model.group || '').trim().toLowerCase() === groupNameKey;
+        return sameGroup && !isImageModel(model.name) && (!model.mode || model.mode === 'token');
+      });
+      var groupName = pick(key, 'group_name') || (key.group && key.group.name) ||
+        (global.S.groupNames && global.S.groupNames[key.group_id]) ||
+        (models[0] && models[0].group) || (key.group_id ? '分组 #' + key.group_id : '默认分组');
+      if (!models.length) {
+        U.toast('当前分组没有可测试的文本模型', 'err');
+        return;
+      }
+
+      var permittedNames = null;
+      var groupMode = true;
+      var selectedModel = '';
+      var busy = false;
+      stopTest = false;
+      var content = h('div', { class: 'chat-test-panel' });
+      var disclosure = h('div', { class: 'chat-test-disclosure' },
+        h('strong', null, '测试会产生实际费用'),
+        h('p', null, '每个模型会发送 1 次真实 API 请求，并按站内规则计费。测试前可查看模型和请求数。'));
+      var scope = h('div', { class: 'chat-test-scope' });
+      var scopeLabel = h('div', { class: 'chat-test-scope-label' });
+      var modeButtons = h('div', { class: 'chat-test-modes' });
+      var list = h('div', { class: 'chat-test-models' });
+      var progress = h('div', { class: 'chat-test-progress', 'aria-live': 'polite' }, '尚未开始');
+      var results = h('div', { class: 'chat-test-results' });
+      var refreshButton;
+      var stopButton;
+      var testStarted = false;
+
+      function inScope() {
+        var available = permittedNames ? models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; }) : [];
+        return groupMode ? available : available.filter(function (model) { return model.name === selectedModel; });
+      }
+      function paintScope() {
+        var available = permittedNames ? models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; }) : [];
+        var scoped = inScope();
+        scopeLabel.textContent = (groupMode ? '整个分组' : '单个模型') + ' · ' + groupName + ' · ' + scoped.length + ' 个请求';
+        modeButtons.innerHTML = '';
+        modeButtons.appendChild(h('button', {
+          class: 'chat-test-mode' + (groupMode ? ' active' : ''), type: 'button',
+          'aria-pressed': groupMode ? 'true' : 'false', text: '整个分组',
+          onclick: function () { groupMode = true; paintScope(); }
+        }));
+        modeButtons.appendChild(h('button', {
+          class: 'chat-test-mode' + (!groupMode ? ' active' : ''), type: 'button',
+          'aria-pressed': !groupMode ? 'true' : 'false', text: '单个模型',
+          onclick: function () { groupMode = false; if (!selectedModel && available.length) selectedModel = available[0].name; paintScope(); }
+        }));
+        list.innerHTML = '';
+        if (!permittedNames) {
+          list.appendChild(h('div', { class: 'chat-test-empty' }, '正在读取此令牌可用的模型…'));
+        } else if (!available.length) {
+          list.appendChild(h('div', { class: 'chat-test-empty' }, '令牌未返回此分组的可用模型'));
+        } else {
+          available.forEach(function (model) {
+            if (groupMode) list.appendChild(h('div', { class: 'chat-test-model-name', text: model.name }));
+            else list.appendChild(h('button', {
+                class: 'chat-test-model' + (selectedModel === model.name ? ' active' : ''),
+                type: 'button', 'aria-pressed': selectedModel === model.name ? 'true' : 'false',
+                text: model.name, onclick: function () { selectedModel = model.name; paintScope(); }
+              }));
+          });
+        }
+        refreshButton.disabled = busy || testStarted || !scoped.length;
+        refreshButton.textContent = busy ? '测试进行中…' : testStarted ? '测试已完成' : '开始测试 ' + scoped.length + ' 个模型';
+      }
+      function metric(value, suffix) {
+        return value === null || value === undefined || !isFinite(Number(value)) ? '—' : U.num(Number(value)) + (suffix || '');
+      }
+      function seconds(value) {
+        return value === null || value === undefined || !isFinite(Number(value)) ? '—' : (Number(value) / 1000).toFixed(2) + ' 秒';
+      }
+      function addResult(model, result) {
+        var latency = { first: result.first, total: result.total };
+        var levels = global.UsageAnalysis ? global.UsageAnalysis.latencyLevels(latency) : {};
+        var output = result.output || result.error || (result.cancelled ? '已取消' : '无文本输出');
+        results.appendChild(h('article', { class: 'chat-test-result' },
+          h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : result.cancelled ? '' : 'ok') }, result.error ? '失败' : result.cancelled ? '已停止' : '完成')),
+          h('div', { class: 'chat-test-metrics' },
+            h('div', null, h('span', null, '输入 Token'), h('strong', null, metric(result.inputTokens))),
+            h('div', null, h('span', null, '输出 Token'), h('strong', null, metric(result.outputTokens))),
+            h('div', null, h('span', null, '缓存读取'), h('strong', null, metric(result.cacheRead))),
+            h('div', null, h('span', null, '缓存写入'), h('strong', null, metric(result.cacheWrite))),
+            h('div', null, h('span', null, 'Token 合计'), h('strong', null, metric(result.totalTokens))),
+            h('div', null, h('span', null, '首次输出 · 客户端'), h('strong', { class: 'latency-' + (levels.first || 'unknown') }, seconds(result.first))),
+            h('div', null, h('span', null, '总耗时 · 客户端'), h('strong', { class: 'latency-' + (levels.total || 'unknown') }, seconds(result.total)))
+          ),
+          h('div', { class: 'chat-test-result-text' }, h('span', null, '输入'), h('p', null, result.prompt || '请用一句话回答：1+1 等于几？')),
+          h('div', { class: 'chat-test-result-text' }, h('span', null, '输出'), h('p', null, output.slice(0, 1800) + (output.length > 1800 ? '…' : '')))
+        ));
+      }
+      function usageMetrics(usage) {
+        if (!usage || typeof usage !== 'object') return { inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, totalTokens: null };
+        var details = usage.prompt_tokens_details || usage.input_tokens_details || {};
+        var cacheWriteDetails = usage.cache_creation || usage.prompt_cache_creation || {};
+        function firstValue(values) {
+          for (var i = 0; i < values.length; i++) {
+            if (values[i] !== undefined && values[i] !== null && values[i] !== '' && isFinite(Number(values[i]))) return Number(values[i]);
+          }
+          return null;
+        }
+        var inputTokens = firstValue([usage.prompt_tokens, usage.input_tokens]);
+        var outputTokens = firstValue([usage.completion_tokens, usage.output_tokens]);
+        return {
+          inputTokens: inputTokens,
+          outputTokens: outputTokens,
+          cacheRead: firstValue([usage.cache_read_input_tokens, usage.cached_tokens, details.cached_tokens, details.cache_read_input_tokens, details.cache_read_tokens]),
+          cacheWrite: firstValue([usage.cache_creation_input_tokens, usage.cache_write_tokens, details.cache_creation_tokens, details.cache_creation_input_tokens, cacheWriteDetails.ephemeral_5m_input_tokens, cacheWriteDetails.ephemeral_1h_input_tokens]),
+          totalTokens: firstValue([usage.total_tokens]) !== null ? firstValue([usage.total_tokens]) :
+            inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null
+        };
+      }
+      function runOne(model, prompt) {
+        return new Promise(function (resolve) {
+          var started = global.performance && performance.now ? performance.now() : Date.now();
+          var first = null, text = '', usage = null, settled = false;
+          function finish(extra) {
+            if (settled) return;
+            settled = true;
+            if (testSettle === finish) testSettle = null;
+            if (testStream) testStream = null;
+            var ended = global.performance && performance.now ? performance.now() : Date.now();
+            resolve(Object.assign({ prompt: prompt, output: text, error: '', cancelled: false,
+              first: first, total: Math.max(0, ended - started) }, usageMetrics(usage), extra || {}));
+          }
+          testSettle = finish;
+          try {
+            testStream = Api.chatStream({
+              model: model, stream: true, stream_options: { include_usage: true },
+              max_tokens: 48, temperature: 0,
+              messages: [{ role: 'user', content: prompt }]
+            }, key.key, {
+              idleTimeoutMs: 45000,
+              onEvent: function (data) {
+                if (data && data.error) {
+                  var message = data.error.message || data.error.msg || '请求失败';
+                  if (testStream) testStream.abort();
+                  finish({ error: String(message), total: Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started) });
+                  return;
+                }
+                usage = mergeUsage(usage, extractUsage(data));
+                var choice = data && data.choices && data.choices[0];
+                var delta = choice && (choice.delta || choice.message) || {};
+                var contentPart = delta.content;
+                var piece = typeof contentPart === 'string' ? contentPart : Array.isArray(contentPart) ? contentPart.map(function (part) { return part && (part.text || part.content) || ''; }).join('') : '';
+                if (piece) {
+                  if (first === null && piece.trim()) first = Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started);
+                  text += piece;
+                }
+              },
+              onDone: function () { finish(); },
+              onError: function (error, status) { finish({ error: String(error || ('HTTP ' + (status || '错误'))) }); }
+            });
+          } catch (error) { finish({ error: error.message || '请求失败' }); }
+        });
+      }
+      function runTest() {
+        if (busy || testStarted) return false;
+        if (!permittedNames) { U.toast('请等待令牌模型列表加载完成', 'err'); return false; }
+        var selected = inScope();
+        if (!selected.length) { U.toast('没有可测试的模型', 'err'); return false; }
+        testStarted = true;
+        busy = true;
+        refreshButton.disabled = true;
+        refreshButton.textContent = '等待确认…';
+        progress.textContent = '等待确认计费测试…';
+        U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用。每次调用都会按站内计费规则产生费用，具体金额取决于实际用量，无法预先准确估算。', '确认并测试').then(function (confirmed) {
+          if (!confirmed || !testOverlay || disposed || !isCurrent()) {
+            busy = false;
+            testStarted = false;
+            paintScope();
+            progress.textContent = confirmed ? '测试已关闭。' : '测试未开始，没有发起任何调用。';
+            return;
+          }
+          runConfirmed(selected);
+        });
+        return false;
+      }
+
+      function runConfirmed(selected) {
+        busy = true; testBusy = true; stopTest = false;
+        stopButton.hidden = false;
+        results.innerHTML = '';
+        progress.textContent = '已确认 ' + selected.length + ' 次真实请求，正在串行测试…';
+        paintScope();
+        var prompt = '请用一句话回答：1+1 等于几？';
+        var index = 0;
+        function next() {
+          if (stopTest || !isCurrent() || index >= selected.length) {
+            busy = false; testBusy = false; testStream = null;
+            stopButton.hidden = true;
+            testStarted = false;
+            progress.textContent = stopTest ? '测试已停止，未开始的模型不会发送请求。' : '测试完成 · ' + index + '/' + selected.length + ' 个模型';
+            paintScope();
+            return;
+          }
+          var model = selected[index++];
+          progress.textContent = '正在测试 ' + index + '/' + selected.length + ' · ' + model.name;
+          runOne(model.name, prompt).then(function (result) {
+            if (!testOverlay || disposed) return;
+            addResult(model.name, result);
+            next();
+          });
+        }
+        next();
+      }
+
+      refreshButton = h('button', { class: 'btn btn-primary chat-test-start', type: 'button', text: '读取令牌可用模型', disabled: true });
+      stopButton = h('button', { class: 'btn chat-test-stop', type: 'button', text: '停止当前及后续测试', hidden: true });
+      stopButton.addEventListener('click', function () {
+        if (!busy) return;
+        stopTest = true;
+        if (testStream && testStream.abort) testStream.abort();
+        testStream = null;
+        if (testSettle) { var settle = testSettle; testSettle = null; settle({ cancelled: true }); }
+        stopButton.hidden = true;
+      });
+      content.appendChild(disclosure);
+      content.appendChild(scope);
+      scope.appendChild(scopeLabel);
+      scope.appendChild(modeButtons);
+      scope.appendChild(list);
+      content.appendChild(refreshButton);
+      content.appendChild(stopButton);
+      content.appendChild(progress);
+      content.appendChild(results);
+      refreshButton.addEventListener('click', runTest);
+      var overlay = U.sheet({
+        title: '一键测试', body: content,
+        onClose: function () {
+          if (testOverlay === overlay) testOverlay = null;
+          stopTest = true;
+          if (testStream && testStream.abort) testStream.abort();
+          testStream = null;
+          if (testSettle) { var settle = testSettle; testSettle = null; settle({ cancelled: true }); }
+          testBusy = false;
+          busy = false;
+        },
+        actions: [{ label: '关闭' }]
+      });
+      testOverlay = overlay;
+      Api.modelsWithKey(key.key).then(function (response) {
+        if (!testOverlay || disposed || !isCurrent()) return;
+        var items = Array.isArray(response) ? response : [];
+        permittedNames = items.map(function (item) { return String(item && (item.id || item.name) || ''); }).filter(Boolean);
+        var firstModel = models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; })[0];
+        selectedModel = firstModel ? firstModel.name : '';
+        paintScope();
+      }).catch(function (error) {
+        if (!testOverlay || disposed) return;
+        permittedNames = [];
+        progress.textContent = '无法确认此令牌可用的模型：' + prettyErr(error);
+        paintScope();
+      });
+      paintScope();
     }
 
     function modelLimit() {

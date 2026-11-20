@@ -634,10 +634,79 @@
     return svg;
   }
 
+  function usageKeyName(row) { return pick(row, 'api_key_name', 'key_name') || pick(row.api_key, 'name'); }
+  function usageAmount(value) { return value == null ? '—' : '$' + String(Number(value)); }
+
+  function showUsageDetail(log, errorLog, current) {
+    var analysis = global.UsageAnalysis;
+    var body = h('div', { class: 'usage-detail' });
+    function paint(row, note) {
+      var lat = analysis.latency(row) || {}, levels = analysis.latencyLevels(lat);
+      var status = errorLog ? 'error' : analysis.recordStatus(row);
+      var code = pick(row, 'status_code', 'http_status', 'statusCode');
+      var requestId = pick(row, 'request_id', 'requestId');
+      var reason = status === 'error' ? pick(row, 'error_message', 'error_reason', 'message') : null;
+      var category = status === 'error' ? pick(row, 'category', 'error_category') : null;
+      var totalTokens = analysis.metricNumber(row, ['total_tokens', 'tokens']);
+      if (totalTokens === null) {
+        var tokenParts = ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens'].map(function (field) {
+          return analysis.metricNumber(row, [field]);
+        });
+        if (tokenParts.every(function (value) { return value !== null; })) {
+          totalTokens = tokenParts.reduce(function (sum, value) { return sum + value; }, 0);
+        }
+      }
+      function value(label, text, tone) {
+        return h('div', null, h('dt', null, label), h('dd', tone ? { class: tone } : null, text == null ? '—' : text));
+      }
+      function token(label, fields) {
+        var n = analysis.metricNumber(row, Array.isArray(fields) ? fields : [fields]);
+        return value(label, n == null ? null : U.num(n));
+      }
+      body.replaceChildren(h('strong', { class: 'usage-detail-model' }, pick(row, 'model', 'model_name') || '请求'),
+        h('dl', { class: 'usage-detail-meta' },
+          value('调用时间', U.datetimeSeconds(pick(row, 'created_at', 'timestamp', 'time'))),
+          value('状态', ({ success: '成功', error: '异常', unknown: '未提供' })[status] + (code ? ' · ' + code : '')),
+          usageKeyName(row) ? value('令牌', usageKeyName(row)) : null,
+          (pick(row.group, 'name') || row.group_name) ? value('分组', pick(row.group, 'name') || row.group_name) : null),
+        h('h4', null, 'Token 与计费'),
+        h('dl', { class: 'usage-detail-grid' }, token('输入', 'input_tokens'), token('输出', 'output_tokens'),
+          token('缓存读取', ['cache_read_tokens', 'cache_read']),
+          token('缓存写入', ['cache_creation_tokens', 'cache_write_tokens', 'cache_write']),
+          value('总 Token', totalTokens === null ? null : U.num(totalTokens)),
+          value('实扣费用', usageAmount(analysis.metricNumber(row, ['actual_cost']))),
+          value('标准费用', usageAmount(analysis.metricNumber(row, ['total_cost'])))),
+        h('h4', null, '延迟'),
+        h('dl', { class: 'usage-detail-grid' },
+          value('首字', analysis.ms(lat.first), 'latency-' + (levels.first || 'unknown')),
+          value('总耗时', analysis.ms(lat.total), 'latency-' + (levels.total || 'unknown')),
+          value('输出 TPS', lat.tps ? lat.tps.toFixed(1) + ' tok/s' : null, 'muted')));
+      if (requestId) body.appendChild(h('div', { class: 'usage-detail-id' },
+        h('div', null, h('span', null, '请求 ID'), h('code', null, requestId)),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': '复制请求 ID', title: '复制请求 ID', html: U.ic('copy', 17),
+          onclick: function () { U.copy(requestId); } })));
+      if (reason || category) body.appendChild(h('div', { class: 'usage-detail-error' },
+        h('strong', null, category ? '错误原因 · ' + String(category) : '错误原因'),
+        reason ? h('p', null, String(reason).slice(0, 2000)) : h('p', { class: 'muted' }, '站端未提供具体说明。')));
+      if (note) body.appendChild(h('p', { class: 'tiny muted', role: 'status' }, note));
+    }
+    var id = String(log.id == null ? '' : log.id), fetchable = /^[1-9]\d*$/.test(id);
+    paint(log, fetchable ? '正在补充请求详情…' : '');
+    var panel = U.sheet({ title: '调用详情', body: body, actions: [{ label: '关闭', kind: 'primary' }] });
+    if (fetchable) Api.usageDetail(id, errorLog).then(function (detail) {
+      if (!panel.box.isConnected || !current()) return;
+      if (!detail || String(detail.id) !== id) throw new Error('详情不可用');
+      paint(Object.assign({}, log, detail));
+    }).catch(function () {
+      if (panel.box.isConnected && current()) paint(log, '详细数据暂不可用，已保留列表记录。');
+    });
+  }
+
   function renderUsage() {
     if (!Api.AUTH.isLogged()) return needLogin();
     var page = h('div', { class: 'page' });
     var range = global.S.usageRange || 'today';
+    var analysis = global.UsageAnalysis, account = Api.AUTH.context(), disposed = false;
     var statusFilter = 'all';
     var searchFilter = '';
     var statsHost = h('div', { class: 'section' });
@@ -650,7 +719,9 @@
     var endInput = U.dateTimeField({ kind: 'date', compact: true, value: U.ymd(end), label: '结束日期' });
     var startTime = U.dateTimeField({ kind: 'time', compact: true, value: '00:00', label: '开始时间' });
     var endTime = U.dateTimeField({ kind: 'time', compact: true, value: '23:59', label: '结束时间' });
-    var requestVersion = 0;
+    var requestVersion = 0, logVersion = 0, appliedRange = null, preciseRows = null;
+    var logPage = 1, logCount = null, logSize = 20, filteredRows = null, logBusy = false;
+    function current() { return !disposed && Api.AUTH.matches(account); }
     var seg = h('div', { class: 'seg usage-range-seg' }, [
       { k: 'today', t: '今日' }, { k: '7d', t: '近 7 天' }, { k: '30d', t: '近 30 天' }
     ].map(function (o) {
@@ -691,38 +762,173 @@
           load();
         } }, '应用时间'))));
     page.appendChild(statsHost);
-    var search = h('input', { class: 'input usage-search', type: 'search', placeholder: '搜索模型或令牌', 'aria-label': '搜索调用记录',
-      oninput: function (event) { searchFilter = event.target.value.trim().toLowerCase(); if (logsHost._logs) renderLogs(logsHost._logs); } });
+    function applySearch() {
+      searchFilter = search.value.trim().toLowerCase();
+      resetLogs();
+      loadLogs();
+    }
+    var search = h('input', { class: 'input usage-search', type: 'search', placeholder: '模型、令牌或请求 ID', 'aria-label': '搜索调用记录',
+      enterkeyhint: 'search', maxlength: '150', oninput: function () { if (!search.value && searchFilter) applySearch(); } });
     var logTools = h('div', { class: 'usage-log-tools' },
-      h('div', { class: 'usage-log-tools-head' }, h('div', null, h('strong', null, '调用记录'), h('span', null, '按请求查看 Token、耗时与费用')),
+      h('div', { class: 'usage-log-tools-head' }, h('div', null, h('strong', null, '调用记录')),
         h('div', { class: 'usage-status-seg', role: 'group', 'aria-label': '调用状态' },
           [{ k: 'all', t: '全部' }, { k: 'success', t: '成功' }, { k: 'error', t: '异常' }].map(function (item) {
-            return h('button', { class: item.k === statusFilter ? 'active' : '', onclick: function (event) {
+            return h('button', { type: 'button', class: item.k === statusFilter ? 'active' : '', 'aria-pressed': item.k === statusFilter ? 'true' : 'false', onclick: function (event) {
               statusFilter = item.k;
-              Array.prototype.forEach.call(event.currentTarget.parentNode.children, function (button) { button.className = button === event.currentTarget ? 'active' : ''; });
-              if (logsHost._logs) renderLogs(logsHost._logs);
+              Array.prototype.forEach.call(event.currentTarget.parentNode.children, function (button) {
+                button.className = button === event.currentTarget ? 'active' : '';
+                button.setAttribute('aria-pressed', button === event.currentTarget ? 'true' : 'false');
+              });
+              applySearch();
             } }, item.t);
           }))),
-      search);
+      h('form', { class: 'usage-log-search-form', onsubmit: function (event) { event.preventDefault(); applySearch(); } }, search,
+        h('button', { type: 'submit', class: 'btn btn-sm', 'aria-label': '搜索', title: '搜索', html: U.ic('search', 17) })));
+    var logNote = h('div', { class: 'usage-log-note', role: 'status' });
+    var pager = h('nav', { class: 'usage-log-pager', 'aria-label': '调用记录分页' });
     page.appendChild(trendHost);
     page.appendChild(modelHost);
-    page.appendChild(section(null, null, null, logTools));
-    page.appendChild(logsHost);
+    page.appendChild(logTools);
+    page.append(logNote, logsHost, pager);
+
+    function resetLogs() {
+      logPage = 1; logCount = null; filteredRows = null;
+      logsHost.replaceChildren();
+    }
+    function paintPager() {
+      pager.replaceChildren();
+      if (!logCount) return;
+      var pages = Math.ceil(logCount / logSize);
+      function step(delta, label, icon) {
+        return h('button', { type: 'button', class: 'btn btn-sm', title: label, 'aria-label': label, html: U.ic(icon, 17),
+          disabled: logBusy || logPage + delta < 1 || logPage + delta > pages, onclick: function () {
+            var before = logPage;
+            logPage += delta;
+            loadLogs(false, before);
+          } });
+      }
+      pager.append(step(-1, '上一页', 'back'), h('span', null, '第 ' + logPage + ' / ' + pages + ' 页 · 共 ' + U.num(logCount) + ' 条'), step(1, '下一页', 'chevron'));
+    }
+    function renderLogs(rows, errorLog) {
+      if (!rows.length) {
+        logsHost.replaceChildren(emptyState('没有符合条件的记录', statusFilter === 'success' ? '所选时段没有明确标记为成功的记录' : null, 'chart'));
+        return;
+      }
+      logsHost.replaceChildren(h('div', { class: 'usage-log-list' }, rows.map(function (row) {
+        var status = errorLog ? 'error' : analysis.recordStatus(row);
+        var model = pick(row, 'model', 'model_name') || '请求';
+        var tok = analysis.tokenBreakdown(row), lat = analysis.latency(row), levels = analysis.latencyLevels(lat);
+        function n(field) { return analysis.metricNumber(row, [field]); }
+        function token(value) { return value == null ? '—' : U.tokens(value); }
+        var input = n('input_tokens'), output = n('output_tokens'), total = n('total_tokens');
+        var cache = n('cache_read_tokens') == null && n('cache_creation_tokens') == null ? null : tok.cache;
+        if (total == null && input != null && output != null && n('cache_read_tokens') != null && n('cache_creation_tokens') != null) total = tok.total;
+        var statusLabel = ({ success: '成功', error: '异常', unknown: '状态未提供' })[status];
+        return h('button', { class: 'usage-log-item', type: 'button', 'aria-label': '查看 ' + model + ' 调用详情',
+          onclick: function () { showUsageDetail(row, errorLog, current); } },
+          h('span', { class: 'usage-log-top' },
+            h('span', { class: 'usage-log-state ' + (status === 'success' ? 'ok' : status), title: statusLabel, 'aria-label': statusLabel }),
+            h('span', { class: 'usage-log-main' },
+              h('span', { class: 'usage-log-title' }, h('strong', null, model),
+                h('b', null, usageAmount(n('actual_cost'))), h('i', { class: 'usage-log-chevron', html: U.ic('chevron', 15), 'aria-hidden': 'true' })),
+              h('span', { class: 'usage-log-sub' }, [U.datetime(pick(row, 'created_at', 'timestamp', 'time')),
+                pick(row.group, 'name') || pick(row, 'group_name', 'group.name'), usageKeyName(row)].filter(Boolean).join(' · ')))),
+          h('span', { class: 'usage-token-strip' },
+            h('span', null, '输入 ', h('b', null, token(input))), h('span', null, '输出 ', h('b', null, token(output))),
+            h('span', null, '缓存 ', h('b', null, token(cache))), h('span', { class: 'usage-token-total' }, '总计 ', h('b', null, token(total)))),
+          lat ? h('span', { class: 'usage-latency-strip' },
+            h('span', { class: 'latency-' + (levels.first || 'unknown') }, '首字 ', h('b', null, analysis.ms(lat.first))),
+            h('span', { class: 'latency-' + (levels.total || 'unknown') }, '总耗时 ', h('b', null, analysis.ms(lat.total))),
+            lat.tps ? h('span', { class: 'usage-tps' }, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null);
+      })));
+    }
+    function loadLogs(silent, previousPage) {
+      if (!appliedRange || !current()) return Promise.resolve();
+      var version = ++logVersion, selected = appliedRange, pn = logPage;
+      var status = statusFilter, keyword = searchFilter;
+      var errorEnabled = global.S.settings && global.S.settings.allow_user_view_error_requests === true;
+      var errorLog = status === 'error' && errorEnabled;
+      if (status === 'error' && !errorEnabled) {
+        logBusy = false; logCount = 0; logPage = 1;
+        logNote.textContent = '';
+        logsHost.replaceChildren(emptyState('站端未开放异常请求记录', '当前账号的异常记录权限未开放，应用无法查询这类请求。', 'shield'));
+        paintPager();
+        return Promise.resolve();
+      }
+      var list = errorLog ? Api.usageErrors : Api.usageLogs;
+      var scan = !selected.wholeDays || !!keyword || (!errorLog && status !== 'all');
+      function valid() { return current() && version === logVersion; }
+      function matches(row) {
+        if (!errorLog && status !== 'all' && analysis.recordStatus(row) !== status) return false;
+        return !keyword || [pick(row, 'model', 'model_name'), usageKeyName(row), pick(row, 'request_id', 'requestId')].some(function (value) {
+          return String(value || '').toLowerCase().indexOf(keyword) >= 0;
+        });
+      }
+      if (!silent) {
+        logBusy = true; paintPager();
+        logNote.textContent = scan && !filteredRows ? '正在检索所选时段…' : '正在加载记录…';
+      }
+      var query;
+      if (scan) {
+        function scanPages() {
+          return analysis.fetchRecords(selected, { list: list, current: valid, match: matches, progress: function (done, total) {
+            if (!silent && valid()) logNote.textContent = '已检索 ' + U.num(done) + ' / ' + U.num(total) + ' 条';
+          } });
+        }
+        var rows = filteredRows ? Promise.resolve(filteredRows) : !errorLog && preciseRows ? preciseRows.then(function (data) {
+          return data.filter(matches);
+        }, function (error) { if (error.recordLimit) return scanPages(); throw error; }) : scanPages();
+        query = rows.then(function (data) {
+          if (valid()) filteredRows = data;
+          return { items: data.slice((pn - 1) * 20, pn * 20), total: data.length, page_size: 20 };
+        });
+      } else {
+        query = list({ start_date: selected.startDate, end_date: selected.endDate, page: pn, page_size: 20 });
+      }
+      return query.then(function (data) {
+        if (!valid()) return;
+        var rows = arrOf(data), count = pick(data, 'total', 'total_count'), size = Number(pick(data, 'page_size', 'pageSize')) || 20;
+        if (!data || (!Array.isArray(data) && !Array.isArray(data.items) && !Array.isArray(data.records) && !Array.isArray(data.list)) ||
+            (count === undefined && (pn > 1 || rows.length >= size)) || (data.page != null && Number(data.page) !== pn) ||
+            !Number.isSafeInteger(size) || size < 1 || rows.length > size ||
+            (count !== undefined && (!Number.isSafeInteger(Number(count)) || Number(count) < 0 ||
+              rows.length !== Math.max(0, Math.min(size, Number(count) - (pn - 1) * size))))) {
+          throw new Error('调用记录分页信息不完整');
+        }
+        logCount = count === undefined ? rows.length : Number(count);
+        logSize = size;
+        if (pn > 1 && (pn - 1) * size >= logCount) { logPage = 1; return loadLogs(false); }
+        renderLogs(rows, errorLog);
+        logNote.textContent = '';
+        if (previousPage && !silent) logTools.scrollIntoView({ block: 'start' });
+      }).catch(function (error) {
+        if (!valid()) return;
+        if (previousPage) logPage = previousPage;
+        logNote.replaceChildren(h('span', null, error.message || '调用记录加载失败'),
+          h('button', { class: 'btn btn-sm', type: 'button', onclick: function () {
+            if (previousPage) { logPage = pn; loadLogs(false, previousPage); }
+            else if (!selected.wholeDays && !errorLog) load(false, true);
+            else loadLogs();
+          } }, '重试'));
+      }).finally(function () { if (valid()) { logBusy = false; paintPager(); } });
+    }
 
     var refreshTimer = null, refreshPending = false, refreshReady = false;
-    function load(silent) {
+    function load(silent, keepRange) {
       silent = silent === true && refreshReady && !!statsHost.firstElementChild;
-      var version = ++requestVersion, selected;
-      try { selected = global.UsageAnalysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
+      var selected = appliedRange;
+      try { if (!silent && !keepRange) selected = analysis.parseRange(startInput.value, startTime.value, endInput.value, endTime.value); }
       catch (error) { U.toast(error.message, 'err'); return Promise.resolve(false); }
+      var version = ++requestVersion;
+      function valid() { return current() && version === requestVersion; }
+      if (!silent) { appliedRange = selected; resetLogs(); }
       var q = { start_date: selected.startDate, end_date: selected.endDate };
       var tasks = [];
-      var precise = selected.wholeDays ? null : global.UsageAnalysis.fetchRecords(selected).then(function (records) {
-        return global.UsageAnalysis.aggregate(records, 'day');
-      });
+      if (!silent) preciseRows = selected.wholeDays ? null : analysis.fetchRecords(selected, { current: valid });
+      var precise = preciseRows ? preciseRows.then(function (records) { return analysis.aggregate(records.slice(), 'day'); }) : null;
       if (!silent) {
         statsHost.innerHTML = '';
-        trendHost.innerHTML = ''; modelHost.innerHTML = ''; logsHost.innerHTML = '';
+        trendHost.innerHTML = ''; modelHost.innerHTML = '';
         statsHost.appendChild(h('div', { class: 'grid-2' },
           h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '花费')),
           h('div', { class: 'card stat' }, h('b', { class: 'skeleton', style: { height: '22px', width: '50px', display: 'block' } }), h('span', null, '请求'))
@@ -730,7 +936,7 @@
       }
 
       tasks.push((precise ? precise.then(function (data) { return data.stats; }) : Api.usageStats(q)).then(function (d) {
-        if (version !== requestVersion) return;
+        if (!valid()) return;
         var st = d || {};
         if (st.data && typeof st.data === 'object') st = st.data;
         if (st.stats && typeof st.stats === 'object') st = st.stats;
@@ -739,11 +945,7 @@
         var inTok = Number(pick(st, 'total_input_tokens', 'input_tokens', 'prompt_tokens') || 0);
         var outTok = Number(pick(st, 'total_output_tokens', 'output_tokens', 'completion_tokens') || 0);
         var quality = global.UsageAnalysis.values(st);
-        var requests = Number(pick(st, 'total_requests', 'requests', 'request_count') || 0);
-        var errors = pick(st, 'total_errors', 'error_count', 'failed_requests');
-        var errorCount = errors === undefined || errors === null || errors === '' ? quality.errors : Number(errors);
-        var successRate = pick(st, 'success_rate', 'request_success_rate');
-        if (successRate !== undefined && successRate !== null && Number(successRate) <= 1) successRate = Number(successRate) * 100;
+        var errorCount = quality.errors, successRate = quality.successRate;
         var cacheRead = Number(pick(st, 'total_cache_read_tokens', 'cache_read_tokens') || 0);
         var cacheWrite = Number(pick(st, 'total_cache_creation_tokens', 'cache_creation_tokens') || 0);
         var cacheRate = pick(st, 'cache_hit_rate', 'cache_rate');
@@ -751,9 +953,6 @@
         if (cacheRate === undefined || cacheRate === null || !isFinite(Number(cacheRate))) {
           var cacheBase = inTok + cacheWrite + cacheRead;
           cacheRate = cacheBase > 0 ? cacheRead / cacheBase * 100 : null;
-        }
-        if (successRate === undefined || successRate === null || !isFinite(Number(successRate))) {
-          successRate = errorCount !== null && errorCount !== undefined && requests > 0 ? Math.max(0, (requests - Number(errorCount)) / requests * 100) : null;
         }
         statsHost.innerHTML = '';
         statsHost.appendChild(h('div', { class: 'usage-summary card' },
@@ -766,10 +965,11 @@
           h('div', { class: 'usage-metric-grid' },
             usageMetric('输入 tokens', U.tokens(inTok), '请求输入'),
             usageMetric('输出 tokens', U.tokens(outTok), '模型输出'),
-            usageMetric('成功率', successRate === null || successRate === undefined ? '未知' : Number(successRate).toFixed(1) + '%', errorCount == null ? '状态统计中' : U.num(Number(errorCount)) + ' 个异常', 'success'),
+            successRate != null ? usageMetric('成功率', Number(successRate).toFixed(1) + '%', errorCount == null ? null : U.num(errorCount) + ' 个异常', 'success') :
+              errorCount != null ? usageMetric('异常数', U.num(errorCount), null) : null,
             usageMetric('缓存命中率', cacheRate === null || cacheRate === undefined ? '未知' : Number(cacheRate).toFixed(1) + '%', '缓存读取占比'))));
       }).catch(function (error) {
-        if (version !== requestVersion) return;
+        if (!valid()) return;
         if (silent) return;
         statsHost.innerHTML = '';
         statsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '用量统计暂不可用'));
@@ -778,7 +978,7 @@
       var tq = Object.assign({}, q);
       tq.granularity = 'day';
       tasks.push((precise ? precise.then(function (data) { return { trend: data.trend }; }) : Api.usageTrend(tq)).then(function (d) {
-        if (version !== requestVersion) return;
+        if (!valid()) return;
         var list = arrOf(d);
         if (!list.length && d && Array.isArray(d.series)) list = d.series;
         if (!list.length && d && Array.isArray(d.dates)) {
@@ -811,11 +1011,11 @@
             h('span', null, '峰值 ' + U.tokens(tokenMax))),
           usageTokenAreaChart(list))));
       }).catch(function (error) {
-        if (version === requestVersion && !precise && !silent) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败'));
+        if (valid() && !precise && !silent) trendHost.appendChild(h('div', { class: 'notice warn' }, error.message || '趋势加载失败'));
       }));
 
       tasks.push((precise ? precise.then(function (data) { return { models: data.models }; }) : Api.usageModels(q)).then(function (d) {
-        if (version !== requestVersion) return;
+        if (!valid()) return;
         var list = d && Array.isArray(d.models) ? d.models : arrOf(d);
         if (!list.length) { modelHost.innerHTML = ''; return; }
         list.sort(function (a, b) { return Number(pick(b, 'actual_cost', 'total_cost', 'cost') || 0) - Number(pick(a, 'actual_cost', 'total_cost', 'cost') || 0); });
@@ -839,63 +1039,17 @@
           })
         )));
       }).catch(function (error) {
-        if (version === requestVersion && !precise && !silent) modelHost.appendChild(h('div', { class: 'notice warn' }, error.message || '模型统计加载失败'));
+        if (valid() && !precise && !silent) modelHost.appendChild(h('div', { class: 'notice warn' }, error.message || '模型统计加载失败'));
       }));
 
-      function renderLogs(list) {
-        logsHost._logs = list;
-        var visible = list.filter(function (log) {
-          var bad = global.UsageAnalysis.isErrorRecord(log);
-          if (statusFilter === 'success' && bad || statusFilter === 'error' && !bad) return false;
-          if (!searchFilter) return true;
-          var model = String(pick(log, 'model', 'model_name') || '').toLowerCase();
-          var token = String(pick(log, 'api_key_name') || (log.api_key && log.api_key.name) || '').toLowerCase();
-          return (model + ' ' + token).indexOf(searchFilter) >= 0;
-        });
-        logsHost.innerHTML = '';
-        if (!visible.length) {
-          logsHost.appendChild(emptyState('没有符合条件的记录', searchFilter || statusFilter !== 'all' ? '试试切换状态或清空搜索' : '发起调用后会显示在这里', 'chart'));
-          return;
-        }
-        logsHost.appendChild(h('div', { class: 'usage-log-list card' }, visible.map(function (log) {
-          var bad = global.UsageAnalysis.isErrorRecord(log);
-          var tok = global.UsageAnalysis.tokenBreakdown(log);
-          var lat = global.UsageAnalysis.latency(log);
-          var latLevels = global.UsageAnalysis.latencyLevels(lat);
-          return h('div', { class: 'usage-log-item' },
-            h('div', { class: 'usage-log-top' },
-              h('span', { class: 'usage-log-state ' + (bad ? 'error' : 'ok') }),
-              h('div', { class: 'usage-log-main' },
-                h('div', { class: 'usage-log-title' }, h('strong', { class: 'nowrap' }, pick(log, 'model', 'model_name') || '请求'),
-                  h('b', null, '$' + U.price(Number(pick(log, 'actual_cost', 'total_cost', 'cost') || 0)))),
-                h('div', { class: 'usage-log-sub' }, U.datetime(pick(log, 'created_at', 'timestamp', 'time')) +
-                  (log.group && log.group.name ? ' · ' + log.group.name : (log['group.name'] ? ' · ' + log['group.name'] : '')) +
-                  (log.api_key && log.api_key.name ? ' · ' + log.api_key.name : '')))),
-            h('div', { class: 'usage-token-strip' },
-              h('span', null, '输入 ', h('b', null, U.tokens(tok.input))),
-              h('span', null, '输出 ', h('b', null, U.tokens(tok.output))),
-              h('span', null, '缓存 ', h('b', null, U.tokens(tok.cache))),
-              h('span', { class: 'usage-token-total' }, '总计 ', h('b', null, U.tokens(tok.total)))),
-            lat ? h('div', { class: 'usage-latency-strip' },
-              h('span', { class: 'latency-' + (latLevels.first || 'unknown') },
-                '首字 ', h('b', null, global.UsageAnalysis.ms(lat.first))),
-              h('span', { class: 'latency-' + (latLevels.total || 'unknown') },
-                '总耗时 ', h('b', null, global.UsageAnalysis.ms(lat.total))),
-              lat.tps ? h('span', { class: 'usage-tps' }, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null);
-        })));
-      }
-      tasks.push((precise ? precise.then(function (data) { return data.records.slice(0, 100); }) : Api.usageLogs(Object.assign({ page: 1, page_size: 100 }, q))).then(function (d) {
-        if (version !== requestVersion) return;
-        renderLogs(arrOf(d));
-      }).catch(function (error) {
-        if (version === requestVersion && !precise && !silent) logsHost.appendChild(h('div', { class: 'notice warn' }, error.message || '调用记录加载失败'));
-      }));
+      if (!silent || (!logBusy && logPage === 1 && !searchFilter && statusFilter === 'all' && selected.wholeDays && !U.hasOverlay())) tasks.push(loadLogs(silent));
       refreshReady = true;
       return Promise.all(tasks).then(function () { return version === requestVersion; });
     }
     function refreshVisible() {
       clearTimeout(refreshTimer);
       if (!App.isPageActive(page) || refreshPending) return;
+      if (document.hidden || !appliedRange || !appliedRange.wholeDays) { refreshTimer = setTimeout(refreshVisible, 5000); return; }
       refreshPending = true;
       load(true).finally(function () {
         refreshPending = false;
@@ -907,7 +1061,7 @@
       refreshTimer = setTimeout(refreshVisible, 5000);
     });
     page.addEventListener('pp:page-deactivate', function () { clearTimeout(refreshTimer); });
-    page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); requestVersion++; });
+    page.addEventListener('pp:page-dispose', function () { clearTimeout(refreshTimer); disposed = true; });
     page.addEventListener('pp:page-refresh', function () { load(); });
     load();
     return page;

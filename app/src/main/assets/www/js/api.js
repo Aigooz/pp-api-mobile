@@ -383,10 +383,13 @@
     }
     var email = item.email;
     var password = item.savedPassword;
-    passwordRelogins[key] = request('POST', API + '/auth/login', {
-      'Content-Type': 'application/json', 'Accept': 'application/json',
-      'Accept-Language': 'zh', 'X-User-UI-Request': '1'
-    }, JSON.stringify({ email: email, password: password })).then(function (res) {
+    passwordRelogins[key] = Api.requireLoginAgreement().then(function () {
+      if (!contextMatches(context)) throw switchedError();
+      return request('POST', API + '/auth/login', {
+        'Content-Type': 'application/json', 'Accept': 'application/json',
+        'Accept-Language': 'zh', 'X-User-UI-Request': '1'
+      }, JSON.stringify({ email: email, password: password }));
+    }).then(function (res) {
       if (!contextMatches(context)) throw switchedError();
       if (res.status === 0) throw mkErr(0, 'NETWORK', '网络连接失败');
       if (res.status === 429 || res.status >= 500) throw mkErr(res.status, 'SERVER', '服务暂不可用，请稍后再试');
@@ -406,6 +409,9 @@
       return result;
     }, function (error) {
       delete passwordRelogins[key];
+      if (contextMatches(context) && error.code === 'LOGIN_AGREEMENT_REQUIRED') {
+        return AUTH.expire(context.id, 'agreement').then(function () { throw error; });
+      }
       if (contextMatches(context) && (error.status === 400 || error.status === 401 || error.status === 403)) {
         var badPassword = /invalid (email or password|credentials)|邮箱或密码错误/i.test(error.message || '');
         return AUTH.expire(context.id, 'expired', badPassword).then(function () { throw expiredError(); });
@@ -568,9 +574,43 @@
   }
   function clearCache() { cache = {}; cacheGeneration++; }
 
+  var agreementRequest = null, agreementConsent = U.store.get('pp_login_agreement_consent', '');
+  function loginAgreement() {
+    if (agreementRequest) return agreementRequest;
+    agreementRequest = api('/settings/public', { auth: false }).then(function (settings) {
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('条款配置不可用');
+      if (settings.login_agreement_enabled !== true) return null;
+      var documents = (Array.isArray(settings.login_agreement_documents) ? settings.login_agreement_documents : []).filter(function (doc) {
+        return doc && typeof doc.title === 'string' && doc.title.trim() && /^[a-z0-9-]+$/.test(doc.id || '');
+      });
+      var updated = String(settings.login_agreement_updated_at || '');
+      var revision = String(settings.login_agreement_revision || (updated + ':' + documents.map(function (doc) { return doc.id + ':' + doc.title; }).join('|')));
+      if (!documents.length) throw new Error('站端条款未完整返回');
+      return { revision: revision, updated: updated, mode: settings.login_agreement_mode, documents: documents };
+    }).finally(function () { agreementRequest = null; });
+    return agreementRequest;
+  }
+
   var Api = {
     ORIGIN: ORIGIN, API: API, V1: V1, AUTH: AUTH, base: api, clearCache: clearCache,
     settings: function () { return cached('settings', 5 * 60e3, function () { return api('/settings/public', { auth: false }); }); },
+    loginAgreement: loginAgreement,
+    hasLoginAgreement: function (agreement) { return !agreement || agreementConsent === agreement.revision; },
+    acceptLoginAgreement: function (agreement) {
+      if (!agreement || !agreement.revision) return;
+      agreementConsent = agreement.revision;
+      U.store.set('pp_login_agreement_consent', agreementConsent);
+    },
+    requireLoginAgreement: function () {
+      return loginAgreement().then(function (agreement) {
+        if (!Api.hasLoginAgreement(agreement)) {
+          var error = mkErr(0, 'LOGIN_AGREEMENT_REQUIRED', '请先确认最新版服务条款');
+          error.agreement = agreement;
+          throw error;
+        }
+        return agreement;
+      });
+    },
     plaza: function (force) {
       if (force) {
         delete cache.plaza;
@@ -608,7 +648,10 @@
     login: function (email, password, extra, rememberPassword) {
       var body = Object.assign({ email: email, password: password }, extra || {});
       var context = authContext();
-      return api('/auth/login', { method: 'POST', body: body, auth: false, trackAuth: false }).then(function (d) {
+      return Api.requireLoginAgreement().then(function () {
+        if (!contextMatches(context)) throw switchedError();
+        return api('/auth/login', { method: 'POST', body: body, auth: false, trackAuth: false });
+      }).then(function (d) {
         if (!contextMatches(context)) throw switchedError();
         return AUTH.commit(d, email, { rememberPassword: !!rememberPassword, password: password }).then(function (saved) { return { data: d, saved: saved }; });
       }).then(function (result) {
@@ -618,7 +661,10 @@
     },
     login2fa: function (payload, rememberPassword) {
       var context = authContext();
-      return api('/auth/login/2fa', { method: 'POST', body: payload, auth: false, trackAuth: false }).then(function (d) {
+      return Api.requireLoginAgreement().then(function () {
+        if (!contextMatches(context)) throw switchedError();
+        return api('/auth/login/2fa', { method: 'POST', body: payload, auth: false, trackAuth: false });
+      }).then(function (d) {
         if (!contextMatches(context)) throw switchedError();
         return AUTH.commit(d, payload.email, { rememberPassword: !!rememberPassword, password: payload.password })
           .then(function (saved) { clearCache(); return { data: d, saved: saved }; });
@@ -673,6 +719,7 @@
     platformQuotas: function () { return api('/user/platform-quotas'); },
     usageLogs: function (query) { return api('/usage', { query: query }); },
     usageErrors: function (query) { return api('/usage/errors', { query: query }); },
+    usageDetail: function (id, error) { return api('/usage/' + (error ? 'errors/' : '') + encodeURIComponent(id)); },
 
     profileUpdate: function (payload) { return api('/user', { method: 'PUT', body: payload }); },
     changePassword: function (oldP, newP) {

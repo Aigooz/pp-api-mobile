@@ -287,6 +287,7 @@
     more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
     play: '<path d="m8 5 11 7-11 7V5Z"/>',
+    activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
     branch: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 7h5a5 5 0 0 1 5 5v-4"/>',
     pin: '<path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6Z"/><path d="M12 15v5"/>',
     users: '<circle cx="9" cy="8" r="3.4"/><path d="M2.8 20c.7-3.4 3.1-5 6.2-5s5.5 1.6 6.2 5"/><path d="M16 5.2a3.2 3.2 0 0 1 0 6.1M18 15.2c2 .6 3.2 2.1 3.7 4.8"/>'
@@ -465,6 +466,7 @@
       if (scrim && scrim.parentNode) scrim.remove();
       if (box && box.parentNode) box.remove();
       removeOverlay(close);
+      if (opts.onClose) opts.onClose();
       if (previous && previous.isConnected && typeof previous.focus === 'function') {
         try { previous.focus({ preventScroll: true }); } catch (e) { try { previous.focus(); } catch (e2) {} }
       }
@@ -482,6 +484,7 @@
           class: 'btn ' + (a.kind === 'primary' ? 'btn-primary' : a.kind === 'danger' ? 'btn-danger' : ''),
           text: a.label,
           onclick: function () {
+            if (closed) return;
             if (a.onClick) {
               var r = a.onClick();
               if (r === false) return;
@@ -501,7 +504,8 @@
     return new Promise(function (resolve) {
       sheet({
         title: title,
-        body: el('p', { class: 'small muted', text: message || '', style: { whiteSpace: 'pre-line' } }),
+        body: message && message.nodeType === 1 ? message : el('p', { class: 'small muted', text: message || '', style: { whiteSpace: 'pre-line' } }),
+        onClose: function () { resolve(false); },
         actions: [
           { label: '取消', onClick: function () { resolve(false); } },
           { label: okLabel || '确定', kind: danger ? 'danger' : 'primary', onClick: function () { resolve(true); } }

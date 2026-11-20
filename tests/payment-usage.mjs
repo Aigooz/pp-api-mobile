@@ -13,7 +13,7 @@ page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 const raw = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
 const fail = message => ({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 500, message }) });
-const makeRecord = (id, time, model, tokens, cost, first, total) => ({ id, created_at: time, model, input_tokens: tokens, output_tokens: 1,
+const makeRecord = (id, time, model, tokens, cost, first, total) => ({ id, created_at: time, model, request_id: `req-${id}`, input_tokens: tokens, output_tokens: 1,
   first_token_ms: first, duration_ms: total,
   cache_creation_tokens: 2, cache_read_tokens: 3, actual_cost: cost, total_cost: cost * 2 });
 const records = [
@@ -49,6 +49,7 @@ await page.route('**/__proxy/**', async route => {
     if (usageMode === 'duplicate') return route.fulfill(ok({ items: pn === 1 ? records.slice(0, 2) : [records[1], records[3]], page: pn, page_size: 2, total: 4 }));
     return route.fulfill(ok({ items: records.slice((pn - 1) * 2, pn * 2), page: pn, page_size: 2, total: records.length }));
   }
+  if (path === '/api/v1/usage/2') return route.fulfill(ok({ ...records[2], status_code: 200, cache_write_tokens: 2, output_tps: 0.1 }));
   if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, min_amount: 1, max_amount: 500, daily_limit: 2000, enabled_payment_types: ['alipay', 'wxpay'], recharge_fee_rate: 1 }));
   if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true }, wxpay: { available: true } }, recharge_fee_rate: 1,
     plans: [{ id: 8, name: '测试日卡', price: 3.66, validity_days: 1, description: '套餐说明', features: ['测试额度'], group_id: 13 }], help_text: '支付说明' }));
@@ -124,7 +125,9 @@ try {
   await page.getByLabel('结束时间', { exact: true }).fill('10:15');
   usageMode = 'normal';
   await page.getByRole('button', { name: '应用时间' }).click();
-  await page.getByText('inside-a', { exact: true }).first().waitFor();
+  await page.locator('.usage-log-item').getByText('inside-a', { exact: true }).waitFor().catch(async error => {
+    throw new Error(`Usage did not render: ${await page.locator('#view').innerText()}\n${errors.join('\n')}`, { cause: error });
+  });
   const usageLatencyClasses = await page.locator('.usage-log-item').evaluateAll(rows => rows.map(row => ({
     model: row.querySelector('.usage-log-title strong')?.textContent,
     spans: Array.from(row.querySelectorAll('.usage-latency-strip > span')).map(span => span.className)
@@ -133,6 +136,14 @@ try {
     { model: 'inside-b', spans: ['latency-orange', 'latency-good'] },
     { model: 'inside-a', spans: ['latency-good', 'latency-warn', 'usage-tps'] }
   ]);
+  await page.getByRole('button', { name: '查看 inside-a 调用详情' }).click();
+  await page.getByRole('heading', { name: '调用详情' }).waitFor();
+  const detailText = await page.locator('.usage-detail').innerText();
+  assert.match(detailText, /请求 ID\s*req-2/);
+  assert.match(detailText, /输入\s*20/);
+  assert.match(detailText, /缓存写入\s*2/);
+  assert.match(detailText, /首字\s*10\.0s/);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
   const yAxisLabels = await page.locator('.usage-trend-y-label').evaluateAll(nodes => nodes.map(node => node.textContent));
@@ -174,9 +185,8 @@ try {
   assert.ok(Math.abs(sectionLayout.leadRight - sectionLayout.gridRight) < .5);
   assert.equal(sectionLayout.border, 1);
   const usageView = await page.locator('#view').innerText();
-  assert.match(usageView, /成功率\s*100\.0%/);
+  assert.doesNotMatch(usageView, /成功率|异常数|个异常/);
   assert.match(usageView, /缓存命中率\s*10\.0%/);
-  assert.match(usageView, /0 个异常/);
   const metrics = await page.evaluate(() => ({
     backend: UsageAnalysis.values({ total_requests: 10, total_errors: 2, status_known: 10,
       total_input_tokens: 80, total_cache_creation_tokens: 20, total_cache_read_tokens: 20 }),

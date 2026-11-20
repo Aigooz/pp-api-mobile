@@ -10,7 +10,7 @@ const upstreams = { site: 'https://ipkey.vip', model: 'https://api.ipkey.vip' };
 const forwardHeaders = ['accept', 'accept-language', 'authorization', 'content-type', 'x-user-ui-request'];
 // Ports 6665-6669 are browser-blocked (ERR_UNSAFE_PORT). Tests previously requested
 // port 0, so CI could intermittently receive one of them and fail before the app loaded.
-export const UNSAFE_PREVIEW_PORTS = new Set([6665, 6666, 6667, 6668, 6669]);
+export const UNSAFE_PREVIEW_PORTS = new Set([1723, 6665, 6666, 6667, 6668, 6669]);
 
 export function listenPreview(server, preferredPort = 0, host = '127.0.0.1') {
   return new Promise((resolve, reject) => {

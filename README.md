@@ -1,6 +1,6 @@
 # Pp API Mobile
 
-Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前正式版为 `1.34.3`。
+Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前正式版为 `1.35.0`。
 
 ## 功能
 
@@ -8,6 +8,7 @@ Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共�
 - 模型广场与渠道状态，包含模型概览、名称/价格/上下文排序、双段价格、缓存价格、收藏和紧凑复制按钮；模型广场不显示厂商信息、最近使用和多余的详情占位，点击模型名称即可查看完整信息。
 - 模型状态使用红、黄、绿三种标记，每个模型均可直接复制名称；站内新增分组或渠道会自动发现并同步。
 - 登录页可选择记住密码，按账号保存到 Android Keystore 加密存储或 iOS 钥匙串；会话失效时先刷新会话，必要时自动恢复登录。网络临时故障不会直接清除账号，两步验证仍需本人确认；主动退出或移除账号会清除该账号保存的密码。
+- 对话支持多模型逐项测试或单个模型测试，调用前明确说明费用并要求二次确认；结果逐条显示输入/输出/缓存 Token、Token 合计、首次输出和总耗时，并可中途停止后续调用。
 - “我的”集中展示资料、余额、充值、兑换、订阅、订单与账号管理；订单和订阅可直达对应视图，登录、资料与账号页使用同一套原生风格组件。
 - 对话工作台支持多回答版本切换、编辑保留旧分支、任意消息重试/收藏/删除、持久草稿、流式空闲超时恢复、思考过程折叠、精确 usage 展示，以及 Markdown/JSON 导入导出；Markdown、KaTeX、代码块和生图结果均可安全渲染，输入区在单行与多行状态下保持稳定对齐。令牌与模型选择列表适配长名称，图标和状态标签保持对齐，令牌和模型选择、历史对话及输入区图标在双端保持居中。
 - 调用记录的延迟按 Sub2API 标准分档：首字 0–10 秒为绿色、10–30 秒为黄色、30–60 秒为橙色、超过 60 秒为红色；总耗时 0–60 秒为绿色、60–180 秒为黄色、180–300 秒为橙色、超过 300 秒为红色。首字与总耗时独立标色，输出 TPS 不参与标色。
@@ -56,7 +57,7 @@ Android 需要 JDK 17 或 21、Android SDK 35 和 Gradle 8.9。在配置 SDK 后
 
 iOS 需要 macOS、Xcode 16 或更新版本；打开 `ios/PpApiMobile.xcodeproj`，或手动运行 `Build iOS package` 工作流。工作流生成未签名 IPA，并构建和启动模拟器。签名分发需要相应 Apple 开发者配置。
 
-发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.34.3` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.34.3 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
+发布时递增 Android `versionCode`、`versionName` 与 iOS `CURRENT_PROJECT_VERSION`、`MARKETING_VERSION`，运行测试并检查签名。以 `v1.35.0` 等标签在本仓库创建正式 Release，上传 `Pp-API-android.apk` 和 `Pp-API-iOS-unsigned.ipa`；等待 GitHub 生成资产 SHA-256 后运行 `node tests/verify-release.mjs v1.35.0 <APK路径>`。迁移版本还须以相同文件名和内容发布到旧更新仓库，供旧版客户端升级。
 
 ## 数据与第三方组件
 
