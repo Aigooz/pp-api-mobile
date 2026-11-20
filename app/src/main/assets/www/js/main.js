@@ -610,6 +610,7 @@
         S.plaza = p;
         S.plazaLoading = false;
         if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
+        global.dispatchEvent(new CustomEvent('pp:plaza-updated', { detail: { plaza: p } }));
         if (currentPath === '/home' && !S.user) renderRoute(true);
       }).catch(function () {
         if (generation !== publicGeneration) return;
@@ -633,6 +634,7 @@
         S.plaza = p;
         S.plazaLoading = false;
         if (pageCache['/plaza']) pageEvent(pageCache['/plaza'], 'plaza-updated');
+        global.dispatchEvent(new CustomEvent('pp:plaza-updated', { detail: { plaza: p } }));
         return { kind: 'plaza', value: p };
       }).catch(function (error) {
         S.plazaLoading = false;

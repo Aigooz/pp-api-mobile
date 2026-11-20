@@ -13,13 +13,14 @@ page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 const raw = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
 const fail = message => ({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 500, message }) });
-const makeRecord = (id, time, model, tokens, cost) => ({ id, created_at: time, model, input_tokens: tokens, output_tokens: 1,
+const makeRecord = (id, time, model, tokens, cost, first, total) => ({ id, created_at: time, model, input_tokens: tokens, output_tokens: 1,
+  first_token_ms: first, duration_ms: total,
   cache_creation_tokens: 2, cache_read_tokens: 3, actual_cost: cost, total_cost: cost * 2 });
 const records = [
-  makeRecord(4, '2026-01-01T11:00:00+08:00', 'outside', 40, 4),
-  makeRecord(3, '2026-01-01T10:15:59+08:00', 'inside-b', 30, 3),
-  makeRecord(2, '2026-01-01T10:15:00+08:00', 'inside-a', 20, 2),
-  makeRecord(1, '2026-01-01T10:14:59+08:00', 'outside', 10, 1)
+  makeRecord(4, '2026-01-01T11:00:00+08:00', 'outside', 40, 4, 65000, 301000),
+  makeRecord(3, '2026-01-01T10:15:59+08:00', 'inside-b', 30, 3, 45000, 5000),
+  makeRecord(2, '2026-01-01T10:15:00+08:00', 'inside-a', 20, 2, 10000, 70000),
+  makeRecord(1, '2026-01-01T10:14:59+08:00', 'outside', 10, 1, 5000, 5000)
 ];
 let usageMode = 'normal', ordersFail = false, createMode = 'success', orderStatus = 'PENDING', order = null;
 let createCalls = [], usageQueries = [], lastTrend = null;
@@ -89,6 +90,14 @@ try {
   assert.match(await page.locator('.dashboard-model-table').innerText(), /inside-b/);
   assert.doesNotMatch(await page.locator('.dashboard-model-table').innerText(), /outside/);
   assert.equal(await page.locator('.dashboard-recent-row').count(), 2);
+  const recentLatencyClasses = await page.locator('.dashboard-recent-row').evaluateAll(rows => rows.map(row => ({
+    model: row.querySelector('strong')?.textContent,
+    spans: Array.from(row.querySelectorAll('.recent-latency > span')).map(span => span.className)
+  })));
+  assert.deepEqual(recentLatencyClasses, [
+    { model: 'inside-b', spans: ['latency-orange', 'latency-good'] },
+    { model: 'inside-a', spans: ['latency-good', 'latency-warn', 'usage-tps'] }
+  ]);
   assert.equal(usageQueries.filter(q => q.get('page_size') === '500').length, 2);
   assert.equal(usageQueries.at(-1).get('page'), '2');
   usageMode = 'too-many';
@@ -116,6 +125,14 @@ try {
   usageMode = 'normal';
   await page.getByRole('button', { name: '应用时间' }).click();
   await page.getByText('inside-a', { exact: true }).first().waitFor();
+  const usageLatencyClasses = await page.locator('.usage-log-item').evaluateAll(rows => rows.map(row => ({
+    model: row.querySelector('.usage-log-title strong')?.textContent,
+    spans: Array.from(row.querySelectorAll('.usage-latency-strip > span')).map(span => span.className)
+  })));
+  assert.deepEqual(usageLatencyClasses, [
+    { model: 'inside-b', spans: ['latency-orange', 'latency-good'] },
+    { model: 'inside-a', spans: ['latency-good', 'latency-warn', 'usage-tps'] }
+  ]);
   assert.match(await page.locator('#view').innerText(), /\$5/);
   assert.doesNotMatch(await page.locator('#view').innerText(), /outside/);
   const yAxisLabels = await page.locator('.usage-trend-y-label').evaluateAll(nodes => nodes.map(node => node.textContent));
@@ -167,19 +184,34 @@ try {
     failed: UsageAnalysis.isErrorRecord({ status_code: 429 }),
     success: UsageAnalysis.isErrorRecord({ status_code: 200 }),
     failedText: UsageAnalysis.isErrorRecord({ status: 'upstream_error' }),
-    latency: {
-      fast: UsageAnalysis.latencyLevel({ first: 500, total: 2500, tps: 35 }),
-      medium: UsageAnalysis.latencyLevel({ first: 1500, total: 7000, tps: 16 }),
-      slow: UsageAnalysis.latencyLevel({ first: 3500, total: 18000, tps: 5 }),
-      unknown: UsageAnalysis.latencyLevel(null)
-    }
+    latency: [
+      { first: 0, total: 0, tps: 1 },
+      { first: 10000, total: 60000, tps: 100 },
+      { first: 10001, total: 60001, tps: 0.1 },
+      { first: 30000, total: 180000, tps: 0.1 },
+      { first: 30001, total: 180001, tps: 0.1 },
+      { first: 60000, total: 300000, tps: 0.1 },
+      { first: 60001, total: 300001, tps: 1000 }
+    ].map(UsageAnalysis.latencyLevels),
+    latencyFastTps: UsageAnalysis.latencyLevels({ first: 500, total: 2500, tps: 0.1 }).overall,
+    latencyUnknown: UsageAnalysis.latencyLevels(null)
   }));
   assert.deepEqual(metrics.backend, { successRate: 80, cacheHitRate: 16.666666666666664, errors: 2 });
   assert.deepEqual(metrics.normalized, { successRate: 75, cacheHitRate: 50, errors: null });
   assert.equal(metrics.failed, true);
   assert.equal(metrics.success, false);
   assert.equal(metrics.failedText, true);
-  assert.deepEqual(metrics.latency, { fast: 'good', medium: 'warn', slow: 'bad', unknown: '' });
+  assert.deepEqual(metrics.latency.map(value => [value.first, value.total, value.overall]), [
+    ['good', 'good', 'good'],
+    ['good', 'good', 'good'],
+    ['warn', 'warn', 'warn'],
+    ['warn', 'warn', 'warn'],
+    ['orange', 'orange', 'orange'],
+    ['orange', 'orange', 'orange'],
+    ['bad', 'bad', 'bad']
+  ]);
+  assert.equal(metrics.latencyFastTps, 'good');
+  assert.deepEqual(metrics.latencyUnknown, { first: '', total: '', overall: '' });
 
   ordersFail = true;
   await page.goto(base + '/#/orders');

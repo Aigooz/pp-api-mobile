@@ -289,6 +289,7 @@
       page.removeEventListener('pp:page-dispose', onDispose);
       global.removeEventListener('pp:keys-updated', onKeysUpdated);
       global.removeEventListener('pp:keys-changed', onKeysChanged);
+      global.removeEventListener('pp:plaza-updated', onPlazaUpdated);
       global.removeEventListener('pp:chat-storage-warning', onStorageWarning);
       disposed = true;
     };
@@ -336,15 +337,20 @@
       if (plazaLimitSource !== global.S.plaza) {
         plazaLimitSource = global.S.plaza;
         plazaLimits = {};
-        C.plazaModels(plazaLimitSource).forEach(function (model) {
-          var value = Number(model.context);
-          if (!(value > 0 && isFinite(value))) return;
-          if (!plazaLimits[model.name]) plazaLimits[model.name] = [];
-          if (plazaLimits[model.name].indexOf(value) < 0) plazaLimits[model.name].push(value);
-        });
+        paintLimitSource(plazaLimitSource);
       }
       var values = plazaLimits[session.model] || [];
       return values.length === 1 ? values[0] : 0;
+    }
+
+    function paintLimitSource(source) {
+      plazaLimits = {};
+      C.plazaModels(source).forEach(function (model) {
+        var value = Number(model.context);
+        if (!(value > 0 && isFinite(value))) return;
+        if (!plazaLimits[model.name]) plazaLimits[model.name] = [];
+        if (plazaLimits[model.name].indexOf(value) < 0) plazaLimits[model.name].push(value);
+      });
     }
 
     function estimate() {
@@ -1551,6 +1557,16 @@
       });
     }
 
+    function onPlazaUpdated(event) {
+      if (!isCurrent()) return;
+      var plaza = event && event.detail && event.detail.plaza;
+      if (plaza) {
+        plazaLimitSource = plaza;
+        paintLimitSource(plazaLimitSource);
+        paintInfo();
+      }
+    }
+
     function onKeysUpdated(event) {
       if (event.detail && event.detail.account === authContext.id && Array.isArray(event.detail.items)) {
         updateKeys(event.detail.items);
@@ -1585,6 +1601,7 @@
 
     global.addEventListener('pp:keys-updated', onKeysUpdated);
     global.addEventListener('pp:keys-changed', onKeysChanged);
+    global.addEventListener('pp:plaza-updated', onPlazaUpdated);
     global.addEventListener('pp:chat-storage-warning', onStorageWarning);
     page.addEventListener('pp:page-activate', onActivate);
     page.addEventListener('pp:page-dispose', onDispose);

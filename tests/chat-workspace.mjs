@@ -172,8 +172,35 @@ try {
     let releaseStream = null;
     const { browser, context, page, errors } = await setup(engine);
     try {
-      await page.goto(base + '/#/chat', { waitUntil: 'domcontentloaded' });
+      await page.goto(base + '/#/chat', { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.getByText('旧格式回答').waitFor();
+
+      // The gear path stays inside its 24x24 viewBox and renders with the same
+      // visible margin as the history icon on both engines.
+      const toolbarPaths = await page.evaluate(() => {
+        const svgs = Array.from(document.querySelectorAll('.chat-toolbar .tool-btn svg'));
+        return svgs.map(svg => {
+          const values = Array.from(svg.querySelectorAll('path, circle')).map(node => {
+            const box = node.getBBox();
+            return { left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height };
+          });
+          return {
+            viewBox: svg.getAttribute('viewBox'),
+            left: Math.min(...values.map(box => box.left)),
+            top: Math.min(...values.map(box => box.top)),
+            right: Math.max(...values.map(box => box.right)),
+            bottom: Math.max(...values.map(box => box.bottom))
+          };
+        });
+      });
+      assert.equal(toolbarPaths.length, 2);
+      assert.ok(toolbarPaths[1].left >= 2.5 && toolbarPaths[1].top >= 2.5, JSON.stringify(toolbarPaths));
+      assert.ok(toolbarPaths[1].right <= 21.5 && toolbarPaths[1].bottom <= 21.5, JSON.stringify(toolbarPaths));
+      toolbarPaths.forEach(path => {
+        assert.equal(path.viewBox, '0 0 24 24');
+        assert.ok(Math.abs((path.left + path.right) / 2 - 12) < .75, JSON.stringify(path));
+        assert.ok(Math.abs((path.top + path.bottom) / 2 - 12) < .75, JSON.stringify(path));
+      });
 
       // Cover long names, disabled tokens and scrolling on Android/iOS engines.
       for (const width of [320, 390, 768]) {

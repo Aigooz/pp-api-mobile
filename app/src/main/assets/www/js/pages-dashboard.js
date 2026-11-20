@@ -522,13 +522,18 @@
         ? h('div', { class: 'dashboard-recent' }, records.map(function (item) {
             var tok = global.UsageAnalysis.tokenBreakdown(item);
             var lat = global.UsageAnalysis.latency(item);
+            var latLevels = global.UsageAnalysis.latencyLevels(lat);
             return h('div', { class: 'dashboard-recent-row' },
               h('div', { class: 'dashboard-recent-info' }, h('strong', null, item.model || '请求'),
                 h('small', null, U.datetime(item.created_at)),
                 h('small', { class: 'recent-tokens' }, '↓' + token(tok.input) + ' ↑' + token(tok.output) + ' ⚙' + token(tok.cache)),
-                lat && (lat.first != null || lat.tps) ? h('small', { class: 'recent-latency latency-' + (global.UsageAnalysis.latencyLevel(lat) || 'unknown') },
-                  '首字 ' + global.UsageAnalysis.ms(lat.first) + ' · 总耗时 ' + global.UsageAnalysis.ms(lat.total) +
-                  (lat.tps ? ' · ' + lat.tps.toFixed(1) + ' tok/s' : '')) : null),
+                lat ? h('small', { class: 'recent-latency' },
+                  lat.first != null ? h('span', { class: 'latency-' + (latLevels.first || 'unknown') },
+                    '首字 ' + global.UsageAnalysis.ms(lat.first)) : h('span', { class: 'latency-unknown' }, '首字 —'),
+                  ' · ',
+                  h('span', { class: 'latency-' + (latLevels.total || 'unknown') },
+                    '总耗时 ' + global.UsageAnalysis.ms(lat.total)),
+                  lat.tps ? h('span', { class: 'usage-tps' }, ' · ' + lat.tps.toFixed(1) + ' tok/s') : null) : null),
               h('div', { class: 'dashboard-recent-price' }, h('b', null, money(item.actual_cost)), h('small', null, '标准 ' + money(item.total_cost))));
           })) : h('div', { class: 'dashboard-empty' }, '所选时段暂无调用记录')));
     }

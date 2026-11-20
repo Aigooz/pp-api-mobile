@@ -861,6 +861,7 @@
           var bad = global.UsageAnalysis.isErrorRecord(log);
           var tok = global.UsageAnalysis.tokenBreakdown(log);
           var lat = global.UsageAnalysis.latency(log);
+          var latLevels = global.UsageAnalysis.latencyLevels(lat);
           return h('div', { class: 'usage-log-item' },
             h('div', { class: 'usage-log-top' },
               h('span', { class: 'usage-log-state ' + (bad ? 'error' : 'ok') }),
@@ -875,10 +876,12 @@
               h('span', null, '输出 ', h('b', null, U.tokens(tok.output))),
               h('span', null, '缓存 ', h('b', null, U.tokens(tok.cache))),
               h('span', { class: 'usage-token-total' }, '总计 ', h('b', null, U.tokens(tok.total)))),
-            lat ? h('div', { class: 'usage-latency-strip latency-' + (global.UsageAnalysis.latencyLevel(lat) || 'unknown') },
-              h('span', null, '首字 ', h('b', null, global.UsageAnalysis.ms(lat.first))),
-              h('span', null, '总耗时 ', h('b', null, global.UsageAnalysis.ms(lat.total))),
-              lat.tps ? h('span', null, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null);
+            lat ? h('div', { class: 'usage-latency-strip' },
+              h('span', { class: 'latency-' + (latLevels.first || 'unknown') },
+                '首字 ', h('b', null, global.UsageAnalysis.ms(lat.first))),
+              h('span', { class: 'latency-' + (latLevels.total || 'unknown') },
+                '总耗时 ', h('b', null, global.UsageAnalysis.ms(lat.total))),
+              lat.tps ? h('span', { class: 'usage-tps' }, '输出 ', h('b', null, lat.tps.toFixed(1) + ' tok/s')) : null) : null);
         })));
       }
       tasks.push((precise ? precise.then(function (data) { return data.records.slice(0, 100); }) : Api.usageLogs(Object.assign({ page: 1, page_size: 100 }, q))).then(function (d) {

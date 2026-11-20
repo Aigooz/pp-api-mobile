@@ -37,7 +37,7 @@ await page.route('**/__proxy/**', async route => {
   return route.fulfill(ok([]));
 });
 try {
-  await page.goto(base + '/#/chat');
+  await page.goto(base + '/#/chat', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.getByText('demo-model').first().waitFor();
   await page.locator('.composer textarea').fill('你好');
   await page.locator('.send-btn').click();

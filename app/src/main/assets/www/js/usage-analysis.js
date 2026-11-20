@@ -137,15 +137,30 @@
     var tps = streaming ? output / ((total - first) / 1000) : null;
     return { first: first, total: total, output: output, tps: tps && isFinite(tps) && tps > 0 ? tps : null };
   }
-  // Latency bands are intentionally conservative: green means genuinely fast,
-  // amber means usable but noticeable, and red flags a request that needs attention.
-  function latencyLevel(latency) {
-    if (!latency || !isFinite(Number(latency.total)) || Number(latency.total) <= 0) return '';
-    var first = Number(latency.first);
-    var tps = Number(latency.tps);
-    if ((isFinite(first) && first >= 3000) || latency.total >= 15000 || (isFinite(tps) && tps > 0 && tps < 8)) return 'bad';
-    if ((isFinite(first) && first >= 1200) || latency.total >= 6000 || (isFinite(tps) && tps > 0 && tps < 20)) return 'warn';
+  // Sub2API-style latency bands. First-token and total-duration colors are
+  // independent because a fast stream can still finish slowly, and vice versa.
+  // TPS is informational only and does not participate in either color.
+  function latencyBand(value, warning, orange, danger) {
+    var number = Number(value);
+    if (value === null || value === undefined || !isFinite(number) || number < 0) return '';
+    if (number > danger) return 'bad';
+    if (number > orange) return 'orange';
+    if (number > warning) return 'warn';
     return 'good';
+  }
+  function latencyLevels(latency) {
+    if (!latency) return { first: '', total: '', overall: '' };
+    var first = latencyBand(latency.first, 10000, 30000, 60000);
+    var total = latencyBand(latency.total, 60000, 180000, 300000);
+    var values = [first, total].filter(Boolean);
+    var order = { good: 0, warn: 1, orange: 2, bad: 3 };
+    var overall = values.reduce(function (current, value) {
+      return !current || order[value] > order[current] ? value : current;
+    }, '');
+    return { first: first, total: total, overall: overall };
+  }
+  function latencyLevel(latency) {
+    return latencyLevels(latency).overall;
   }
   function tokenBreakdown(row) {
     var input = metricNumber(row, ['input_tokens']) || 0;
@@ -164,5 +179,6 @@
   }
 
   global.UsageAnalysis = { parseRange: parseRange, fetchRecords: fetchRecords, aggregate: aggregate, values: values,
-    isErrorRecord: isErrorRecord, latency: latency, latencyLevel: latencyLevel, tokenBreakdown: tokenBreakdown, ms: ms };
+    isErrorRecord: isErrorRecord, latency: latency, latencyLevel: latencyLevel, latencyLevels: latencyLevels,
+    tokenBreakdown: tokenBreakdown, ms: ms };
 })(window);

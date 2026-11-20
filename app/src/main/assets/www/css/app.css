@@ -17,6 +17,7 @@
   --line: #e4e6ea;
   --danger: #e5484d;
   --warn: #e0951b;
+  --orange: #e56a1f;
   --ok: #1f9d55;
   --info: #0071e3;
   --radius: 8px;
@@ -68,6 +69,7 @@
   --muted-2: #767c83;
   --line: #262b30;
   --teal-soft: rgba(44, 145, 228, .18);
+  --orange: #f2994a;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .28);
   --bar-bg: rgba(14, 17, 19, .88);
 }
@@ -86,6 +88,7 @@
     --muted-2: #767c83;
     --line: #262b30;
     --teal-soft: rgba(44, 145, 228, .18);
+    --orange: #f2994a;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .28);
     --bar-bg: rgba(14, 17, 19, .88);
   }
@@ -3041,17 +3044,30 @@ button.dashboard-quality-item:active {
 .usage-latency-strip span { background: transparent; padding: 1px 2px; }
 .latency-good { color: var(--ok); }
 .latency-warn { color: var(--warn); }
+.latency-orange { color: var(--orange); }
 .latency-bad { color: var(--danger); }
 .latency-unknown { color: var(--muted); }
-.dashboard-recent-info .recent-latency.latency-good,
-.usage-latency-strip.latency-good span,
-.usage-latency-strip.latency-good b { color: var(--ok); }
-.dashboard-recent-info .recent-latency.latency-warn,
-.usage-latency-strip.latency-warn span,
-.usage-latency-strip.latency-warn b { color: var(--warn); }
-.dashboard-recent-info .recent-latency.latency-bad,
-.usage-latency-strip.latency-bad span,
-.usage-latency-strip.latency-bad b { color: var(--danger); }
+.dashboard-recent-info .recent-latency,
+.usage-latency-strip span { color: var(--muted); }
+.dashboard-recent-info .recent-latency b,
+.dashboard-recent-info .recent-latency .latency-good,
+.usage-latency-strip .latency-good,
+.usage-latency-strip .latency-good b { color: var(--ok); }
+.dashboard-recent-info .recent-latency .latency-warn,
+.usage-latency-strip .latency-warn,
+.usage-latency-strip .latency-warn b { color: var(--warn); }
+.dashboard-recent-info .recent-latency .latency-orange,
+.usage-latency-strip .latency-orange,
+.usage-latency-strip .latency-orange b { color: var(--orange); }
+.dashboard-recent-info .recent-latency .latency-bad,
+.usage-latency-strip .latency-bad,
+.usage-latency-strip .latency-bad b { color: var(--danger); }
+.dashboard-recent-info .recent-latency .latency-unknown,
+.dashboard-recent-info .recent-latency .usage-tps,
+.usage-latency-strip .latency-unknown,
+.usage-latency-strip .latency-unknown b,
+.usage-latency-strip .usage-tps,
+.usage-latency-strip .usage-tps b { color: var(--muted); }
 
 /* Key card action menu */
 .key-card-tools {

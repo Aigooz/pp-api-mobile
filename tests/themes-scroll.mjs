@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
 import { createPreviewServer, listenPreview } from '../preview.mjs';
 
@@ -6,6 +7,8 @@ const server = createPreviewServer();
 await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
+const screenshotDir = process.env.PP_TEST_SCREENSHOTS;
+if (screenshotDir) await mkdir(screenshotDir, { recursive: true });
 
 async function run(engine, name) {
   const browser = await engine.launch({ headless: true });
@@ -83,6 +86,13 @@ async function run(engine, name) {
     }
     await page.evaluate(() => App.go('#/chat'));
     await page.getByRole('button', { name: '对话设置' }).waitFor();
+    if (screenshotDir) {
+      await page.locator('.chat-toolbar').screenshot({ path: `${screenshotDir}/${name}-toolbar-light.png`, animations: 'disabled' });
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+      await page.waitForTimeout(120);
+      await page.locator('.chat-toolbar').screenshot({ path: `${screenshotDir}/${name}-toolbar-dark.png`, animations: 'disabled' });
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'ocean'));
+    }
     const iconCenters = await page.locator('.tool-btn').evaluateAll(buttons => buttons.map(button => {
       const box = button.getBoundingClientRect();
       const icon = button.querySelector('svg').getBoundingClientRect();

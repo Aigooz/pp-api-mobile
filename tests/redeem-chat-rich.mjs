@@ -100,10 +100,20 @@ try {
   for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {
     const { browser, context, page, errors, remoteRequests } = await setup(engine);
     try {
-      await page.goto(base + '/#/chat');
+      await page.goto(base + '/#/chat', { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.locator('.chat-toolbar .chip').first().getByText('demo-model').waitFor();
       await page.locator('.composer-meta').getByText('令牌 测试令牌').waitFor();
       await page.waitForFunction(() => document.querySelector('.token-estimate-btn'));
+      await page.waitForFunction(() => {
+        const button = document.querySelector('[aria-label="查看 Token 使用量估算"]');
+        if (!button) return false;
+        if (!document.querySelector('.sheet .token-row')) button.click();
+        const rows = Array.from(document.querySelectorAll('.token-row'));
+        const limit = rows.find(row => row.firstElementChild?.textContent === '模型限制')?.lastElementChild?.textContent;
+        if (limit === '16,384') U.closeOverlay();
+        return limit === '16,384';
+      }, null, { timeout: 15000 });
+      await page.locator('.sheet').waitFor({ state: 'detached' });
       let values = await tokenRows(page);
       assert.equal(values['上下文消息数'], '0');
       // /v1/models and the plaza catalog both advertise this model; the richer live
