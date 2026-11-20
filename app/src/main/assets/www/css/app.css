@@ -1640,6 +1640,7 @@ body.kb-open .composer { bottom: calc(var(--tabbar-space, 92px) + var(--kb, 0px)
 body.chat-mode.kb-open .tabbar { display: none !important; transform: none; }
 body.chat-mode.kb-open main { padding-bottom: calc(var(--kb, 0px) + 118px); }
 body.chat-mode.kb-open .composer { bottom: calc(var(--kb, 0px) + 8px); }
+body.chat-mode .route-slot.route-enter { animation: none; }
 body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 70vh; }
 .input.with-eye { padding-right: 46px; }
 .eye-btn {
@@ -1731,6 +1732,7 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-test-empty, .chat-test-progress { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .chat-test-start, .chat-test-stop { width: 100%; min-height: 40px; }
 .chat-test-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); }
+.chat-test-stop[hidden] { display: none; }
 .chat-test-results { display: grid; gap: 8px; }
 .chat-test-result { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .chat-test-result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }

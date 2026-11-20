@@ -777,6 +777,7 @@
     var vv = global.visualViewport;
     var keyboardBaseHeight = global.innerHeight;
     var focusedField = null;
+    var nativeKeyboard = global.__ppKeyboard || null;
     function update() {
       var layoutHeight = global.innerHeight;
       if (layoutHeight > keyboardBaseHeight + 80) keyboardBaseHeight = layoutHeight;
@@ -785,16 +786,28 @@
       var resizedKb = focusedField ? keyboardBaseHeight - layoutHeight : 0;
       if (resizedKb < 80) resizedKb = 0;
       var keyboardOpen = overlayKb > 0 || resizedKb > 0;
+      if (nativeKeyboard) {
+        keyboardOpen = nativeKeyboard.visible === true;
+        overlayKb = keyboardOpen ? Math.max(0, Math.round(Number(nativeKeyboard.overlap) || 0)) : 0;
+      }
       // A resized WebView already places fixed controls above the IME; only
       // compensate when the keyboard overlays the original viewport.
       document.documentElement.style.setProperty('--kb', overlayKb + 'px');
       document.body.classList.toggle('kb-open', keyboardOpen);
     }
+    global.__applyKeyboard = function (state) {
+      nativeKeyboard = state || null;
+      update();
+    };
     if (vv) {
       vv.addEventListener('resize', update);
       vv.addEventListener('scroll', update);
     }
     global.addEventListener('resize', update);
+    global.addEventListener('orientationchange', function () {
+      if (focusedField) focusedField.blur();
+      setTimeout(function () { keyboardBaseHeight = global.innerHeight; update(); }, 350);
+    });
     setTimeout(update, 400);
 
     document.addEventListener('focusin', function (e) {

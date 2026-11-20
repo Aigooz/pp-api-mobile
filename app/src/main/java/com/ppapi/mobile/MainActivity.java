@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +25,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.WindowInsets;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.webkit.JavascriptInterface;
@@ -77,6 +79,8 @@ public class MainActivity extends Activity {
     private long lastBackPress = 0L;
     private long backNavigationPendingUntil = 0L;
     private boolean openUpdatesOnLoad;
+    private Boolean lastKeyboardVisible;
+    private int lastKeyboardOverlap = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -158,6 +162,8 @@ public class MainActivity extends Activity {
                     float cssBottom = Math.max(0, navigationBar - alreadyInset) / (d == 0 ? 1 : d);
                     view.evaluateJavascript("window.__applyInsets && window.__applyInsets("
                             + cssTop + "," + cssBottom + ")", null);
+                    lastKeyboardVisible = null;
+                    syncKeyboardState();
                     if (openUpdatesOnLoad) {
                         openUpdatesOnLoad = false;
                         view.evaluateJavascript("window.App && window.App.go('#/updates', true)", null);
@@ -171,7 +177,31 @@ public class MainActivity extends Activity {
         web.loadUrl(START_URL);
 
         setContentView(web);
+        web.getViewTreeObserver().addOnGlobalLayoutListener(this::syncKeyboardState);
         UpdateJobService.schedule(this);
+    }
+
+    private void syncKeyboardState() {
+        if (web == null || web.getHeight() == 0) return;
+        Rect frame = new Rect();
+        web.getWindowVisibleDisplayFrame(frame);
+        int[] location = new int[2];
+        web.getLocationOnScreen(location);
+        float density = Math.max(1f, getResources().getDisplayMetrics().density);
+        boolean visible;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && web.getRootWindowInsets() != null) {
+            visible = web.getRootWindowInsets().isVisible(WindowInsets.Type.ime());
+        } else {
+            visible = web.getRootView().getHeight() - frame.height() > 120f * density;
+        }
+        // adjustResize may already end the WebView at the keyboard edge. Only
+        // send the still-covered portion, never the full IME height twice.
+        int overlap = visible ? Math.max(0, Math.round((location[1] + web.getHeight() - frame.bottom) / density)) : 0;
+        if (lastKeyboardVisible != null && lastKeyboardVisible == visible && lastKeyboardOverlap == overlap) return;
+        lastKeyboardVisible = visible;
+        lastKeyboardOverlap = overlap;
+        web.evaluateJavascript("window.__ppKeyboard={visible:" + visible + ",overlap:" + overlap
+                + "};window.__applyKeyboard&&window.__applyKeyboard(window.__ppKeyboard)", null);
     }
 
     @Override

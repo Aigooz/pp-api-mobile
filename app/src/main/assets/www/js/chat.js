@@ -224,6 +224,7 @@
     var keys = global.S.keys || [];
     var modelList = [];
     var modelLimits = {};
+    var modelLimitsKey = null;
     var plazaLimitSource = null;
     var plazaLimits = {};
     var modelsRun = 0;
@@ -292,6 +293,7 @@
       if (saveTimer) clearTimeout(saveTimer);
       if (scrollFrame) cancelAnimationFrame(scrollFrame);
       page.removeEventListener('pp:page-activate', onActivate);
+      page.removeEventListener('pp:page-deactivate', onDeactivate);
       page.removeEventListener('pp:page-dispose', onDispose);
       global.removeEventListener('pp:keys-updated', onKeysUpdated);
       global.removeEventListener('pp:keys-changed', onKeysChanged);
@@ -357,6 +359,7 @@
 
     function openChatTest() {
       if (testBusy || testOverlay) return;
+      if (streaming) { U.toast('请先等待当前回答完成或停止生成', 'err'); return; }
       var key = activeKey();
       if (!key || !key.key) { U.toast('请先选择可用令牌', 'err'); return; }
       if (String(key.status || 'active') !== 'active') { U.toast('当前令牌不可用', 'err'); return; }
@@ -367,6 +370,8 @@
         var sameGroup = groupKey !== null ? String(model.groupId || '') === groupKey :
           !!groupNameKey && String(model.group || '').trim().toLowerCase() === groupNameKey;
         return sameGroup && !isImageModel(model.name) && (!model.mode || model.mode === 'token');
+      }).filter(function (model, index, all) {
+        return all.findIndex(function (candidate) { return candidate.name === model.name; }) === index;
       });
       var groupName = pick(key, 'group_name') || (key.group && key.group.name) ||
         (global.S.groupNames && global.S.groupNames[key.group_id]) ||
@@ -380,11 +385,15 @@
       var groupMode = true;
       var selectedModel = '';
       var busy = false;
+      var overlay = null;
+      function dialogCurrent() {
+        return !!overlay && testOverlay === overlay && isCurrent() && App.isPageActive(page);
+      }
       stopTest = false;
       var content = h('div', { class: 'chat-test-panel' });
       var disclosure = h('div', { class: 'chat-test-disclosure' },
         h('strong', null, '测试会产生实际费用'),
-        h('p', null, '每个模型会发送 1 次真实 API 请求，并按站内规则计费。测试前可查看模型和请求数。'));
+        h('p', null, '仅测试当前令牌所属分组内可用的文本对话模型；切换分组请先切换令牌。每个模型发送 1 次真实请求，按站内规则计费，失败不自动重试。'));
       var scope = h('div', { class: 'chat-test-scope' });
       var scopeLabel = h('div', { class: 'chat-test-scope-label' });
       var modeButtons = h('div', { class: 'chat-test-modes' });
@@ -406,11 +415,13 @@
         modeButtons.innerHTML = '';
         modeButtons.appendChild(h('button', {
           class: 'chat-test-mode' + (groupMode ? ' active' : ''), type: 'button',
+          disabled: busy,
           'aria-pressed': groupMode ? 'true' : 'false', text: '整个分组',
           onclick: function () { groupMode = true; paintScope(); }
         }));
         modeButtons.appendChild(h('button', {
           class: 'chat-test-mode' + (!groupMode ? ' active' : ''), type: 'button',
+          disabled: busy,
           'aria-pressed': !groupMode ? 'true' : 'false', text: '单个模型',
           onclick: function () { groupMode = false; if (!selectedModel && available.length) selectedModel = available[0].name; paintScope(); }
         }));
@@ -425,6 +436,7 @@
             else list.appendChild(h('button', {
                 class: 'chat-test-model' + (selectedModel === model.name ? ' active' : ''),
                 type: 'button', 'aria-pressed': selectedModel === model.name ? 'true' : 'false',
+                disabled: busy,
                 text: model.name, onclick: function () { selectedModel = model.name; paintScope(); }
               }));
           });
@@ -441,9 +453,9 @@
       function addResult(model, result) {
         var latency = { first: result.first, total: result.total };
         var levels = global.UsageAnalysis ? global.UsageAnalysis.latencyLevels(latency) : {};
-        var output = result.output || result.error || (result.cancelled ? '已取消' : '无文本输出');
+        var output = result.error || result.output || (result.cancelled ? '已取消' : '无文本输出');
         results.appendChild(h('article', { class: 'chat-test-result' },
-          h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : result.cancelled ? '' : 'ok') }, result.error ? '失败' : result.cancelled ? '已停止' : '完成')),
+          h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : result.cancelled ? '' : !result.output ? 'warn' : 'ok') }, result.error ? '失败' : result.cancelled ? '已停止' : !result.output ? '无文本输出' : '完成')),
           h('div', { class: 'chat-test-metrics' },
             h('div', null, h('span', null, '输入 Token'), h('strong', null, metric(result.inputTokens))),
             h('div', null, h('span', null, '输出 Token'), h('strong', null, metric(result.outputTokens))),
@@ -469,13 +481,26 @@
         }
         var inputTokens = firstValue([usage.prompt_tokens, usage.input_tokens]);
         var outputTokens = firstValue([usage.completion_tokens, usage.output_tokens]);
+        var read = firstValue([usage.cache_read_input_tokens, usage.cached_tokens, details.cached_tokens, details.cache_read_input_tokens, details.cache_read_tokens]);
+        var write = firstValue([usage.cache_creation_input_tokens, usage.cache_write_tokens, details.cache_creation_tokens, details.cache_creation_input_tokens]);
+        if (write === null) {
+          var write5m = firstValue([cacheWriteDetails.ephemeral_5m_input_tokens]);
+          var write1h = firstValue([cacheWriteDetails.ephemeral_1h_input_tokens]);
+          if (write5m !== null || write1h !== null) write = (write5m || 0) + (write1h || 0);
+        }
+        var total = firstValue([usage.total_tokens]);
+        if (total === null && inputTokens !== null && outputTokens !== null) {
+          // OpenAI prompt_tokens includes cached input; Anthropic input_tokens
+          // excludes its separate cache-read and cache-creation fields.
+          total = inputTokens + outputTokens;
+          if (usage.prompt_tokens == null && (usage.cache_read_input_tokens != null || usage.cache_creation_input_tokens != null || usage.cache_creation)) total += (read || 0) + (write || 0);
+        }
         return {
           inputTokens: inputTokens,
           outputTokens: outputTokens,
-          cacheRead: firstValue([usage.cache_read_input_tokens, usage.cached_tokens, details.cached_tokens, details.cache_read_input_tokens, details.cache_read_tokens]),
-          cacheWrite: firstValue([usage.cache_creation_input_tokens, usage.cache_write_tokens, details.cache_creation_tokens, details.cache_creation_input_tokens, cacheWriteDetails.ephemeral_5m_input_tokens, cacheWriteDetails.ephemeral_1h_input_tokens]),
-          totalTokens: firstValue([usage.total_tokens]) !== null ? firstValue([usage.total_tokens]) :
-            inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null
+          cacheRead: read,
+          cacheWrite: write,
+          totalTokens: total
         };
       }
       function runOne(model, prompt) {
@@ -495,11 +520,12 @@
           try {
             testStream = Api.chatStream({
               model: model, stream: true, stream_options: { include_usage: true },
-              max_tokens: 48, temperature: 0,
+              max_tokens: 64,
               messages: [{ role: 'user', content: prompt }]
             }, key.key, {
-              idleTimeoutMs: 45000,
+              idleTimeoutMs: 120000,
               onEvent: function (data) {
+                if (settled || !dialogCurrent()) return;
                 if (data && data.error) {
                   var message = data.error.message || data.error.msg || '请求失败';
                   if (testStream) testStream.abort();
@@ -511,10 +537,9 @@
                 var delta = choice && (choice.delta || choice.message) || {};
                 var contentPart = delta.content;
                 var piece = typeof contentPart === 'string' ? contentPart : Array.isArray(contentPart) ? contentPart.map(function (part) { return part && (part.text || part.content) || ''; }).join('') : '';
-                if (piece) {
-                  if (first === null && piece.trim()) first = Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started);
-                  text += piece;
-                }
+                var reasoning = delta.reasoning_content || delta.reasoning || '';
+                if (first === null && (piece.trim() || String(reasoning).trim())) first = Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started);
+                if (piece && text.length < 2400) text += piece.slice(0, 2400 - text.length);
               },
               onDone: function () { finish(); },
               onError: function (error, status) { finish({ error: String(error || ('HTTP ' + (status || '错误'))) }); }
@@ -523,7 +548,7 @@
         });
       }
       function runTest() {
-        if (busy || testStarted) return false;
+        if (busy || testStarted || !dialogCurrent()) return false;
         if (!permittedNames) { U.toast('请等待令牌模型列表加载完成', 'err'); return false; }
         var selected = inScope();
         if (!selected.length) { U.toast('没有可测试的模型', 'err'); return false; }
@@ -533,7 +558,7 @@
         refreshButton.textContent = '等待确认…';
         progress.textContent = '等待确认计费测试…';
         U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用。每次调用都会按站内计费规则产生费用，具体金额取决于实际用量，无法预先准确估算。', '确认并测试').then(function (confirmed) {
-          if (!confirmed || !testOverlay || disposed || !isCurrent()) {
+          if (!confirmed || !dialogCurrent()) {
             busy = false;
             testStarted = false;
             paintScope();
@@ -563,9 +588,16 @@
             return;
           }
           var model = selected[index++];
+          if (!dialogCurrent()) { stopChatTest(); return; }
+          var currentKey = keys.filter(function (candidate) { return String(candidate.id) === String(key.id); })[0];
+          if (!currentKey || currentKey.key !== key.key || String(currentKey.status || 'active') !== 'active' || String(currentKey.group_id || '') !== String(key.group_id || '')) {
+            stopTest = true;
+            next();
+            return;
+          }
           progress.textContent = '正在测试 ' + index + '/' + selected.length + ' · ' + model.name;
           runOne(model.name, prompt).then(function (result) {
-            if (!testOverlay || disposed) return;
+            if (!dialogCurrent()) return;
             addResult(model.name, result);
             next();
           });
@@ -593,7 +625,7 @@
       content.appendChild(progress);
       content.appendChild(results);
       refreshButton.addEventListener('click', runTest);
-      var overlay = U.sheet({
+      overlay = U.sheet({
         title: '一键测试', body: content,
         onClose: function () {
           if (testOverlay === overlay) testOverlay = null;
@@ -608,14 +640,14 @@
       });
       testOverlay = overlay;
       Api.modelsWithKey(key.key).then(function (response) {
-        if (!testOverlay || disposed || !isCurrent()) return;
-        var items = Array.isArray(response) ? response : [];
-        permittedNames = items.map(function (item) { return String(item && (item.id || item.name) || ''); }).filter(Boolean);
+        if (!dialogCurrent()) return;
+        var items = Array.isArray(response) ? response : (response && (response.data || response.models)) || [];
+        permittedNames = items.map(function (item) { return typeof item === 'string' ? item : String(item && (item.id || item.name) || ''); }).filter(Boolean);
         var firstModel = models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; })[0];
         selectedModel = firstModel ? firstModel.name : '';
         paintScope();
       }).catch(function (error) {
-        if (!testOverlay || disposed) return;
+        if (!dialogCurrent()) return;
         permittedNames = [];
         progress.textContent = '无法确认此令牌可用的模型：' + prettyErr(error);
         paintScope();
@@ -1478,7 +1510,11 @@
     function loadModels(callback) {
       var key = activeKey();
       var run = ++modelsRun;
-      modelLimits = {};
+      var scopeKey = key ? String(key.id) + ':' + String(key.group_id || '') + ':' + key.key : '';
+      if (modelLimitsKey !== scopeKey) {
+        modelLimits = {};
+        modelLimitsKey = scopeKey;
+      }
       paintEstimate();
       function fallback() {
         if (!isCurrent() || run !== modelsRun) return;
@@ -1889,12 +1925,17 @@
       if (activeChat) activeChat();
       activeChat = null;
     }
+    function onDeactivate() {
+      stopChatTest();
+      if (input === document.activeElement) input.blur();
+    }
 
     global.addEventListener('pp:keys-updated', onKeysUpdated);
     global.addEventListener('pp:keys-changed', onKeysChanged);
     global.addEventListener('pp:plaza-updated', onPlazaUpdated);
     global.addEventListener('pp:chat-storage-warning', onStorageWarning);
     page.addEventListener('pp:page-activate', onActivate);
+    page.addEventListener('pp:page-deactivate', onDeactivate);
     page.addEventListener('pp:page-dispose', onDispose);
 
     if (session.model) global.S.chatModel = session.model;

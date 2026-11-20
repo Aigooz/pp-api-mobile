@@ -795,8 +795,17 @@
     handlers = handlers || {};
     var lifecycle = null;
     var watchdog = 0;
+    var ctrl = null;
     var idleMs = Math.max(10000, Number(handlers.idleTimeoutMs) || 90000);
     var finished = false;
+
+    function stopTransport() {
+      try {
+        if (global.Native && global.Native.stream) global.Native.abort(id);
+        else if (ctrl) ctrl.abort();
+      } catch (e) {}
+      delete streams[id];
+    }
 
     function armWatchdog() {
       if (finished || idleMs <= 0) return;
@@ -804,10 +813,7 @@
       watchdog = setTimeout(function () {
         if (finished) return;
         finished = true;
-        try {
-          if (global.Native && global.Native.stream) global.Native.abort(id);
-        } catch (e) {}
-        delete streams[id];
+        stopTransport();
         if (handlers.onError) handlers.onError('流式响应超时，请重试', 0);
       }, idleMs);
     }
@@ -817,6 +823,7 @@
       if (kind === 'error') {
         finished = true;
         clearTimeout(watchdog);
+        stopTransport();
         if (handlers.onError) handlers.onError(value && value.message || value || '请求失败', value && value.status);
         return;
       }
@@ -835,6 +842,7 @@
     };
     var parser = makeSseParser({
       onEvent: function (value) {
+        if (finished) return;
         armWatchdog();
         if (handlers.onEvent) handlers.onEvent(value);
       },
@@ -846,17 +854,14 @@
       abort: function () {
         finished = true;
         clearTimeout(watchdog);
-        try {
-          if (global.Native && global.Native.stream) global.Native.abort(id);
-        } catch (e) {}
-        delete streams[id];
+        stopTransport();
       }
     };
     armWatchdog();
 
     if (!(global.Native && global.Native.stream)) {
       // browser fallback
-      var ctrl = new AbortController();
+      ctrl = new AbortController();
       var streamUrl = browserUrl(V1 + '/chat/completions');
       if (streamUrl !== V1 + '/chat/completions') headers['X-Pp-Preview'] = '1';
       fetch(streamUrl, {
