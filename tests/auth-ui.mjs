@@ -144,7 +144,7 @@ async function run(engine, name) {
           offsetY: Math.abs((box.top + box.bottom - icon.top - icon.bottom) / 2)
         };
       }));
-      assert.equal(centers.length, width <= 350 ? 2 : 3, JSON.stringify(centers));
+      assert.equal(centers.length, 3, JSON.stringify(centers));
       assert.ok(centers.every(item => item.width >= 44 && item.height >= 44 && item.offsetX < .5 && item.offsetY < .5), JSON.stringify(centers));
     }
     await page.evaluate(() => App.go('#/keys'));

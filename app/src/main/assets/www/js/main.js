@@ -860,19 +860,25 @@
       global.Updates.check(false);
     }
     // insets
-    if (global.__insetTop) applyInsets(global.__insetTop, global.__insetBottom || 0);
+    if (global.__insetTop || global.__insetLeft || global.__insetRight) {
+      applyInsets(global.__insetTop, global.__insetBottom || 0, global.__insetLeft || 0, global.__insetRight || 0);
+    }
   }
 
-  function applyInsets(top, bottom) {
+  function applyInsets(top, bottom, left, right) {
     global.__insetTop = top;
     global.__insetBottom = bottom;
+    global.__insetLeft = left || 0;
+    global.__insetRight = right || 0;
     document.documentElement.style.setProperty('--safe-top', (top || 0) + 'px');
     document.documentElement.style.setProperty('--safe-bottom', (bottom || 0) + 'px');
+    document.documentElement.style.setProperty('--safe-left', (left || 0) + 'px');
+    document.documentElement.style.setProperty('--safe-right', (right || 0) + 'px');
     var app = U.$('#app');
     if (app) app.style.height = '100%';
     syncSpace();
   }
-  global.__applyInsets = function (top, bottom) { applyInsets(top, bottom); };
+  global.__applyInsets = function (top, bottom, left, right) { applyInsets(top, bottom, left, right); };
   // The shell is a native app, not a document viewer: block multi-finger gestures and
   // double-tap zoom wherever a WebView still tries to offer them.
   (function lockZoom() {

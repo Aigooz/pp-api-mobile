@@ -261,7 +261,9 @@ final class MobileViewController: UIViewController, WKNavigationDelegate {
     private func applyInsets() {
         let top = view.safeAreaInsets.top
         let bottom = view.safeAreaInsets.bottom
-        webView?.evaluateJavaScript("window.__applyInsets && window.__applyInsets(\(top),\(bottom))")
+        let left = view.safeAreaInsets.left
+        let right = view.safeAreaInsets.right
+        webView?.evaluateJavaScript("window.__applyInsets && window.__applyInsets(\(top),\(bottom),\(left),\(right))")
     }
 
     private func showLoadError() {

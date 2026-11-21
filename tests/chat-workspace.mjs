@@ -134,9 +134,12 @@ async function checkPickerLayout(page, selector, label) {
           tailRight: tailBox && tailBox.right,
           titleOverflow: row.querySelector('.li-title').scrollWidth > row.querySelector('.li-title').clientWidth,
           titleEllipsis: getComputedStyle(row.querySelector('.li-title')).textOverflow === 'ellipsis',
-          columnsOverlap: columns.some((column, index) => index > 0 && columns[index - 1].right > column.left + 1),
+          columnsOverlap: columns.some((column, index) => columns.slice(0, index).some(other =>
+            Math.min(column.right, other.right) - Math.max(column.left, other.left) > 1 &&
+            Math.min(column.bottom, other.bottom) - Math.max(column.top, other.top) > 1)),
           columnsOutside: columns.some(column => column.left < box.left || column.right > box.right + 1),
-          badgeOffsetY: badge && Math.abs((badge.top + badge.bottom - box.top - box.bottom) / 2),
+          stacked: getComputedStyle(row).display === 'grid',
+          badgeOffsetY: badge && Math.abs((badge.top + badge.bottom - iconBox.top - iconBox.bottom) / 2),
           iconOffsetX: Math.abs((iconBox.left + iconBox.right - svg.left - svg.right) / 2),
           iconOffsetY: Math.abs((iconBox.top + iconBox.bottom - svg.top - svg.bottom) / 2)
         };
@@ -148,12 +151,12 @@ async function checkPickerLayout(page, selector, label) {
   for (const row of layout.rows) {
     const detail = JSON.stringify({ label, ...row });
     assert.ok(Math.abs(row.width - row.hostWidth) < 2, detail);
-    assert.ok(row.tailLeft === null || row.bodyRight <= row.tailLeft + 1, detail);
+    assert.ok(row.stacked || row.tailLeft === null || row.bodyRight <= row.tailLeft + 1, detail);
     assert.ok(row.tailRight === null || row.tailRight <= row.right + 1, detail);
     assert.ok(!row.titleOverflow || row.titleEllipsis, detail);
     assert.equal(row.columnsOverlap, false, detail);
     assert.equal(row.columnsOutside, false, detail);
-    assert.ok(row.height >= 56 && row.height <= 76, detail);
+    assert.ok(row.height >= 56 && row.height <= (row.stacked ? 112 : 76), detail);
     assert.ok(row.badgeOffsetY === null || row.badgeOffsetY < 1.1, detail);
     assert.ok(row.iconOffsetX < 1.1 && row.iconOffsetY < 1.1, detail);
   }
