@@ -387,7 +387,7 @@
       var content = h('div', { class: 'chat-test-panel' });
       var disclosure = h('div', { class: 'chat-test-disclosure' },
         h('strong', null, '测试会产生实际费用'),
-        h('p', null, '仅测试当前令牌所属分组的可用文本模型，每个模型 1 次真实计费请求，失败不重试；最多 4 个并行。关闭此窗口或切换软件内页面不会停止测试。'));
+        h('p', null, '仅测试当前令牌所属分组的可用文本模型，所选模型全部同时发起，每个模型 1 次真实计费请求，失败不重试。平台并发或速率限制可能导致部分请求失败。关闭此窗口或切换软件内页面不会停止测试。'));
       var scope = h('div', { class: 'chat-test-scope' });
       var scopeLabel = h('div', { class: 'chat-test-scope-label' });
       var modeButtons = h('div', { class: 'chat-test-modes' });
@@ -448,7 +448,7 @@
         var latency = { first: result.first, total: result.total };
         var levels = global.UsageAnalysis ? global.UsageAnalysis.latencyLevels(latency) : {};
         var pending = result.state === 'running' || result.state === 'queued';
-        var label = pending ? result.state === 'running' ? '测试中' : '等待并发空位' : result.error ? '失败' : result.cancelled ? '已停止' : !result.output ? '无文本输出' : '完成';
+        var label = pending ? result.state === 'running' ? '测试中' : '准备发起' : result.error ? '失败' : result.cancelled ? '已停止' : !result.output ? '无文本输出' : '完成';
         var output = result.error || result.output || (pending ? '等待模型响应…' : result.cancelled ? '已取消' : '无文本输出');
         results.appendChild(h('article', { class: 'chat-test-result' },
           h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : pending || result.cancelled ? '' : !result.output ? 'warn' : 'ok') }, label)),
@@ -469,7 +469,7 @@
         var current = Tests.current();
         stopButton.hidden = !(current && current.running);
         if (current) {
-          progress.textContent = current.running ? '正在并行测试 · ' + current.completed + '/' + current.items.length + ' 个模型 · 最多 ' + current.parallel + ' 并行' :
+          progress.textContent = current.running ? '正在并行测试 · ' + current.completed + '/' + current.items.length + ' 个模型 · 全部同时发起' :
             current.stopped ? '测试已停止 · ' + current.completed + '/' + current.items.length + ' 个模型' : '测试完成 · ' + current.completed + '/' + current.items.length + ' 个模型';
           if (current !== lastBatch) {
             lastBatch = current;
@@ -497,7 +497,7 @@
         refreshButton.disabled = true;
         refreshButton.textContent = '等待确认…';
         progress.textContent = '等待确认计费测试…';
-        U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用，最多 ' + Math.min(Tests.maxParallel, selected.length) + ' 个并行。每次调用都会按站内规则产生费用。关闭窗口或切换软件内页面后仍会继续，已发送的请求停止后也可能计费。', '确认并测试').then(function (confirmed) {
+        U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用，全部同时发起，不分批排队。每次调用都会按站内规则产生费用；平台并发或速率限制可能导致部分请求失败，失败不会自动重试。关闭窗口或切换软件内页面后仍会继续，已发送的请求停止后也可能计费。', '确认并测试').then(function (confirmed) {
           busy = false;
           if (!confirmed || !dialogCurrent()) {
             paintScope();

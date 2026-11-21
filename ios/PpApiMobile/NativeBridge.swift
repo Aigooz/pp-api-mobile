@@ -32,7 +32,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
         super.init()
         queue.name = "com.ppapi.mobile.network"
         queue.maxConcurrentOperationCount = 1
-        session = URLSession(configuration: .default, delegate: self, delegateQueue: queue)
+        let configuration = URLSessionConfiguration.default
+        // Dispatch every selected model without an app-imposed HTTP/1.1 connection cap.
+        configuration.httpMaximumConnectionsPerHost = Int.max
+        session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

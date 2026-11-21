@@ -6,7 +6,6 @@
   var cancelRequests = null;
   var notifyTimer = 0;
   var elapsedTimer = 0;
-  var MAX_PARALLEL = 4;
 
   function current() {
     return job && Api.AUTH.currentId() === job.accountId ? job : null;
@@ -63,14 +62,13 @@
     var batch = {
       accountId: Api.AUTH.currentId(), keyId: key.id, keyName: key.name || U.maskKey(key.key),
       groupId: key.group_id, groupName: options.groupName, running: true, stopped: false,
-      completed: 0, startedAt: Date.now(), finishedAt: null, parallel: Math.min(MAX_PARALLEL, names.length),
+      completed: 0, startedAt: Date.now(), finishedAt: null, parallel: names.length,
       items: names.map(function (name) {
         return Object.assign({ model: name, state: 'queued', prompt: prompt, output: '', error: '',
           cancelled: false, first: null, total: null }, usageMetrics(null));
       })
     };
     job = batch;
-    var nextIndex = 0;
     var active = [];
     var token = key.key;
     function valid() { return job === batch && Api.AUTH.matches(context) && Api.AUTH.currentId() === batch.accountId; }
@@ -91,16 +89,18 @@
       function finish(extra) {
         if (settled) return;
         settled = true;
-        active.splice(active.indexOf(cancel), 1);
+        var index = active.indexOf(cancel);
+        if (index >= 0) active.splice(index, 1);
         Object.assign(item, usageMetrics(usage), extra || {});
         item.total = Math.max(0, now() - began);
         delete item.elapsedStartedAt;
         item.state = item.cancelled ? 'cancelled' : item.error ? 'error' : item.output ? 'complete' : 'empty';
         batch.completed++;
         endBatch();
-        if (valid()) { pump(); notify(false); }
+        if (valid()) notify(false);
       }
       function cancel() {
+        item.cancelled = true;
         if (transport) transport.abort();
         finish({ cancelled: true });
       }
@@ -145,10 +145,6 @@
         if (settled && transport) transport.abort();
       } catch (error) { finish({ error: error.message || '请求失败' }); }
     }
-    function pump() {
-      if (!valid() || batch.stopped || !batch.running) return;
-      while (active.length < MAX_PARALLEL && nextIndex < batch.items.length) run(batch.items[nextIndex++]);
-    }
     cancelRequests = function () {
       batch.stopped = true;
       batch.items.forEach(function (item) {
@@ -169,7 +165,9 @@
       });
       if (activeRequest) notify(false);
     }, 250);
-    pump();
+    batch.items.forEach(function (item) {
+      if (valid() && !batch.stopped && batch.running) run(item);
+    });
     notify(true);
     return batch;
   }
@@ -184,5 +182,5 @@
     var key = detail.items.filter(function (item) { return String(item.id) === String(batch.keyId); })[0];
     if (!key || String(key.status || 'active') !== 'active' || String(key.group_id || '') !== String(batch.groupId || '')) stop();
   });
-  global.PagesChatTests = { current: current, start: start, stop: stop, maxParallel: MAX_PARALLEL };
+  global.PagesChatTests = { current: current, start: start, stop: stop };
 })(window);

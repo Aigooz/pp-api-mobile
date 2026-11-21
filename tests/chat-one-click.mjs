@@ -39,6 +39,8 @@ async function run(engine, name) {
     let requestGate = null;
     let releaseRequests = null;
     let noKeys = false;
+    let expandedGroup = false;
+    const expandedModels = Array.from({ length: 12 }, (_, index) => 'parallel-model-' + (index + 1));
     const holdRequests = () => { requestGate = new Promise(resolve => { releaseRequests = resolve; }); };
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/__proxy/**', async route => {
@@ -46,7 +48,9 @@ async function run(engine, name) {
       const path = url.pathname.replace(/^\/__proxy\/(site|model)/, '');
       if (path === '/api/v1/settings/public') return route.fulfill(ok({ site_name: 'Pp API' }));
       if (path === '/api/v1/model-plaza') return route.fulfill(ok({ groups: [{
-        id: 4, name: '测试分组', models: [
+        id: 4, name: '测试分组', models: expandedGroup ? expandedModels.map(name => ({
+          name, pricing: { billing_mode: 'token', input_price: 1, output_price: 2 }
+        })) : [
           { name: 'test-alpha', pricing: { billing_mode: 'token', input_price: 1, output_price: 2 } },
           { name: 'test-beta', pricing: { billing_mode: 'token', input_price: 1, output_price: 2 } },
           { name: 'image-model', pricing: { billing_mode: 'image', image_price: 1 } }
@@ -54,7 +58,7 @@ async function run(engine, name) {
       }] }));
       if (path === '/api/v1/auth/me') return route.fulfill(ok({ id: 1, email: 'test@example.test', balance: 10 }));
       if (path === '/api/v1/keys') return route.fulfill(ok({ items: noKeys ? [] : [{ id: 7, name: '测试令牌', key: 'test-key', status: 'active', group_id: 4, group_name: '测试分组' }] }));
-      if (path === '/v1/models') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ id: 'test-alpha' }, { id: 'test-beta' }] }) });
+      if (path === '/v1/models') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: (expandedGroup ? expandedModels : ['test-alpha', 'test-beta']).map(id => ({ id })) }) });
       if (path === '/v1/chat/completions') {
         const payload = route.request().postDataJSON();
         calls.push(payload);
@@ -232,6 +236,60 @@ async function run(engine, name) {
     await page.getByRole('button', { name: '一键测试' }).click();
     await page.getByText('测试完成 · 2/2 个模型').waitFor();
     await page.locator('.sheet').getByRole('button', { name: '关闭', exact: true }).click();
+
+    expandedGroup = true;
+    await page.evaluate(names => {
+      S.plaza = { groups: [{ id: 4, name: '测试分组', models: names.map(name => ({
+        name, pricing: { billing_mode: 'token', input_price: 1, output_price: 2 }
+      })) }] };
+    }, expandedModels);
+    await page.getByRole('button', { name: '一键测试' }).click();
+    await page.getByRole('button', { name: '开始测试 12 个模型' }).waitFor();
+    const beforeFullGroup = calls.length;
+    holdRequests();
+    await page.getByRole('button', { name: '开始测试 12 个模型' }).click();
+    assert.match(await page.locator('.sheet').last().innerText(), /12 次真实调用，全部同时发起，不分批排队/);
+    assert.equal(calls.length, beforeFullGroup, 'all-model testing still requires cost consent');
+    await page.locator('.sheet').last().getByRole('button', { name: '确认并测试' }).click();
+    await page.waitForFunction(() => {
+      const batch = PagesChatTests.current();
+      return batch?.items.length === 12 && batch.items.every(item => item.state === 'running');
+    });
+    await page.waitForFunction(() => document.querySelectorAll('.chat-test-result').length === 12);
+    const dispatchDeadline = Date.now() + 15000;
+    while (calls.length < beforeFullGroup + 12 && Date.now() < dispatchDeadline) await page.waitForTimeout(50);
+    assert.equal(calls.length, beforeFullGroup + 12, 'all 12 requests must reach the transport before ANY response is released');
+    assert.deepEqual(calls.slice(beforeFullGroup).map(call => call.model).sort(), expandedModels.slice().sort());
+    assert.equal(await page.evaluate(() => PagesChatTests.current().completed), 0);
+    assert.equal(await page.evaluate(() => PagesChatTests.current().parallel), 12);
+    assert.match(await page.locator('.chat-test-progress').innerText(), /全部同时发起/);
+    assert.equal(await page.evaluate(() => PagesChatTests.start({ key: S.keys[0], models: ['duplicate'] })), null, 'a running batch must not be submitted twice');
+    await page.locator('.sheet').getByRole('button', { name: '关闭', exact: true }).click();
+    await page.evaluate(() => App.go('#/me'));
+    await page.waitForFunction(() => location.hash === '#/me');
+    assert.equal(await page.evaluate(() => PagesChatTests.current().running), true);
+    await page.evaluate(() => { App.invalidatePages(); App.go('#/chat'); });
+    await page.waitForFunction(() => document.querySelector('.chat-test-trigger')?.getAttribute('data-test-state') === 'running');
+    await page.getByRole('button', { name: '一键测试' }).click();
+    assert.equal(await page.locator('.chat-test-result').count(), 12);
+    releaseRequests(); requestGate = null;
+    await page.getByText('测试完成 · 12/12 个模型').waitFor();
+    for (const article of await page.locator('.chat-test-result').all()) {
+      assert.equal(await article.locator('.badge').innerText(), '完成');
+      assert.doesNotMatch(await article.locator('.chat-test-metrics > div').nth(5).innerText(), /—/);
+      assert.doesNotMatch(await article.locator('.chat-test-metrics > div').nth(6).innerText(), /—/);
+    }
+    assert.equal(calls.length, beforeFullGroup + 12, 'navigation must not duplicate any of the 12 calls');
+    assert.equal(await page.locator('.chat-test-trigger').getAttribute('data-test-state'), 'complete');
+    holdRequests();
+    await page.getByRole('button', { name: '开始测试 12 个模型' }).click();
+    await page.locator('.sheet').last().getByRole('button', { name: '确认并测试' }).click();
+    await page.waitForFunction(() => PagesChatTests.current()?.items.every(item => item.state === 'running'));
+    await page.getByRole('button', { name: '停止测试', exact: true }).click();
+    await page.getByText('测试已停止 · 12/12 个模型').waitFor();
+    assert.equal(await page.evaluate(() => PagesChatTests.current().items.every(item => item.cancelled)), true);
+    releaseRequests(); requestGate = null;
+    await page.locator('.sheet').getByRole('button', { name: '关闭', exact: true }).click();
     noKeys = true;
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:keys-updated', {
       detail: { account: Api.AUTH.currentId(), items: [] }
@@ -286,7 +344,7 @@ async function run(engine, name) {
     }
     assert.deepEqual(errors, []);
     await context.close();
-    console.log(`${name}: keyboard, consent, parallel requests, cross-page task recovery, timing, usage and stop passed`);
+    console.log(`${name}: keyboard, consent, all 12 concurrent requests, cross-page task recovery, timing, usage and stop passed`);
   } finally { await browser.close(); }
 }
 

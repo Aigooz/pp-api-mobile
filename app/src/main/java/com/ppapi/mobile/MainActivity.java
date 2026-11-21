@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
-    private final ExecutorService streamPool = Executors.newFixedThreadPool(4);
+    private final ExecutorService streamPool = Executors.newCachedThreadPool();
     private final Map<String, FutureTask<Void>> streamJobs = new ConcurrentHashMap<>();
     private final Map<String, HttpURLConnection> active = new ConcurrentHashMap<String, HttpURLConnection>();
     private final Handler ui = new Handler(Looper.getMainLooper());
