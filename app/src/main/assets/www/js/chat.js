@@ -5,6 +5,7 @@
   var U = global.U;
   var C = global.PagesCore;
   var Store = global.PagesChatStore;
+  var Tests = global.PagesChatTests;
   var h = C.h;
   var emptyState = C.emptyState;
   var pick = C.pick;
@@ -232,10 +233,7 @@
     var currentRun = null;
     var currentController = null;
     var testOverlay = null;
-    var testStream = null;
-    var testSettle = null;
-    var testBusy = false;
-    var stopTest = false;
+    var paintTestDialog = null;
     var storageWarningShown = false;
 
     function isCurrent() {
@@ -262,7 +260,6 @@
     function abortGeneration(markStopped) {
       runSeq++;
       currentRun = null;
-      stopChatTest();
       if (currentController) {
         try { currentController.abort(); } catch (e) {}
         currentController = null;
@@ -288,6 +285,7 @@
 
     activeChat = function () {
       if (disposed) return;
+      if (testOverlay) testOverlay.close();
       abortGeneration(false);
       if (draftTimer) clearTimeout(draftTimer);
       if (saveTimer) clearTimeout(saveTimer);
@@ -299,6 +297,7 @@
       global.removeEventListener('pp:keys-changed', onKeysChanged);
       global.removeEventListener('pp:plaza-updated', onPlazaUpdated);
       global.removeEventListener('pp:chat-storage-warning', onStorageWarning);
+      global.removeEventListener('pp:chat-test-updated', onTestUpdated);
       disposed = true;
     };
 
@@ -344,25 +343,20 @@
       })[0] || keys[0] || null;
     }
 
-    function stopChatTest() {
-      stopTest = true;
-      if (testStream && testStream.abort) testStream.abort();
-      testStream = null;
-      if (testSettle) {
-        var settle = testSettle;
-        testSettle = null;
-        settle({ cancelled: true });
-      }
-      if (testOverlay && testOverlay.close) testOverlay.close();
-      testOverlay = null;
+    function onTestUpdated() {
+      var batch = Tests.current();
+      testBtn.setAttribute('data-test-state', batch ? batch.running ? 'running' : 'complete' : 'idle');
+      testBtn.title = batch ? batch.running ? '一键测试：正在测试' : '一键测试：测试已结束' : '一键测试';
+      if (paintTestDialog) paintTestDialog();
     }
 
     function openChatTest() {
-      if (testBusy || testOverlay) return;
-      if (streaming) { U.toast('请先等待当前回答完成或停止生成', 'err'); return; }
+      if (testOverlay) return;
+      var batch = Tests.current();
       var key = activeKey();
-      if (!key || !key.key) { U.toast('请先选择可用令牌', 'err'); return; }
-      if (String(key.status || 'active') !== 'active') { U.toast('当前令牌不可用', 'err'); return; }
+      var validKey = key && key.key && String(key.status || 'active') === 'active';
+      if (!validKey && !batch) { U.toast('请先选择可用令牌', 'err'); return; }
+      key = key || {};
 
       var groupKey = key.group_id == null || key.group_id === '' ? null : String(key.group_id);
       var groupNameKey = String((key.group && key.group.name) || pick(key, 'group_name') || '').trim().toLowerCase();
@@ -376,7 +370,7 @@
       var groupName = pick(key, 'group_name') || (key.group && key.group.name) ||
         (global.S.groupNames && global.S.groupNames[key.group_id]) ||
         (models[0] && models[0].group) || (key.group_id ? '分组 #' + key.group_id : '默认分组');
-      if (!models.length) {
+      if (!models.length && !batch) {
         U.toast('当前分组没有可测试的文本模型', 'err');
         return;
       }
@@ -385,15 +379,15 @@
       var groupMode = true;
       var selectedModel = '';
       var busy = false;
+      var lastBatch = null;
       var overlay = null;
       function dialogCurrent() {
         return !!overlay && testOverlay === overlay && isCurrent() && App.isPageActive(page);
       }
-      stopTest = false;
       var content = h('div', { class: 'chat-test-panel' });
       var disclosure = h('div', { class: 'chat-test-disclosure' },
         h('strong', null, '测试会产生实际费用'),
-        h('p', null, '仅测试当前令牌所属分组内可用的文本对话模型；切换分组请先切换令牌。每个模型发送 1 次真实请求，按站内规则计费，失败不自动重试。'));
+        h('p', null, '仅测试当前令牌所属分组的可用文本模型，每个模型 1 次真实计费请求，失败不重试；最多 4 个并行。关闭此窗口或切换软件内页面不会停止测试。'));
       var scope = h('div', { class: 'chat-test-scope' });
       var scopeLabel = h('div', { class: 'chat-test-scope-label' });
       var modeButtons = h('div', { class: 'chat-test-modes' });
@@ -402,26 +396,26 @@
       var results = h('div', { class: 'chat-test-results' });
       var refreshButton;
       var stopButton;
-      var testStarted = false;
 
       function inScope() {
         var available = permittedNames ? models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; }) : [];
         return groupMode ? available : available.filter(function (model) { return model.name === selectedModel; });
       }
       function paintScope() {
+        var running = !!(Tests.current() && Tests.current().running);
         var available = permittedNames ? models.filter(function (model) { return permittedNames.indexOf(model.name) >= 0; }) : [];
         var scoped = inScope();
         scopeLabel.textContent = (groupMode ? '整个分组' : '单个模型') + ' · ' + groupName + ' · ' + scoped.length + ' 个请求';
         modeButtons.innerHTML = '';
         modeButtons.appendChild(h('button', {
           class: 'chat-test-mode' + (groupMode ? ' active' : ''), type: 'button',
-          disabled: busy,
+          disabled: busy || running,
           'aria-pressed': groupMode ? 'true' : 'false', text: '整个分组',
           onclick: function () { groupMode = true; paintScope(); }
         }));
         modeButtons.appendChild(h('button', {
           class: 'chat-test-mode' + (!groupMode ? ' active' : ''), type: 'button',
-          disabled: busy,
+          disabled: busy || running,
           'aria-pressed': !groupMode ? 'true' : 'false', text: '单个模型',
           onclick: function () { groupMode = false; if (!selectedModel && available.length) selectedModel = available[0].name; paintScope(); }
         }));
@@ -436,13 +430,13 @@
             else list.appendChild(h('button', {
                 class: 'chat-test-model' + (selectedModel === model.name ? ' active' : ''),
                 type: 'button', 'aria-pressed': selectedModel === model.name ? 'true' : 'false',
-                disabled: busy,
+                disabled: busy || running,
                 text: model.name, onclick: function () { selectedModel = model.name; paintScope(); }
               }));
           });
         }
-        refreshButton.disabled = busy || testStarted || !scoped.length;
-        refreshButton.textContent = busy ? '测试进行中…' : testStarted ? '测试已完成' : '开始测试 ' + scoped.length + ' 个模型';
+        refreshButton.disabled = busy || running || !scoped.length || !validKey;
+        refreshButton.textContent = running ? '并行测试进行中…' : busy ? '等待确认…' : '开始测试 ' + scoped.length + ' 个模型';
       }
       function metric(value, suffix) {
         return value === null || value === undefined || !isFinite(Number(value)) ? '—' : U.num(Number(value)) + (suffix || '');
@@ -453,9 +447,11 @@
       function addResult(model, result) {
         var latency = { first: result.first, total: result.total };
         var levels = global.UsageAnalysis ? global.UsageAnalysis.latencyLevels(latency) : {};
-        var output = result.error || result.output || (result.cancelled ? '已取消' : '无文本输出');
+        var pending = result.state === 'running' || result.state === 'queued';
+        var label = pending ? result.state === 'running' ? '测试中' : '等待并发空位' : result.error ? '失败' : result.cancelled ? '已停止' : !result.output ? '无文本输出' : '完成';
+        var output = result.error || result.output || (pending ? '等待模型响应…' : result.cancelled ? '已取消' : '无文本输出');
         results.appendChild(h('article', { class: 'chat-test-result' },
-          h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : result.cancelled ? '' : !result.output ? 'warn' : 'ok') }, result.error ? '失败' : result.cancelled ? '已停止' : !result.output ? '无文本输出' : '完成')),
+          h('div', { class: 'chat-test-result-head' }, h('strong', null, model), h('span', { class: 'badge ' + (result.error ? 'danger' : pending || result.cancelled ? '' : !result.output ? 'warn' : 'ok') }, label)),
           h('div', { class: 'chat-test-metrics' },
             h('div', null, h('span', null, '输入 Token'), h('strong', null, metric(result.inputTokens))),
             h('div', null, h('span', null, '输出 Token'), h('strong', null, metric(result.outputTokens))),
@@ -469,152 +465,57 @@
           h('div', { class: 'chat-test-result-text' }, h('span', null, '输出'), h('p', null, output.slice(0, 1800) + (output.length > 1800 ? '…' : '')))
         ));
       }
-      function usageMetrics(usage) {
-        if (!usage || typeof usage !== 'object') return { inputTokens: null, outputTokens: null, cacheRead: null, cacheWrite: null, totalTokens: null };
-        var details = usage.prompt_tokens_details || usage.input_tokens_details || {};
-        var cacheWriteDetails = usage.cache_creation || usage.prompt_cache_creation || {};
-        function firstValue(values) {
-          for (var i = 0; i < values.length; i++) {
-            if (values[i] !== undefined && values[i] !== null && values[i] !== '' && isFinite(Number(values[i]))) return Number(values[i]);
+      function paintResults() {
+        var current = Tests.current();
+        stopButton.hidden = !(current && current.running);
+        if (current) {
+          progress.textContent = current.running ? '正在并行测试 · ' + current.completed + '/' + current.items.length + ' 个模型 · 最多 ' + current.parallel + ' 并行' :
+            current.stopped ? '测试已停止 · ' + current.completed + '/' + current.items.length + ' 个模型' : '测试完成 · ' + current.completed + '/' + current.items.length + ' 个模型';
+          if (current !== lastBatch) {
+            lastBatch = current;
+            renderedStates = [];
+            results.innerHTML = '';
           }
-          return null;
+          current.items.forEach(function (item, index) {
+            var signature = item.state + ':' + item.first + ':' + item.inputTokens + ':' + Math.floor((item.total || 0) / 250);
+            if (renderedStates[index] === signature) return;
+            var previous = results.children[index];
+            addResult(item.model, item);
+            if (previous) results.replaceChild(results.lastElementChild, previous);
+            renderedStates[index] = signature;
+          });
         }
-        var inputTokens = firstValue([usage.prompt_tokens, usage.input_tokens]);
-        var outputTokens = firstValue([usage.completion_tokens, usage.output_tokens]);
-        var read = firstValue([usage.cache_read_input_tokens, usage.cached_tokens, details.cached_tokens, details.cache_read_input_tokens, details.cache_read_tokens]);
-        var write = firstValue([usage.cache_creation_input_tokens, usage.cache_write_tokens, details.cache_creation_tokens, details.cache_creation_input_tokens]);
-        if (write === null) {
-          var write5m = firstValue([cacheWriteDetails.ephemeral_5m_input_tokens]);
-          var write1h = firstValue([cacheWriteDetails.ephemeral_1h_input_tokens]);
-          if (write5m !== null || write1h !== null) write = (write5m || 0) + (write1h || 0);
-        }
-        var total = firstValue([usage.total_tokens]);
-        if (total === null && inputTokens !== null && outputTokens !== null) {
-          // OpenAI prompt_tokens includes cached input; Anthropic input_tokens
-          // excludes its separate cache-read and cache-creation fields.
-          total = inputTokens + outputTokens;
-          if (usage.prompt_tokens == null && (usage.cache_read_input_tokens != null || usage.cache_creation_input_tokens != null || usage.cache_creation)) total += (read || 0) + (write || 0);
-        }
-        return {
-          inputTokens: inputTokens,
-          outputTokens: outputTokens,
-          cacheRead: read,
-          cacheWrite: write,
-          totalTokens: total
-        };
+        paintScope();
       }
-      function runOne(model, prompt) {
-        return new Promise(function (resolve) {
-          var started = global.performance && performance.now ? performance.now() : Date.now();
-          var first = null, text = '', usage = null, settled = false;
-          function finish(extra) {
-            if (settled) return;
-            settled = true;
-            if (testSettle === finish) testSettle = null;
-            if (testStream) testStream = null;
-            var ended = global.performance && performance.now ? performance.now() : Date.now();
-            resolve(Object.assign({ prompt: prompt, output: text, error: '', cancelled: false,
-              first: first, total: Math.max(0, ended - started) }, usageMetrics(usage), extra || {}));
-          }
-          testSettle = finish;
-          try {
-            testStream = Api.chatStream({
-              model: model, stream: true, stream_options: { include_usage: true },
-              max_tokens: 64,
-              messages: [{ role: 'user', content: prompt }]
-            }, key.key, {
-              idleTimeoutMs: 120000,
-              onEvent: function (data) {
-                if (settled || !dialogCurrent()) return;
-                if (data && data.error) {
-                  var message = data.error.message || data.error.msg || '请求失败';
-                  if (testStream) testStream.abort();
-                  finish({ error: String(message), total: Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started) });
-                  return;
-                }
-                usage = mergeUsage(usage, extractUsage(data));
-                var choice = data && data.choices && data.choices[0];
-                var delta = choice && (choice.delta || choice.message) || {};
-                var contentPart = delta.content;
-                var piece = typeof contentPart === 'string' ? contentPart : Array.isArray(contentPart) ? contentPart.map(function (part) { return part && (part.text || part.content) || ''; }).join('') : '';
-                var reasoning = delta.reasoning_content || delta.reasoning || '';
-                if (first === null && (piece.trim() || String(reasoning).trim())) first = Math.max(0, (global.performance && performance.now ? performance.now() : Date.now()) - started);
-                if (piece && text.length < 2400) text += piece.slice(0, 2400 - text.length);
-              },
-              onDone: function () { finish(); },
-              onError: function (error, status) { finish({ error: String(error || ('HTTP ' + (status || '错误'))) }); }
-            });
-          } catch (error) { finish({ error: error.message || '请求失败' }); }
-        });
-      }
+      var renderedStates = [];
       function runTest() {
-        if (busy || testStarted || !dialogCurrent()) return false;
+        if (busy || (Tests.current() && Tests.current().running) || !dialogCurrent()) return false;
         if (!permittedNames) { U.toast('请等待令牌模型列表加载完成', 'err'); return false; }
         var selected = inScope();
         if (!selected.length) { U.toast('没有可测试的模型', 'err'); return false; }
-        testStarted = true;
         busy = true;
         refreshButton.disabled = true;
         refreshButton.textContent = '等待确认…';
         progress.textContent = '等待确认计费测试…';
-        U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用。每次调用都会按站内计费规则产生费用，具体金额取决于实际用量，无法预先准确估算。', '确认并测试').then(function (confirmed) {
+        U.confirm('确认发起计费测试', '将使用令牌「' + (key.name || U.maskKey(key.key)) + '」测试 ' + selected.length + ' 个模型，共 ' + selected.length + ' 次真实调用，最多 ' + Math.min(Tests.maxParallel, selected.length) + ' 个并行。每次调用都会按站内规则产生费用。关闭窗口或切换软件内页面后仍会继续，已发送的请求停止后也可能计费。', '确认并测试').then(function (confirmed) {
+          busy = false;
           if (!confirmed || !dialogCurrent()) {
-            busy = false;
-            testStarted = false;
             paintScope();
             progress.textContent = confirmed ? '测试已关闭。' : '测试未开始，没有发起任何调用。';
             return;
           }
-          runConfirmed(selected);
+          var currentKey = keys.filter(function (candidate) { return String(candidate.id) === String(key.id); })[0];
+          if (!currentKey || currentKey.key !== key.key || String(currentKey.status || 'active') !== 'active' || String(currentKey.group_id || '') !== String(key.group_id || '')) {
+            progress.textContent = '令牌已发生变化，请关闭窗口后重新选择。'; paintScope(); return;
+          }
+          Tests.start({ key: currentKey, groupName: groupName, models: selected.map(function (model) { return model.name; }) });
+          paintResults();
         });
         return false;
       }
 
-      function runConfirmed(selected) {
-        busy = true; testBusy = true; stopTest = false;
-        stopButton.hidden = false;
-        results.innerHTML = '';
-        progress.textContent = '已确认 ' + selected.length + ' 次真实请求，正在串行测试…';
-        paintScope();
-        var prompt = '请用一句话回答：1+1 等于几？';
-        var index = 0;
-        function next() {
-          if (stopTest || !isCurrent() || index >= selected.length) {
-            busy = false; testBusy = false; testStream = null;
-            stopButton.hidden = true;
-            testStarted = false;
-            progress.textContent = stopTest ? '测试已停止，未开始的模型不会发送请求。' : '测试完成 · ' + index + '/' + selected.length + ' 个模型';
-            paintScope();
-            return;
-          }
-          var model = selected[index++];
-          if (!dialogCurrent()) { stopChatTest(); return; }
-          var currentKey = keys.filter(function (candidate) { return String(candidate.id) === String(key.id); })[0];
-          if (!currentKey || currentKey.key !== key.key || String(currentKey.status || 'active') !== 'active' || String(currentKey.group_id || '') !== String(key.group_id || '')) {
-            stopTest = true;
-            next();
-            return;
-          }
-          progress.textContent = '正在测试 ' + index + '/' + selected.length + ' · ' + model.name;
-          runOne(model.name, prompt).then(function (result) {
-            if (!dialogCurrent()) return;
-            addResult(model.name, result);
-            next();
-          });
-        }
-        next();
-      }
-
       refreshButton = h('button', { class: 'btn btn-primary chat-test-start', type: 'button', text: '读取令牌可用模型', disabled: true });
-      stopButton = h('button', { class: 'btn chat-test-stop', type: 'button', text: '停止当前及后续测试', hidden: true });
-      stopButton.addEventListener('click', function () {
-        if (!busy) return;
-        stopTest = true;
-        if (testStream && testStream.abort) testStream.abort();
-        testStream = null;
-        if (testSettle) { var settle = testSettle; testSettle = null; settle({ cancelled: true }); }
-        stopButton.hidden = true;
-      });
+      stopButton = h('button', { class: 'btn chat-test-stop', type: 'button', text: '停止测试', hidden: true, onclick: function () { Tests.stop(); } });
       content.appendChild(disclosure);
       content.appendChild(scope);
       scope.appendChild(scopeLabel);
@@ -629,17 +530,13 @@
         title: '一键测试', body: content,
         onClose: function () {
           if (testOverlay === overlay) testOverlay = null;
-          stopTest = true;
-          if (testStream && testStream.abort) testStream.abort();
-          testStream = null;
-          if (testSettle) { var settle = testSettle; testSettle = null; settle({ cancelled: true }); }
-          testBusy = false;
-          busy = false;
+          if (paintTestDialog === paintResults) paintTestDialog = null;
         },
         actions: [{ label: '关闭' }]
       });
       testOverlay = overlay;
-      Api.modelsWithKey(key.key).then(function (response) {
+      paintTestDialog = paintResults;
+      if (validKey) Api.modelsWithKey(key.key).then(function (response) {
         if (!dialogCurrent()) return;
         var items = Array.isArray(response) ? response : (response && (response.data || response.models)) || [];
         permittedNames = items.map(function (item) { return typeof item === 'string' ? item : String(item && (item.id || item.name) || ''); }).filter(Boolean);
@@ -652,7 +549,7 @@
         progress.textContent = '无法确认此令牌可用的模型：' + prettyErr(error);
         paintScope();
       });
-      paintScope();
+      paintResults();
     }
 
     function modelLimit() {
@@ -938,12 +835,13 @@
     function paint() {
       msgsHost.innerHTML = '';
       if (!session.nodes.length) {
-        msgsHost.appendChild(h('div', { class: 'chat-welcome' },
+        var welcome = h('div', { class: 'chat-welcome' },
           h('div', { class: 'chat-welcome-icon', html: U.ic('chat', 25) }),
           h('h2', null, '开始新的对话'),
-          h('p', null, session.model || '选择模型后开始')));
+          h('p', null, session.model || '选择模型后开始'));
+        msgsHost.appendChild(welcome);
         if (!keys.length) {
-          msgsHost.appendChild(h('div', { style: { textAlign: 'center', marginTop: '-12px' } },
+          welcome.appendChild(h('div', { class: 'chat-welcome-actions' },
             h('button', {
               class: 'btn btn-primary btn-sm', type: 'button',
               onclick: function () { App.go('#/keys'); }
@@ -1866,6 +1764,7 @@
 
     function updateKeys(items) {
       if (!isCurrent()) return;
+      var hadKeys = keys.length > 0;
       keys = Array.isArray(items) ? items : [];
       global.S.keys = keys;
       var key = activeKey();
@@ -1878,6 +1777,7 @@
       } else {
         keyChip.firstChild.textContent = '无可用令牌';
       }
+      if (hadKeys !== (keys.length > 0) && !session.nodes.length) paint();
       paintInfo();
       loadModels(function () {
         if (session.model && !isImageModel(session.model)) paintInfo();
@@ -1913,6 +1813,7 @@
     }
     function onActivate() {
       if (!isCurrent()) return;
+      onTestUpdated();
       if (global.S.useSelectedChatModel && global.S.chatModel) {
         session.model = global.S.chatModel;
         global.S.useSelectedChatModel = false;
@@ -1926,7 +1827,7 @@
       activeChat = null;
     }
     function onDeactivate() {
-      stopChatTest();
+      if (testOverlay) testOverlay.close();
       if (input === document.activeElement) input.blur();
     }
 
@@ -1934,11 +1835,13 @@
     global.addEventListener('pp:keys-changed', onKeysChanged);
     global.addEventListener('pp:plaza-updated', onPlazaUpdated);
     global.addEventListener('pp:chat-storage-warning', onStorageWarning);
+    global.addEventListener('pp:chat-test-updated', onTestUpdated);
     page.addEventListener('pp:page-activate', onActivate);
     page.addEventListener('pp:page-deactivate', onDeactivate);
     page.addEventListener('pp:page-dispose', onDispose);
 
     if (session.model) global.S.chatModel = session.model;
+    onTestUpdated();
     modelChip.firstChild.textContent = session.model || '选择模型';
     autoGrow();
     paint();

@@ -124,7 +124,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; overscroll-behavior: none; }
+html, body { height: 100%; overscroll-behavior: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   margin: 0;
   background: var(--bg);
@@ -1711,11 +1711,19 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-toolbar .chip:first-child { max-width: 60%; }
 .chat-toolbar .tool-btn { width: 40px; height: 40px; border-radius: 8px; }
 .chat-test-trigger {
+  position: relative; overflow: visible;
   appearance: none; -webkit-appearance: none; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink-2);
 }
 .chat-test-trigger svg { display: block; flex: 0 0 auto; }
+.chat-test-trigger[data-test-state="running"]::after,
+.chat-test-trigger[data-test-state="complete"]::after {
+  content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px;
+  border: 2px solid var(--bg); border-radius: 50%; pointer-events: none;
+  background: var(--danger);
+}
+.chat-test-trigger[data-test-state="complete"]::after { background: var(--ok); }
 .chat-test-panel { display: grid; gap: 12px; min-width: 0; }
 .chat-test-disclosure { padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
 .chat-test-disclosure strong { display: block; color: var(--warn); font-size: 13px; }
@@ -1736,7 +1744,7 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-test-results { display: grid; gap: 8px; }
 .chat-test-result { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .chat-test-result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.chat-test-result-head strong { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.chat-test-result-head strong { min-width: 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .chat-test-result-head .badge { flex: 0 0 auto; }
 .chat-test-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--line); }
 .chat-test-metrics > div { min-width: 0; display: grid; gap: 3px; padding: 6px 7px; background: var(--surface-2); }
@@ -1744,10 +1752,12 @@ body.kb-open .sheet { padding-bottom: calc(var(--kb, 0px) + 18px); max-height: 7
 .chat-test-metrics strong { min-width: 0; font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .chat-test-result-text { display: grid; gap: 2px; margin-top: 8px; }
 .chat-test-result-text p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
-.chat-welcome { padding: 36px 8px 8px; text-align: center; }
-.chat-welcome-icon { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 12px; border-radius: 12px; background: var(--teal-soft); color: var(--teal); }
-.chat-welcome h2 { margin: 0; font-size: 17px; }
-.chat-welcome p { margin: 4px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.chat-welcome { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; padding: 36px 8px 8px; text-align: center; }
+.chat-welcome-icon { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; margin: 0 0 2px; border-radius: 12px; background: var(--teal-soft); color: var(--teal); }
+.chat-welcome h2 { max-width: 100%; margin: 0; font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.chat-welcome p { max-width: 100%; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.chat-welcome-actions { display: flex; justify-content: center; max-width: 100%; margin-top: 4px; }
+.chat-welcome-actions .btn { max-width: 100%; height: auto; min-height: 36px; padding: 7px 12px; white-space: normal; line-height: 1.5; overflow-wrap: anywhere; }
 .suggests { margin-top: 18px; }
 .suggest { min-height: 58px; border-radius: 8px; }
 .bubble-row { align-items: flex-start; margin: 18px 0 0; gap: 8px; }

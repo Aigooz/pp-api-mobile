@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.zip.GZIPInputStream;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -74,6 +75,8 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
+    private final ExecutorService streamPool = Executors.newFixedThreadPool(4);
+    private final Map<String, FutureTask<Void>> streamJobs = new ConcurrentHashMap<>();
     private final Map<String, HttpURLConnection> active = new ConcurrentHashMap<String, HttpURLConnection>();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private long lastBackPress = 0L;
@@ -331,6 +334,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         pool.shutdownNow();
+        streamPool.shutdownNow();
+        for (FutureTask<Void> task : streamJobs.values()) task.cancel(true);
+        streamJobs.clear();
         for (HttpURLConnection c : active.values()) {
             try { c.disconnect(); } catch (Exception ignored) {}
         }
@@ -581,12 +587,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void stream(final String id, final String method, final String url,
                            final String headers, final String body) {
-            pool.execute(new Runnable() {
+            FutureTask<Void> task = new FutureTask<Void>(new Runnable() {
                 @Override public void run() {
                     HttpURLConnection c = null;
                     try {
+                        if (Thread.currentThread().isInterrupted()) return;
                         c = openConn(method, url, headers, body);
                         active.put(id, c);
+                        if (Thread.currentThread().isInterrupted()) return;
                         c.setReadTimeout(300000);
                         int status = c.getResponseCode();
                         if (status >= 400) {
@@ -615,11 +623,17 @@ public class MainActivity extends Activity {
                         if (c != null) c.disconnect();
                     }
                 }
-            });
+            }, null) {
+                @Override protected void done() { streamJobs.remove(id); }
+            };
+            streamJobs.put(id, task);
+            streamPool.execute(task);
         }
 
         @JavascriptInterface
         public void abort(final String id) {
+            FutureTask<Void> task = streamJobs.remove(id);
+            if (task != null) task.cancel(true);
             HttpURLConnection c = active.remove(id);
             if (c != null) {
                 try { c.disconnect(); } catch (Exception ignored) {}
