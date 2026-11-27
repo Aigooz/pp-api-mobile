@@ -52,11 +52,13 @@ export function createPreviewServer() {
     if (url.pathname.startsWith('/__proxy/')) {
       const match = url.pathname.match(/^\/__proxy\/(site|model)(\/.*)$/);
       const publicStatus = match && match[1] === 'site' && match[2] === '/api/public/channel-status';
+      const publicRankings = match && match[1] === 'site' && match[2] === '/api/rankings';
       const daycardInfo = match && match[1] === 'site' && match[2] === '/api/daycard/info';
       const daycardBuy = match && match[1] === 'site' && match[2] === '/api/daycard/buy';
-      const allowed = match && (match[1] === 'site' ? match[2].startsWith('/api/v1/') || publicStatus || daycardInfo || daycardBuy : match[2].startsWith('/v1/'));
+      const allowed = match && (match[1] === 'site' ? match[2].startsWith('/api/v1/') || publicStatus || publicRankings || daycardInfo || daycardBuy : match[2].startsWith('/v1/'));
       if (!allowed || req.headers['x-pp-preview'] !== '1' ||
           (publicStatus && req.method !== 'GET') ||
+          (publicRankings && req.method !== 'GET') ||
           (daycardInfo && req.method !== 'GET') || (daycardBuy && req.method !== 'POST') ||
           !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) ||
           (req.headers.origin && req.headers.origin !== `http://${host}`) ||
@@ -67,7 +69,7 @@ export function createPreviewServer() {
       const headers = {};
       for (const name of forwardHeaders) if (req.headers[name]) headers[name] = req.headers[name];
       const upstreamUrl = new URL(match[2] + url.search, upstreams[match[1]]);
-      if (!(match[1] === 'site' ? upstreamUrl.pathname.startsWith('/api/v1/') || publicStatus || daycardInfo || daycardBuy : upstreamUrl.pathname.startsWith('/v1/'))) {
+      if (!(match[1] === 'site' ? upstreamUrl.pathname.startsWith('/api/v1/') || publicStatus || publicRankings || daycardInfo || daycardBuy : upstreamUrl.pathname.startsWith('/v1/'))) {
         res.writeHead(403).end('Forbidden');
         return;
       }

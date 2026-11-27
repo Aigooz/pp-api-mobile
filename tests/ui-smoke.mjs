@@ -100,6 +100,8 @@ try {
   assert.equal(wrapped.status, 403);
   const statusPost = await fetch(base + '/__proxy/site/api/public/channel-status', { method: 'POST', headers: { 'X-Pp-Preview': '1' } });
   assert.equal(statusPost.status, 403);
+  const rankingsPost = await fetch(base + '/__proxy/site/api/rankings', { method: 'POST', headers: { 'X-Pp-Preview': '1' } });
+  assert.equal(rankingsPost.status, 403);
   await page.goto(base);
   await page.getByText('demo-model').first().waitFor();
   assert.equal(await page.locator('.tab').count(), 5);

@@ -431,6 +431,8 @@
     return h('div', { class: 'model-tabs', role: 'group', 'aria-label': '模型页面' },
       h('button', { class: active === 'plaza' ? 'active' : '', 'aria-current': active === 'plaza' ? 'page' : null,
         onclick: function () { App.go('#/plaza'); } }, '模型广场'),
+      h('button', { class: active === 'rankings' ? 'active' : '', 'aria-current': active === 'rankings' ? 'page' : null,
+        onclick: function () { App.go('#/rankings'); } }, '平台数据'),
       h('button', { class: active === 'status' ? 'active' : '', 'aria-current': active === 'status' ? 'page' : null,
         onclick: function () { App.go('#/channel-status'); } }, '渠道状态'));
   }

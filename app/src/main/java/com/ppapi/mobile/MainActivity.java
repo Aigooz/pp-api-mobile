@@ -236,8 +236,24 @@ public class MainActivity extends Activity {
     private HttpURLConnection openConn(String method, String url, String headersJson, String body) throws Exception {
         URL target = new URL(url);
         String host = target.getHost();
+        String path = target.getPath();
+        boolean supportedMethod = "GET".equalsIgnoreCase(method)
+                || "POST".equalsIgnoreCase(method)
+                || "PUT".equalsIgnoreCase(method)
+                || "PATCH".equalsIgnoreCase(method)
+                || "DELETE".equalsIgnoreCase(method);
+        boolean allowedPath = false;
+        if ("ipkey.vip".equalsIgnoreCase(host)) {
+            allowedPath = path.startsWith("/api/v1/")
+                    || ("/api/public/channel-status".equals(path) && "GET".equalsIgnoreCase(method))
+                    || ("/api/rankings".equals(path) && "GET".equalsIgnoreCase(method))
+                    || ("/api/daycard/info".equals(path) && "GET".equalsIgnoreCase(method))
+                    || ("/api/daycard/buy".equals(path) && "POST".equalsIgnoreCase(method));
+        } else if ("api.ipkey.vip".equalsIgnoreCase(host)) {
+            allowedPath = path.startsWith("/v1/");
+        }
         if (!"https".equalsIgnoreCase(target.getProtocol())
-                || !("ipkey.vip".equalsIgnoreCase(host) || "api.ipkey.vip".equalsIgnoreCase(host))
+                || !allowedPath || !supportedMethod
                 || target.getUserInfo() != null || (target.getPort() != -1 && target.getPort() != 443)) {
             throw new SecurityException("Unsupported network destination");
         }

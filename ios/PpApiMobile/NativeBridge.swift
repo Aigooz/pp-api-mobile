@@ -191,6 +191,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
               let url = URL(string: rawURL), Self.isAllowed(url),
               ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method.uppercased()),
               (url.path != "/api/public/channel-status" || method.uppercased() == "GET"),
+              (url.path != "/api/rankings" || method.uppercased() == "GET"),
               (url.path != "/api/daycard/info" || method.uppercased() == "GET"),
               (url.path != "/api/daycard/buy" || method.uppercased() == "POST") else {
             fail(body["id"] as? String, isStream: isStream, message: "不支持的网络请求")
@@ -294,6 +295,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler, URLSessionDataDelega
               let host = url.host?.lowercased() else { return false }
         if host == "ipkey.vip" {
             return url.path.hasPrefix("/api/v1/") || url.path == "/api/public/channel-status"
+                || url.path == "/api/rankings"
                 || url.path == "/api/daycard/info" || url.path == "/api/daycard/buy"
         }
         if host == "api.ipkey.vip" { return url.path.hasPrefix("/v1/") }

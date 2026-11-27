@@ -151,7 +151,7 @@ try {
     for (const theme of themes) {
       await page.evaluate(theme => AppTheme.set(theme, true), theme);
       const id = `${size.width}x${size.height}-${theme}`;
-      for (const route of ['home', 'plaza', 'channel-status', 'keys', 'usage', 'purchase', 'subscriptions', 'orders', 'me', 'accounts', 'profile', 'redeem', 'affiliate', 'announcements', 'announcements/7', 'updates', 'about']) {
+      for (const route of ['home', 'plaza', 'rankings', 'channel-status', 'keys', 'usage', 'purchase', 'subscriptions', 'orders', 'me', 'accounts', 'profile', 'redeem', 'affiliate', 'announcements', 'announcements/7', 'updates', 'about']) {
         await page.evaluate(route => { U.closeOverlay(); App.go('#/' + route); }, route);
         await page.waitForFunction(route => location.hash === '#/' + route, route);
         await page.waitForTimeout(250);
@@ -180,7 +180,7 @@ try {
           await inspect(page, `${id}-key-detail`);
           await page.evaluate(() => U.closeOverlay());
         }
-        if (['home', 'plaza', 'channel-status', 'usage', 'purchase', 'profile', 'me', 'redeem'].includes(route)) {
+        if (['home', 'plaza', 'rankings', 'channel-status', 'usage', 'purchase', 'profile', 'me', 'redeem'].includes(route)) {
           await page.locator('main').evaluate(node => { node.scrollTop = node.scrollHeight; });
           await inspect(page, `${id}-${route}-bottom`);
         }

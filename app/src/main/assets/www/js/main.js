@@ -23,7 +23,7 @@
   var publicGeneration = 0;
   var pageCache = Object.create(null), activePage = null, preloadGeneration = 0;
   var refreshInFlight = null;
-  var cachedRoutes = { '/home': true, '/plaza': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
+  var cachedRoutes = { '/home': true, '/plaza': true, '/rankings': true, '/channel-status': true, '/chat': true, '/keys': true, '/me': true };
   var AUTH_ROUTES = ['/home', '/dashboard', '/chat', '/keys', '/usage', '/me', '/accounts', '/profile',
     '/redeem', '/purchase', '/orders', '/subscriptions', '/affiliate'];
   var routeHistory = [], routeHistoryIndex = -1, restoringAppHistory = false;
@@ -49,6 +49,7 @@
     '/home': { title: 'Pp API', tab: 'home', render: function () { return C.renderHome(); } },
     '/dashboard': { title: '仪表盘', tab: 'home', render: function () { return global.PagesDashboard.renderDashboard(); } },
     '/plaza': { title: '模型广场', tab: 'plaza', render: function () { return C.renderPlaza(); } },
+    '/rankings': { title: '平台数据', tab: 'plaza', render: function () { return global.PagesRankings.render(); } },
     '/channel-status': { title: '渠道状态', tab: 'plaza', render: function () { return global.PagesChannel.render(); } },
     '/chat': { title: '对话', tab: 'chat', render: function () { return global.PagesChat.renderChat(); }, full: true },
     '/keys': { title: '我的令牌', tab: 'keys', render: function () { return global.PagesUser.renderKeys(); } },
@@ -374,7 +375,7 @@
 
   function preloadPages() {
     var generation = ++preloadGeneration;
-    var paths = Api.AUTH.isLogged() ? ['/plaza', '/keys', '/chat', '/me', '/home', '/channel-status'] : ['/plaza', '/channel-status'];
+    var paths = Api.AUTH.isLogged() ? ['/plaza', '/rankings', '/keys', '/chat', '/me', '/home', '/channel-status'] : ['/plaza', '/rankings', '/channel-status'];
     function scheduleNext(callback) {
       if (global.requestIdleCallback) global.requestIdleCallback(callback, { timeout: 900 });
       else setTimeout(callback, 160);

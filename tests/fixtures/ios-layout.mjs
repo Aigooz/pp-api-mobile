@@ -71,6 +71,33 @@ export async function mockIOSLayout(page) {
       updatedAt: new Date().toISOString(), items: rows.map(row => ({ model: row.model, group: longGroup, status: 'operational', latency: 4240, ping: 88, availability: 99.98,
         timeline: [0, 1, 2].map(index => ({ at: new Date(Date.now() - index * 60000).toISOString(), status: 'operational', latency_ms: 4240, ping_ms: 88 })) }))
     }) });
+    if (path === '/api/rankings') {
+      const period = url.searchParams.get('period') || 'today';
+      const labels = period === 'week' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+        : period === 'rt' ? Array.from({ length: 30 }, (_, index) => String(index + 1).padStart(2, '0') + ':00')
+        : Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0') + ':00');
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        period, generated_at: new Date().toISOString(), labels,
+        total: 9876543210,
+        summary: { requests: 123456, tokens: 9876543210, latency_ms: 12340, success_rate: null, deltas: { requests: 2.5, tokens: 4.1 } },
+        series: [
+          { name: longModel, vendor: 'Anthropic', total: 7000000000, values: labels.map((_, index) => index * 1000) },
+          { name: 'gpt-6-astra', vendor: 'OpenAI', total: 2876543210, values: labels.map((_, index) => index * 500) }
+        ],
+        models: [
+          { name: longModel, vendor: 'Anthropic', total: 7000000000 },
+          { name: 'gpt-6-astra', vendor: 'OpenAI', total: 2876543210 }
+        ],
+        vendors: [
+          { name: 'Anthropic', total: 7000000000, icon: 'Anthropic' },
+          { name: 'OpenAI', total: 2876543210, icon: 'OpenAI' }
+        ],
+        requests_series: labels.map((_, index) => index * 100),
+        latency: { p50: 6420, p90: 18640, p99: 52340, min: 1220, max: 148000, avg: 12340 },
+        stream: { stream: 120000, plain: 3456 },
+        users: { top1: 45678, total: 19 }
+      }) });
+    }
     if (path === '/api/v1/payment/config') return route.fulfill(ok({ enabled: true, min_amount: 1, max_amount: 500, enabled_payment_types: ['alipay', 'wxpay'], recharge_fee_rate: 1 }));
     if (path === '/api/v1/payment/checkout-info') return route.fulfill(ok({ methods: { alipay: { available: true }, wxpay: { available: true } }, plans }));
     if (path === '/api/daycard/info') {

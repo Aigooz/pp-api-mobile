@@ -10,6 +10,7 @@
   function browserUrl(url) {
     if (global.location.hostname !== '127.0.0.1') return url;
     if (url === ORIGIN + '/api/public/channel-status') return '/__proxy/site/api/public/channel-status';
+    if (url.indexOf(ORIGIN + '/api/rankings') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(ORIGIN + '/api/daycard/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(API + '/') === 0) return '/__proxy/site' + url.slice(ORIGIN.length);
     if (url.indexOf(V1 + '/') === 0) return '/__proxy/model' + url.slice('https://api.ipkey.vip'.length);
@@ -623,6 +624,19 @@
         var data = parse(res);
         if (res.status < 200 || res.status >= 300 || !data || !Array.isArray(data.items)) {
           throw mkErr(res.status, 'CHANNEL_STATUS', '渠道状态加载失败，请稍后重试');
+        }
+        return data;
+      });
+    },
+    rankings: function (period, step) {
+      if (['today', 'week', 'month', 'year', 'rt'].indexOf(period) < 0) period = 'today';
+      if (['10s', '1m', '5m'].indexOf(step) < 0) step = '';
+      var url = ORIGIN + '/api/rankings?period=' + encodeURIComponent(period) +
+        (period === 'rt' && step ? '&step=' + encodeURIComponent(step) : '');
+      return request('GET', url, { 'Accept': 'application/json' }).then(function (res) {
+        var data = parse(res);
+        if (res.status < 200 || res.status >= 300 || !data || !Array.isArray(data.labels) || !data.summary) {
+          throw mkErr(res.status, 'RANKINGS', '平台数据加载失败，请稍后重试');
         }
         return data;
       });
