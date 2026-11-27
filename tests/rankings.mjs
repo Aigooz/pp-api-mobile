@@ -78,11 +78,14 @@ try {
   assert.equal(await page.locator('.rankings-metric').count(), 4);
   assert.match(await page.locator('.rankings-summary').innerText(), /123,456/);
   assert.match(await page.locator('.rankings-summary').innerText(), /12\.3 s/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /98\.77 亿/);
   assert.equal(await page.locator('.rankings-rank-row').count(), 4);
   assert.match(await page.locator('.rankings-ranks-panel').innerText(), /模型排行[\s\S]*alpha-model/);
   assert.match(await page.locator('.rankings-vendor-panel').innerText(), /厂商排行[\s\S]*Alpha/);
   assert.equal(await page.locator('.rankings-donut-segment').count(), 2);
   assert.equal(await page.locator('.rankings-trend-line').count(), 1);
+  assert.equal(await page.locator('.rankings-steps').count(), 0);
+  assert.equal(await page.locator('.rankings-refresh-select, select').count(), 0);
   assert.match(await page.locator('.rankings-quality-panel').innerText(), /P90[\s\S]*P99[\s\S]*最快[\s\S]*最慢/);
   assert.match(await page.locator('.rankings-quality-panel').innerText(), /调用形态[\s\S]*用户集中度/);
 
@@ -100,13 +103,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.rankings-trend-point').length > 0);
   assert.equal(requests.at(-1).period, 'rt');
   assert.equal(requests.at(-1).step, '1m');
-  await page.getByRole('button', { name: '10 秒', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.rankings-chart-sub').textContent.includes('每 10 秒'));
-  assert.equal(requests.at(-1).period, 'rt');
-  assert.equal(requests.at(-1).step, '10s');
-  await page.getByRole('button', { name: '5 分钟', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.rankings-chart-sub').textContent.includes('每 5 分钟'));
-  assert.equal(requests.at(-1).step, '5m');
+  assert.match(await page.locator('.rankings-chart-sub').innerText(), /最近 30 分钟 · 每分钟/);
 
   await page.getByRole('button', { name: 'Token', exact: true }).click();
   assert.match(await page.locator('.rankings-chart-sub').innerText(), /Token 用量/);
@@ -114,7 +111,32 @@ try {
   await page.getByRole('button', { name: '请求', exact: true }).click();
   assert.match(await page.locator('.rankings-panel').first().innerText(), /请求量/);
 
-  await page.getByLabel('自动刷新间隔').selectOption('10000');
+  const chart = page.locator('.rankings-trend-svg');
+  await chart.scrollIntoViewIfNeeded();
+  await page.locator('.rankings-trend-hit').evaluate(hit => {
+    const rect = hit.ownerSVGElement.getBoundingClientRect();
+    hit.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      pointerType: 'touch',
+      clientX: rect.left + rect.width * .58,
+      clientY: rect.top + rect.height * .46
+    }));
+  });
+  await page.locator('.rankings-chart-readout').waitFor();
+  const readout = await page.locator('.rankings-chart-readout').textContent();
+  assert.match(readout, /\d{2}:\d{2}/);
+  assert.match(readout, /次请求/);
+  assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
+  assert.equal(await page.locator('.rankings-trend-active').evaluate(node => getComputedStyle(node).display !== 'none'), true);
+
+  await page.locator('.rankings-refresh-trigger').click();
+  await page.getByRole('dialog', { name: '自动刷新' }).waitFor();
+  assert.equal(await page.getByRole('option').count(), 5);
+  assert.equal(await page.getByRole('option', { name: '1 分钟', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.ok(await page.getByRole('dialog').evaluate(node => node.scrollWidth <= node.clientWidth));
+  await page.getByRole('option', { name: '10 秒', exact: true }).click();
+  assert.match(await page.locator('.rankings-refresh-trigger').innerText(), /10 秒/);
+  assert.equal(await page.getByRole('dialog').count(), 0);
   const beforeRefresh = requests.length;
   await page.waitForTimeout(10200);
   assert.ok(requests.length > beforeRefresh, 'automatic refresh should request fresh rankings');
@@ -150,9 +172,13 @@ try {
     })));
     assert.ok(tabs.every(item => item.width >= 60 && !item.overflow), JSON.stringify(tabs));
     assert.equal(await page.locator('.rankings-periods button').evaluateAll(nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)), true);
+    assert.equal(await page.locator('.rankings-refresh-trigger').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.locator('.rankings-refresh-trigger').click();
+    assert.ok(await page.getByRole('dialog').evaluate(node => node.scrollWidth <= node.clientWidth));
+    await page.getByRole('button', { name: '取消' }).click();
   }
   assert.deepEqual(errors, []);
-  console.log('Rankings: API periods, realtime steps, refresh, empty/error states, charts, rankings and responsive layouts passed');
+  console.log('Rankings: API periods, TUI refresh picker, chart touch readout, empty/error states, rankings and responsive layouts passed');
 } finally {
   await context.close();
   await browser.close();

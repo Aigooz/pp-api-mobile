@@ -1365,7 +1365,7 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .rankings-control-secondary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   min-width: 0;
   margin-top: 8px;
@@ -1379,39 +1379,22 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   font-size: 10.5px;
   white-space: nowrap;
 }
-.rankings-refresh-select {
-  width: 80px;
-  height: 30px;
-  padding: 0 4px;
+.rankings-refresh-trigger {
+  width: auto;
+  min-width: 88px;
+  height: 32px;
+  padding: 0 9px 0 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--ink-2);
+  cursor: pointer;
   font-size: 11px;
 }
-.rankings-steps {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-}
-.rankings-steps button {
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-.rankings-steps button.active {
-  border-color: color-mix(in srgb, var(--teal) 28%, var(--line));
-  background: var(--teal-soft);
-  color: var(--teal);
-  font-weight: 650;
-}
+.rankings-refresh-trigger .group-picker-value { flex: 1; text-align: left; }
+.rankings-refresh-trigger:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+.rankings-refresh-options { margin-top: 2px; }
+.rankings-refresh-option { min-height: 42px; }
 .rankings-view-row {
   display: flex;
   align-items: center;
@@ -1526,6 +1509,35 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   vector-effect: non-scaling-stroke;
 }
 .rankings-trend-point { fill: var(--teal); stroke: var(--surface); stroke-width: 1; }
+.rankings-trend-guide {
+  stroke: var(--teal);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .55;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.rankings-trend-active {
+  fill: var(--surface);
+  stroke: var(--teal);
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.rankings-chart-readout { pointer-events: none; }
+.rankings-chart-readout rect {
+  fill: var(--ink);
+  stroke: color-mix(in srgb, var(--ink) 15%, transparent);
+  stroke-width: 1;
+}
+.rankings-chart-readout text {
+  fill: var(--surface);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+.rankings-chart-readout-label { opacity: .74; }
+.rankings-chart-readout-value { font-weight: 700; }
+.rankings-trend-hit { fill: transparent; cursor: crosshair; touch-action: pan-x pan-y; }
 .rankings-chart-axis-note {
   display: flex;
   justify-content: space-between;
@@ -3800,9 +3812,7 @@ button.dashboard-quality-item:active {
   .usage-status-seg button { padding: 0 6px; }
   .usage-log-tools-head { gap: 6px; }
   .payment-plan-price-row { flex-wrap: wrap; }
-  .rankings-control-secondary { align-items: flex-start; flex-direction: column; }
-  .rankings-steps { width: 100%; }
-  .rankings-steps button { flex: 1; }
+  .rankings-control-secondary { align-items: center; }
   .rankings-share-body { align-items: stretch; flex-direction: column; }
   .rankings-donut-wrap { margin: 0 auto; }
   .rankings-latency { grid-template-columns: minmax(96px, .72fr) minmax(0, 1.28fr); }

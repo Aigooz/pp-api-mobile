@@ -11,11 +11,6 @@
     { key: 'year', label: '今年' },
     { key: 'rt', label: '实时' }
   ];
-  var STEPS = [
-    { key: '10s', label: '10 秒' },
-    { key: '1m', label: '1 分钟' },
-    { key: '5m', label: '5 分钟' }
-  ];
   var REFRESHES = [
     { value: 10000, label: '10 秒' },
     { value: 30000, label: '30 秒' },
@@ -30,11 +25,7 @@
     month: { name: '本月', win: '过去 30 天', step: '每天' },
     year: { name: '今年', win: '过去 12 个月', step: '每月' }
   };
-  var STEP_META = {
-    '10s': { win: '最近 5 分钟', step: '每 10 秒' },
-    '1m': { win: '最近 30 分钟', step: '每分钟' },
-    '5m': { win: '最近 3 小时', step: '每 5 分钟' }
-  };
+  var REALTIME_META = { win: '最近 30 分钟', step: '每分钟' };
 
   function number(value) {
     var n = Number(value);
@@ -50,9 +41,9 @@
 
   function short(value) {
     var n = number(value);
-    if (n >= 1e9) return { value: (n / 1e9).toFixed(2), unit: 'B' };
-    if (n >= 1e6) return { value: (n / 1e6).toFixed(2), unit: 'M' };
-    if (n >= 1e3) return { value: (n / 1e3).toFixed(n >= 1e4 ? 0 : 1), unit: 'K' };
+    if (n >= 1e8) return { value: (n / 1e8).toFixed(2), unit: ' 亿' };
+    if (n >= 1e4) return { value: (n / 1e4).toFixed(n >= 1e6 ? 0 : 2), unit: ' 万' };
+    if (n >= 1e3) return { value: (n / 1e3).toFixed(1), unit: 'K' };
     return { value: U.num(n), unit: '' };
   }
 
@@ -82,8 +73,8 @@
     return (+match[2]) + '月' + (+match[3]) + '日 ' + match[4] + ':' + match[5];
   }
 
-  function periodMeta(period, step) {
-    if (period === 'rt') return STEP_META[step] || STEP_META['1m'];
+  function periodMeta(period) {
+    if (period === 'rt') return REALTIME_META;
     return PERIOD_META[period] || PERIOD_META.today;
   }
 
@@ -119,7 +110,7 @@
   function trendChart(values, labels, options) {
     var count = values.length;
     if (!count) return C.emptyState('暂无可绘制数据', '', 'chart');
-    var width = Math.max(280, count <= 12 ? 320 : count * 36);
+    var width = Math.max(280, count <= 12 ? 320 : count * 25);
     var height = 190;
     var left = 5, right = 40, top = 18, bottom = 28;
     var plotWidth = width - left - right;
@@ -153,7 +144,7 @@
       if (!value || count > 16 && index !== values.length - 1) return;
       chart.appendChild(svg('circle', { cx: x(index), cy: y(value), r: 2.5, class: 'rankings-trend-point' }));
     });
-    var step = count <= 7 ? 1 : count <= 14 ? 2 : count <= 26 ? 3 : 6;
+    var step = count <= 7 ? 1 : count <= 14 ? 2 : count <= 26 ? 4 : 8;
     var ticks = [];
     for (var index = count - 1; index >= 0; index -= step) ticks.push(index);
     if (ticks[ticks.length - 1] !== 0 && count <= 31) ticks.push(0);
@@ -165,7 +156,97 @@
       text.textContent = labels[index] || '';
       chart.appendChild(text);
     });
-    var hit = svg('rect', { x: left, y: top, width: plotWidth, height: plotHeight, fill: 'transparent' });
+    var guideX = svg('line', {
+      x1: 0, x2: 0, y1: top, y2: top + plotHeight,
+      class: 'rankings-trend-guide rankings-trend-guide-x'
+    });
+    var guideY = svg('line', {
+      x1: left, x2: left + plotWidth, y1: 0, y2: 0,
+      class: 'rankings-trend-guide rankings-trend-guide-y'
+    });
+    var active = svg('circle', { r: 4.5, class: 'rankings-trend-active' });
+    var readout = svg('g', { class: 'rankings-chart-readout' });
+    var readoutBox = svg('rect', { height: '38', rx: '7' });
+    var readoutLabel = svg('text', { y: '15', class: 'rankings-chart-readout-label' });
+    var readoutValue = svg('text', { y: '30', class: 'rankings-chart-readout-value' });
+    readout.appendChild(readoutBox);
+    readout.appendChild(readoutLabel);
+    readout.appendChild(readoutValue);
+    guideX.style.display = 'none';
+    guideY.style.display = 'none';
+    active.style.display = 'none';
+    readout.style.display = 'none';
+    chart.appendChild(guideX);
+    chart.appendChild(guideY);
+    chart.appendChild(active);
+    chart.appendChild(readout);
+    var baseLabel = options.title + '，' + count + ' 个时段';
+    var lastIndex = -1;
+
+    function activate(event) {
+      var rect = chart.getBoundingClientRect();
+      if (!rect.width) return;
+      var chartX = (event.clientX - rect.left) * width / rect.width;
+      var index = count === 1 ? 0 : Math.round((chartX - left) / plotWidth * (count - 1));
+      index = Math.max(0, Math.min(count - 1, index));
+      if (index === lastIndex && readout.style.display !== 'none') return;
+      lastIndex = index;
+      var pointX = x(index), pointY = y(values[index]);
+      var label = labels[index] || '';
+      var valueText = (options.exact ? options.exact(values[index]) : options.format(values[index])) +
+        (options.unit ? ' ' + options.unit : '');
+      guideX.style.display = '';
+      guideX.setAttribute('x1', String(pointX));
+      guideX.setAttribute('x2', String(pointX));
+      guideY.style.display = '';
+      guideY.setAttribute('y1', String(pointY));
+      guideY.setAttribute('y2', String(pointY));
+      active.style.display = '';
+      active.setAttribute('cx', String(pointX));
+      active.setAttribute('cy', String(pointY));
+      var boxWidth = Math.min(152, Math.max(102, Math.max(label.length * 6 + 18, valueText.length * 6 + 18)));
+      var boxX = Math.max(left, Math.min(left + plotWidth - boxWidth, pointX - boxWidth / 2));
+      readout.style.display = '';
+      readoutBox.setAttribute('x', String(boxX));
+      readoutBox.setAttribute('y', '2');
+      readoutBox.setAttribute('width', String(boxWidth));
+      readoutLabel.setAttribute('x', String(boxX + 8));
+      readoutValue.setAttribute('x', String(boxX + 8));
+      readoutLabel.textContent = label;
+      readoutValue.textContent = valueText;
+      chart.setAttribute('aria-label', baseLabel + '，' + label + '，' + valueText);
+    }
+
+    function hide() {
+      lastIndex = -1;
+      guideX.style.display = 'none';
+      guideY.style.display = 'none';
+      active.style.display = 'none';
+      readout.style.display = 'none';
+      chart.setAttribute('aria-label', baseLabel);
+    }
+
+    var touching = false;
+    var hit = svg('rect', {
+      x: left, y: top, width: plotWidth, height: plotHeight,
+      fill: 'transparent', class: 'rankings-trend-hit'
+    });
+    hit.addEventListener('pointerdown', function (event) {
+      touching = true;
+      activate(event);
+      if (hit.setPointerCapture) {
+        try { hit.setPointerCapture(event.pointerId); } catch (error) {}
+      }
+    });
+    hit.addEventListener('pointermove', function (event) {
+      if (event.pointerType === 'touch' && !touching) return;
+      activate(event);
+    });
+    hit.addEventListener('pointerup', function () { touching = false; });
+    hit.addEventListener('pointercancel', function () { touching = false; });
+    hit.addEventListener('pointerleave', function (event) {
+      if (event.pointerType === 'mouse') hide();
+    });
     chart.appendChild(hit);
     return chart;
   }
@@ -269,22 +350,21 @@
 
   function render() {
     var storedPeriod = U.store.get('rankings_period', 'today');
-    var storedStep = U.store.get('rankings_step', '1m');
     var storedRefresh = Number(U.store.get('rankings_refresh_ms', 60000));
     var storedView = U.store.get('rankings_view', 'requests');
     var period = PERIODS.some(function (item) { return item.key === storedPeriod; }) ? storedPeriod : 'today';
-    var step = STEPS.some(function (item) { return item.key === storedStep; }) ? storedStep : '1m';
     var refreshMs = REFRESHES.some(function (item) { return item.value === storedRefresh; }) ? storedRefresh : 60000;
     var view = storedView === 'tokens' ? 'tokens' : 'requests';
     var data = null, pending = false, queued = false, timer = null, updatedAt = 0, requestToken = 0;
     var host = h('div', { class: 'page rankings-page' }, C.modelTabs('rankings'));
     var state = h('div', { class: 'rankings-state', 'aria-live': 'polite' }, '正在加载平台数据…');
     var periodGroup = h('div', { class: 'rankings-periods', role: 'group', 'aria-label': '统计周期' });
-    var stepGroup = h('div', { class: 'rankings-steps', role: 'group', 'aria-label': '实时粒度' });
-    var refreshSelect = h('select', { class: 'rankings-refresh-select', 'aria-label': '自动刷新间隔' },
-      REFRESHES.map(function (item) {
-        return h('option', { value: String(item.value), selected: item.value === refreshMs }, item.label);
-      }));
+    var refreshLabel = h('span', { class: 'group-picker-value mono' });
+    var refreshTrigger = h('button', {
+      type: 'button', class: 'input group-picker-trigger rankings-refresh-trigger',
+      'aria-label': '自动刷新间隔', 'aria-haspopup': 'dialog',
+      onclick: openRefreshPicker
+    }, refreshLabel, h('span', { html: U.ic('down', 17) }));
     var viewGroup = h('div', { class: 'rankings-view-switch', role: 'group', 'aria-label': '趋势指标' });
     var chartHost = h('div', { class: 'rankings-trend-scroll' });
     var ranksHost = h('div', { class: 'rankings-ranks' });
@@ -307,9 +387,8 @@
         h('span', { class: 'rankings-live-dot' }), state), reload),
       periodGroup,
       h('div', { class: 'rankings-control-secondary' },
-        h('label', { class: 'rankings-refresh-control' },
-          h('span', null, '自动刷新'), refreshSelect),
-        stepGroup),
+        h('div', { class: 'rankings-refresh-control' },
+          h('span', null, '自动刷新'), refreshTrigger)),
       h('div', { class: 'rankings-view-row' }, viewGroup));
     host.appendChild(controls);
     var content = h('div'); host.appendChild(content);
@@ -352,13 +431,34 @@
       load(true);
     }
 
-    function selectStep(next) {
-      step = next; U.store.set('rankings_step', step);
-      if (period !== 'rt') {
-        period = 'rt'; U.store.set('rankings_period', period);
-      }
-      paintControls();
-      load(true);
+    function refreshText() {
+      var selected = REFRESHES.filter(function (item) { return item.value === refreshMs; })[0];
+      return selected ? selected.label : '1 分钟';
+    }
+
+    function setRefresh(next, activeBefore) {
+      refreshMs = next;
+      U.store.set('rankings_refresh_ms', refreshMs);
+      refreshLabel.textContent = refreshText();
+      schedule();
+      if (activeBefore) load(false);
+    }
+
+    function openRefreshPicker() {
+      var activeBefore = isPageActive();
+      var list = h('div', { class: 'group-options rankings-refresh-options', role: 'listbox', 'aria-label': '自动刷新间隔' });
+      REFRESHES.forEach(function (item) {
+        var chosen = item.value === refreshMs;
+        list.appendChild(h('button', {
+          type: 'button', role: 'option', 'aria-selected': chosen ? 'true' : 'false',
+          class: 'group-option rankings-refresh-option' + (chosen ? ' active' : ''),
+          onclick: function () {
+            dialog.close();
+            if (!chosen) setRefresh(item.value, activeBefore);
+          }
+        }, h('span', { class: 'mono' }, item.label), chosen ? h('span', { html: U.ic('check', 17) }) : null));
+      });
+      var dialog = U.picker({ title: '自动刷新', body: list, actions: [{ label: '取消' }] });
     }
 
     function paintControls() {
@@ -367,15 +467,7 @@
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
-      stepGroup.innerHTML = '';
-      STEPS.forEach(function (item) {
-        stepGroup.appendChild(h('button', {
-          type: 'button', 'data-step': item.key,
-          class: period === 'rt' && step === item.key ? 'active' : '',
-          'aria-pressed': period === 'rt' && step === item.key ? 'true' : 'false',
-          onclick: function () { selectStep(item.key); }
-        }, item.label));
-      });
+      refreshLabel.textContent = refreshText();
       viewGroup.innerHTML = '';
       [{ key: 'requests', label: '请求' }, { key: 'tokens', label: 'Token' }].forEach(function (item) {
         viewGroup.appendChild(h('button', {
@@ -398,12 +490,14 @@
       } else {
         chartHost.appendChild(trendChart(values, labels, {
           title: (view === 'requests' ? '请求' : 'Token') + '趋势',
-          format: function (value) { var item = short(value); return item.value + item.unit; }
+          format: function (value) { var item = short(value); return item.value + item.unit; },
+          exact: U.num,
+          unit: view === 'requests' ? '次请求' : 'Token'
         }));
       }
-      var meta = periodMeta(period, step);
+      var meta = periodMeta(period);
       var subtitle = trendSection.querySelector('.rankings-chart-sub');
-      subtitle.textContent = meta.win + meta.step + (view === 'requests' ? '的请求量' : '的 Token 用量');
+      subtitle.textContent = meta.win + ' · ' + meta.step + (view === 'requests' ? '的请求量' : '的 Token 用量');
       var total = view === 'requests' ? number(data.summary && data.summary.requests) : number(data.total);
       var compact = short(total);
       trendSection.querySelector('.rankings-chart-total').textContent = compact.value + ' ' + compact.unit;
@@ -496,10 +590,10 @@
         showInitial('loading');
       }
       var sequence = ++requestToken;
-      var requestedPeriod = period, requestedStep = step;
+      var requestedPeriod = period, requestedStep = period === 'rt' ? '1m' : '';
       Api.rankings(requestedPeriod, requestedStep).then(function (result) {
         if (sequence !== requestToken || !App.isPageRetained(host)) return;
-        if (requestedPeriod !== period || requestedStep !== step) {
+        if (requestedPeriod !== period) {
           queued = true;
           return;
         }
@@ -508,7 +602,7 @@
         paint();
       }).catch(function () {
         if (sequence !== requestToken || !App.isPageRetained(host)) return;
-        if (requestedPeriod !== period || requestedStep !== step) {
+        if (requestedPeriod !== period) {
           queued = true;
           return;
         }
@@ -524,11 +618,6 @@
       });
     }
 
-    refreshSelect.addEventListener('change', function (event) {
-      refreshMs = Number(event.target.value); U.store.set('rankings_refresh_ms', refreshMs);
-      schedule();
-      if (isPageActive()) load(false);
-    });
     host.addEventListener('pp:page-activate', function () { if (!updatedAt || Date.now() - updatedAt >= refreshMs) load(false); else schedule(); });
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(timer); });
     host.addEventListener('pp:page-refresh', function () { load(true); });
