@@ -1,6 +1,6 @@
 # Pp API Mobile
 
-Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前版本为 `1.40.1`。
+Pp API 的第三方 Android 和 iOS 客户端。应用使用原生容器和共享移动界面，不代表 Pp API 官方。当前版本为 `1.40.2`。
 
 ## 功能
 

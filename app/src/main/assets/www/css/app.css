@@ -1337,6 +1337,18 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.rankings-live-status {
+  flex-wrap: wrap;
+  row-gap: 1px;
+}
+.rankings-updated-at {
+  flex-basis: 100%;
+  padding-left: 14px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
 .rankings-periods {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1379,52 +1391,10 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   font-size: 10.5px;
   white-space: nowrap;
 }
-.rankings-refresh-trigger {
-  width: auto;
-  min-width: 88px;
-  height: 32px;
-  padding: 0 9px 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
+.rankings-refresh-value {
   color: var(--ink-2);
-  cursor: pointer;
   font-size: 11px;
-}
-.rankings-refresh-trigger .group-picker-value { flex: 1; text-align: left; }
-.rankings-refresh-trigger:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
-.rankings-refresh-options { margin-top: 2px; }
-.rankings-refresh-option { min-height: 42px; }
-.rankings-view-row {
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.rankings-view-switch {
-  display: flex;
-  width: 100%;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-.rankings-view-switch button {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-.rankings-view-switch button.active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+  font-variant-numeric: tabular-nums;
 }
 .rankings-summary {
   display: grid;
@@ -1499,6 +1469,9 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 .rankings-trend-svg { display: block; max-width: none; min-width: 100%; }
 .rankings-grid-line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .rankings-axis-text { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.rankings-legend-text { fill: var(--muted); font-size: 9px; }
+.rankings-legend-request { fill: var(--teal); color: var(--teal); stroke: var(--teal); }
+.rankings-legend-token { fill: #0873ca; color: #0873ca; stroke: #0873ca; }
 .rankings-trend-area { fill: var(--teal-soft); }
 .rankings-trend-line {
   fill: none;
@@ -1508,6 +1481,18 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
+.rankings-trend-token {
+  stroke: #0873ca;
+}
+.rankings-trend-request {
+  stroke: var(--teal);
+}
+.rankings-trend-guide-token-y { stroke: #0873ca; }
+.rankings-trend-guide-request-y { stroke: var(--teal); }
+.rankings-trend-active-token { stroke: #0873ca; }
+.rankings-trend-active-request { stroke: var(--teal); }
+.rankings-chart-readout-request { fill: var(--teal); }
+.rankings-chart-readout-token { fill: #0873ca; }
 .rankings-trend-point { fill: var(--teal); stroke: var(--surface); stroke-width: 1; }
 .rankings-trend-guide {
   stroke: var(--teal);
@@ -1526,18 +1511,23 @@ button.dashboard-metric { width: 100%; cursor: pointer; }
 }
 .rankings-chart-readout { pointer-events: none; }
 .rankings-chart-readout rect {
-  fill: var(--ink);
-  stroke: color-mix(in srgb, var(--ink) 15%, transparent);
+  fill: var(--surface);
+  stroke: var(--line);
   stroke-width: 1;
 }
 .rankings-chart-readout text {
-  fill: var(--surface);
+  fill: var(--ink-2);
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
 }
 .rankings-chart-readout-label { opacity: .74; }
 .rankings-chart-readout-value { font-weight: 700; }
-.rankings-trend-hit { fill: transparent; cursor: crosshair; touch-action: pan-x pan-y; }
+.rankings-trend-hit {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+  touch-action: none;
+}
 .rankings-chart-axis-note {
   display: flex;
   justify-content: space-between;

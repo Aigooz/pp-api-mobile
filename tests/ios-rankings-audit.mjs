@@ -8,7 +8,7 @@ const server = createPreviewServer();
 await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await webkit.launch({ headless: true });
-const screenshotDir = 'ios-check/rankings-1.40.1';
+const screenshotDir = 'ios-check/rankings-1.40.2';
 await mkdir(screenshotDir, { recursive: true });
 
 const context = await browser.newContext({
@@ -49,6 +49,10 @@ try {
   });
   await mockIOSLayout(page);
   await page.goto(base + '/#/rankings', { waitUntil: 'domcontentloaded' });
+  await mockIOSLayout(page);
+  await page.waitForFunction(() => window.__ppLiveRefresh && document.querySelector('.rankings-trend-svg'));
+  await page.evaluate(async () => __ppLiveRefresh('ios-audit'));
+  await page.waitForTimeout(500);
   await page.locator('.rankings-trend-svg').waitFor();
 
   for (const size of [
@@ -66,29 +70,50 @@ try {
       const id = `${size.width}x${size.height}-${theme}`;
       await page.screenshot({ path: `${screenshotDir}/${id}-top.png`, animations: 'disabled' });
 
-      const trigger = page.locator('.rankings-refresh-trigger');
-      assert.equal(await trigger.evaluate(node => node.scrollWidth <= node.clientWidth), true, `${id} refresh trigger clips`);
-      await trigger.click();
-      await page.getByRole('dialog', { name: '自动刷新' }).waitFor();
-      const picker = await page.getByRole('dialog', { name: '自动刷新' }).evaluate(node => {
-        const box = node.getBoundingClientRect();
-        return {
-          box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom },
-          overflow: node.scrollWidth - node.clientWidth,
-          options: [...node.querySelectorAll('[role=option]')].map(option => ({
-            text: option.textContent, width: option.clientWidth, scroll: option.scrollWidth
-          }))
-        };
+      assert.match(await page.locator('.rankings-refresh-value').innerText(), /5 秒/);
+      assert.equal(await page.locator('.rankings-refresh-trigger, .rankings-view-switch').count(), 0);
+      assert.equal(await page.locator('[data-chart=combined]').count(), 1);
+      assert.match(await page.locator('[data-chart=combined]').textContent(), /请求.*Token/);
+      await page.locator('.rankings-trend-svg').evaluate(node => node.scrollIntoView({ block: 'center' }));
+      await page.waitForTimeout(200);
+      const chart = page.locator('.rankings-trend-svg');
+      const hitBox = await page.locator('.rankings-trend-hit').boundingBox();
+      const tapX = Math.max(48, hitBox.x) + (Math.min(size.width - 12, hitBox.x + hitBox.width) - Math.max(48, hitBox.x)) * .58;
+      await page.touchscreen.tap(tapX, hitBox.y + hitBox.height * .46);
+      await page.waitForTimeout(100);
+      const readout = await chart.locator('.rankings-chart-readout').evaluate(node => {
+        const box = node.querySelector('rect');
+        return { text: node.textContent, display: getComputedStyle(node).display,
+          x: Number(box.getAttribute('x')), width: Number(box.getAttribute('width')) };
       });
-      assert.ok(picker.box.left >= size.left, `${id} picker overlaps left safe area`);
-      assert.ok(picker.box.right <= size.width - size.right + .5, `${id} picker overlaps right safe area`);
-      assert.ok(picker.box.bottom <= size.height - size.bottom + .5, `${id} picker overlaps bottom safe area`);
-      assert.equal(picker.overflow <= 1, true, `${id} picker overflows horizontally`);
-      assert.equal(picker.options.every(option => option.scroll <= option.width + 1), true, `${id} picker option clips`);
-      await page.screenshot({ path: `${screenshotDir}/${id}-picker.png`, animations: 'disabled' });
-      await page.getByRole('option', { name: theme === 'ocean' ? '10 秒' : '30 秒', exact: true }).click();
-      assert.match(await trigger.innerText(), theme === 'ocean' ? /10 秒/ : /30 秒/);
-      assert.ok(requests.at(-1)?.includes('period=today'), `${id} selecting refresh did not trigger a request`);
+      const chartWidth = await chart.evaluate(node => Number(node.getAttribute('width')));
+      assert.equal(readout.display !== 'none', true, `${id} combined chart readout hidden`);
+      assert.match(readout.text, /\d{2}:\d{2}/);
+      assert.match(readout.text, /次请求/);
+      assert.match(readout.text, /Token/);
+      assert.match(readout.text, /\d+(?:\.\d+)?[BMK] Token/);
+      assert.equal(await page.locator('.rankings-summary').innerText().then(text =>
+        /均 800K \/ 次/.test(text)), true, `${id} token average must be scaled once`);
+      const readoutFill = await chart.locator('.rankings-chart-readout rect').evaluate(node => getComputedStyle(node).fill);
+      const [readoutR, readoutG, readoutB] = readoutFill.match(/\d+/g).map(Number);
+      const luminance = channel => {
+        const value = channel / 255;
+        return value <= .03928 ? value / 12.92 : Math.pow((value + .055) / 1.055, 2.4);
+      };
+      const readoutLuminance = .2126 * luminance(readoutR) + .7152 * luminance(readoutG) + .0722 * luminance(readoutB);
+      const readoutTextFills = await chart.locator('.rankings-chart-readout text').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).fill));
+      const textContrast = readoutTextFills.map(fill => {
+        const [r, g, b] = fill.match(/\d+/g).map(Number);
+        const textLuminance = .2126 * luminance(r) + .7152 * luminance(g) + .0722 * luminance(b);
+        return (Math.max(textLuminance, readoutLuminance) + .05) / (Math.min(textLuminance, readoutLuminance) + .05);
+      });
+      assert.ok(textContrast.every(ratio => ratio >= 4.5), `${id} chart readout text contrast is insufficient: ${JSON.stringify(textContrast)}`);
+      const guideState = await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.map(node => ({
+        display: getComputedStyle(node).display, x1: node.getAttribute('x1'), y1: node.getAttribute('y1')
+      })));
+      assert.ok(readout.x >= 5 && readout.x + readout.width <= chartWidth, `${id} chart readout escapes plot`);
+      assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
+      await page.locator('main').evaluate(node => { node.scrollTop = 0; });
     }
   }
 
@@ -97,7 +122,8 @@ try {
   await page.evaluate(() => AppTheme.set('ocean', true));
   await page.evaluate(() => { App.go('#/rankings', true); });
   await page.locator('.rankings-trend-svg').waitFor();
-  await page.locator('.rankings-trend-panel').scrollIntoViewIfNeeded();
+  await page.locator('.rankings-trend-svg').evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(200);
   const chart = page.locator('.rankings-trend-svg');
   const hitBox = await page.locator('.rankings-trend-hit').boundingBox();
   await page.touchscreen.tap(hitBox.x + hitBox.width * .58, hitBox.y + hitBox.height * .46);
@@ -114,12 +140,13 @@ try {
   assert.equal(readout.display !== 'none', true);
   assert.match(readout.text, /\d{2}:\d{2}/);
   assert.match(readout.text, /次请求/);
+  assert.match(readout.text, /Token/);
   assert.ok(readout.x >= 5 && readout.x + readout.width <= chartWidth);
   assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
   await page.screenshot({ path: `${screenshotDir}/390x844-ocean-chart-touch.png`, animations: 'disabled' });
 
   assert.deepEqual(errors, []);
-  console.log('iOS rankings audit: picker, selection refresh, chart readout and responsive screenshots passed');
+  console.log('iOS rankings audit: five-second refresh, combined chart readout and responsive screenshots passed');
 } finally {
   await context.close();
   await browser.close();

@@ -190,6 +190,13 @@ try {
           await inspect(page, `${id}-channel-detail`);
           await page.evaluate(() => U.closeOverlay());
         }
+        if (route === 'rankings') {
+          assert.equal(await page.locator('.rankings-refresh-value').innerText(), '5 秒');
+          assert.equal(await page.locator('.rankings-refresh-trigger, .rankings-view-switch').count(), 0);
+          assert.equal(await page.locator('[data-chart=combined]').count(), 1);
+          assert.match(await page.locator('[data-chart=combined]').textContent(), /请求.*Token/);
+          assert.match(await page.locator('.rankings-control-head').innerText(), /更新于 \d{4}年\d{1,2}月\d{1,2}日 \d{2}:\d{2}:\d{2}/);
+        }
         if (route === 'keys') {
           await activate(page.locator('.keycard-name').first());
           await inspect(page, `${id}-key-detail`);

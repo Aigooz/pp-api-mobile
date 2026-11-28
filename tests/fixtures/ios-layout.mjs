@@ -74,7 +74,7 @@ export async function mockIOSLayout(page) {
     if (path === '/api/rankings') {
       const period = url.searchParams.get('period') || 'today';
       const stamp = new Date();
-      stamp.setHours(period === 'rt' ? 10 : 10, 30, 0, 0);
+      stamp.setHours(period === 'rt' ? 10 : 10, 30, 14, 0);
       const labels = period === 'week' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
         : period === 'rt' ? Array.from({ length: 30 }, (_, index) => String(index + 1).padStart(2, '0') + ':00')
         : Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0') + ':00');

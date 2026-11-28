@@ -28,8 +28,8 @@ function dataFor(period, step) {
     total: 9876543210,
     summary: { requests: 123456, tokens: 9876543210, latency_ms: 12340, success_rate: null, deltas: { requests: 2.5, tokens: 3.1 } },
     series: [
-      { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 7000000000, values: labels.map((_, index) => (index + 1) * 1000000) },
-      { name: 'beta-model', vendor: 'Beta', total: 2876543210, values: labels.map((_, index) => (index + 1) * 500000) }
+      { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 700000000, values: labels.map((_, index) => (index + 1) * 100000) },
+      { name: 'beta-model', vendor: 'Beta', total: 287654321, values: labels.map((_, index) => (index + 1) * 50000) }
     ],
     models: [
       { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 7000000000 },
@@ -46,6 +46,8 @@ function dataFor(period, step) {
   };
 }
 
+let currentVisibleTokenTotal = 0;
+let seriesScale = 1;
 await page.route('**/__proxy/**', async route => {
   const url = new URL(route.request().url());
   const path = url.pathname.replace(/^\/__proxy\/(site|model)/, '');
@@ -59,7 +61,19 @@ await page.route('**/__proxy/**', async route => {
     requests.push({ period, step });
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     if (fail) return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dataFor(period, step)) });
+    const result = dataFor(period, step);
+    result.summary.tokens = currentVisibleTokenTotal || result.summary.tokens;
+    result.total = result.summary.tokens;
+    const count = result.labels.length;
+    const weightTotal = count * (count + 1) / 2;
+    result.series.forEach((item, modelIndex) => {
+      const modelShare = modelIndex === 0 ? .71 : .29;
+      item.values = result.labels.map((_, index) => 9876543210 * modelShare * (index + 1) / weightTotal * seriesScale);
+    });
+    if (!seriesScale) {
+      result.series.forEach(item => { item.values = []; });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
   }
   return route.fulfill(ok({ items: [], total: 0 }));
 });
@@ -67,9 +81,7 @@ await page.route('**/__proxy/**', async route => {
 try {
   await page.goto(base + '/#/plaza');
   await page.evaluate(() => {
-    localStorage.removeItem('rankings_refresh_ms');
     localStorage.removeItem('rankings_period');
-    localStorage.removeItem('rankings_view');
   });
   await page.evaluate(() => App.go('#/rankings', true));
   await page.locator('.rankings-page').waitFor();
@@ -85,14 +97,19 @@ try {
   assert.equal(await page.locator('.rankings-metric').count(), 4);
   assert.match(await page.locator('.rankings-summary').innerText(), /123,456/);
   assert.match(await page.locator('.rankings-summary').innerText(), /12\.3 s/);
-  assert.match(await page.locator('.rankings-summary').innerText(), /98\.77 亿/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /98\.77B/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /平台原始值 9,876,543,210/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /均 800K \/ 次/);
   assert.equal(await page.locator('.rankings-rank-row').count(), 4);
   assert.match(await page.locator('.rankings-ranks-panel').innerText(), /模型排行[\s\S]*alpha-model/);
+  assert.match(await page.locator('.rankings-ranks-panel').innerText(), /70\.00B/);
   assert.match(await page.locator('.rankings-vendor-panel').innerText(), /厂商排行[\s\S]*Alpha/);
   assert.equal(await page.locator('.rankings-donut-segment').count(), 2);
-  assert.equal(await page.locator('.rankings-trend-line').count(), 1);
-  assert.match(await page.locator('.rankings-state').innerText(), /更新于 11月28日 12:00/);
-  assert.equal(await page.locator('.rankings-steps').count(), 0);
+  assert.equal(await page.locator('.rankings-trend-line').count(), 2);
+  assert.equal(await page.locator('[data-chart=combined]').count(), 1);
+  assert.equal(await page.locator('.rankings-state').innerText(), '实时');
+  assert.match(await page.locator('.rankings-updated-at').innerText(), /^更新于 2026年11月28日 12:00:00$/);
+  assert.equal(await page.locator('.rankings-steps, .rankings-refresh-trigger, .rankings-view-switch').count(), 0);
   assert.equal(await page.locator('.rankings-refresh-select, select').count(), 0);
   assert.match(await page.locator('.rankings-quality-panel').innerText(), /P90[\s\S]*P99[\s\S]*最快[\s\S]*最慢/);
   assert.match(await page.locator('.rankings-quality-panel').innerText(), /调用形态[\s\S]*用户集中度/);
@@ -115,11 +132,9 @@ try {
   assert.equal(requests.at(-1).step, '1m');
   assert.match(await page.locator('.rankings-chart-sub').innerText(), /最近 30 分钟 · 每分钟/);
 
-  await page.getByRole('button', { name: 'Token', exact: true }).click();
-  assert.match(await page.locator('.rankings-chart-sub').innerText(), /Token 用量/);
-  assert.equal(await page.getByRole('button', { name: 'Token', exact: true }).getAttribute('aria-pressed'), 'true');
-  await page.getByRole('button', { name: '请求', exact: true }).click();
-  assert.match(await page.locator('.rankings-panel').first().innerText(), /请求量/);
+  assert.match(await page.locator('.rankings-chart-sub').innerText(), /请求与 Token/);
+  assert.equal(await page.getByRole('button', { name: 'Token', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '请求', exact: true }).count(), 0);
 
   const chart = page.locator('.rankings-trend-svg');
   await chart.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
@@ -133,25 +148,23 @@ try {
   const readout = await page.locator('.rankings-chart-readout').textContent();
   assert.match(readout, /\d{2}:\d{2}/);
   assert.match(readout, /次请求/);
+  assert.match(readout, /Token/);
+  const tokenReadout = Number((readout.match(/(\d+(?:\.\d+)?)([BMK]?) Token/) || [])[1]) *
+    ({ '': 1, K: 1e3, M: 1e6, B: 1e9 })[(readout.match(/(\d+(?:\.\d+)?)([BMK]?) Token/) || [])[2]];
+  assert.ok(tokenReadout >= 1e8 && tokenReadout <= 2e9, 'chart must show canonical tokens only once: ' + readout);
   assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
-  assert.equal(await page.locator('.rankings-trend-active').evaluate(node => getComputedStyle(node).display !== 'none'), true);
-
-  await page.locator('.rankings-refresh-trigger').click();
-  await page.getByRole('dialog', { name: '自动刷新' }).waitFor();
-  assert.equal(await page.getByRole('option').count(), 5);
-  assert.equal(await page.getByRole('option', { name: '1 分钟', exact: true }).getAttribute('aria-selected'), 'true');
-  assert.ok(await page.getByRole('dialog').evaluate(node => node.scrollWidth <= node.clientWidth));
-  await page.getByRole('option', { name: '10 秒', exact: true }).click();
-  assert.match(await page.locator('.rankings-refresh-trigger').innerText(), /10 秒/);
-  assert.equal(await page.getByRole('dialog').count(), 0);
+  assert.equal(await page.locator('.rankings-trend-active').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
+  assert.match(await page.locator('.rankings-refresh-value').innerText(), /5 秒/);
   const beforeRefresh = requests.length;
-  await page.waitForTimeout(10200);
-  assert.ok(requests.length > beforeRefresh, 'automatic refresh should request fresh rankings');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:live-refreshed', { detail: { reason: 'test' } })));
+  for (let i = 0; i < 20 && requests.length <= beforeRefresh; i++) await page.waitForTimeout(50);
+  assert.ok(requests.length > beforeRefresh, 'rankings should refresh on the app five-second live tick');
 
   await page.evaluate(() => App.go('#/plaza'));
   await page.locator('.plaza-group').first().waitFor();
   const afterLeave = requests.length;
-  await page.waitForTimeout(10200);
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('pp:live-refreshed', { detail: { reason: 'test' } })));
+  await page.waitForTimeout(150);
   assert.equal(requests.length, afterLeave, 'inactive cached rankings must not poll');
   await page.getByRole('button', { name: '平台数据', exact: true }).click();
   await page.locator('.rankings-page').waitFor();
@@ -174,12 +187,19 @@ try {
   assert.match(await page.locator('.rankings-summary').innerText(), /123,456/);
   fail = false;
 
-  empty = true;
-  await page.getByRole('button', { name: '刷新平台数据' }).click();
-  await page.getByText('暂无趋势数据', { exact: true }).waitFor();
-  assert.match(await page.locator('.rankings-ranks-panel').innerText(), /暂无模型调用/);
-  assert.match(await page.locator('.rankings-vendor-panel').innerText(), /暂无厂商调用/);
-  empty = false;
+  currentVisibleTokenTotal = 296216240;
+  seriesScale = 1.2;
+  await page.locator('.rankings-page').evaluate(node => node.dispatchEvent(new CustomEvent('pp:page-refresh', { bubbles: true })));
+  await page.locator('.rankings-source-warning').waitFor();
+  await page.locator('.rankings-summary').waitFor();
+  assert.match(await page.locator('.rankings-summary').innerText(), /2\.96B/);
+  assert.equal(await page.locator('.rankings-source-warning').isVisible(), true);
+  assert.match(await page.locator('.rankings-source-warning').innerText(), /平台原始统计口径异常/);
+  seriesScale = 1;
+  currentVisibleTokenTotal = 0;
+  await page.locator('.rankings-page').evaluate(node => node.dispatchEvent(new CustomEvent('pp:page-refresh', { bubbles: true })));
+  await page.waitForFunction(() => document.querySelector('.rankings-summary').textContent.includes('98.77B'));
+  await page.locator('.rankings-source-warning').waitFor({ state: 'hidden' });
 
   for (const width of [320, 390, 768]) {
     await page.setViewportSize({ width, height: 844 });
@@ -191,11 +211,18 @@ try {
     })));
     assert.ok(tabs.every(item => item.width >= 60 && !item.overflow), JSON.stringify(tabs));
     assert.equal(await page.locator('.rankings-periods button').evaluateAll(nodes => nodes.every(node => node.scrollWidth <= node.clientWidth)), true);
-    assert.equal(await page.locator('.rankings-refresh-trigger').evaluate(node => node.scrollWidth <= node.clientWidth), true);
-    await page.locator('.rankings-refresh-trigger').click();
-    assert.ok(await page.getByRole('dialog').evaluate(node => node.scrollWidth <= node.clientWidth));
-    await page.getByRole('button', { name: '取消' }).click();
+    assert.equal(await page.locator('.rankings-refresh-control').evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    assert.equal(await page.locator('[data-chart=combined]').count(), 1);
+    assert.match(await page.locator('[data-chart=combined]').textContent(), /请求.*Token/);
   }
+
+  empty = true;
+  await page.getByRole('button', { name: '刷新平台数据' }).click();
+  await page.getByText('暂无趋势数据', { exact: true }).waitFor();
+  assert.match(await page.locator('.rankings-ranks-panel').innerText(), /暂无模型调用/);
+  assert.match(await page.locator('.rankings-vendor-panel').innerText(), /暂无厂商调用/);
+  empty = false;
+
   assert.deepEqual(errors, []);
   console.log('Rankings: API periods, TUI refresh picker, chart touch readout, empty/error states, rankings and responsive layouts passed');
 } finally {
