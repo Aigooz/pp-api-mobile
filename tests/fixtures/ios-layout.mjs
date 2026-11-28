@@ -73,11 +73,13 @@ export async function mockIOSLayout(page) {
     }) });
     if (path === '/api/rankings') {
       const period = url.searchParams.get('period') || 'today';
+      const stamp = new Date();
+      stamp.setHours(period === 'rt' ? 10 : 10, 30, 0, 0);
       const labels = period === 'week' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
         : period === 'rt' ? Array.from({ length: 30 }, (_, index) => String(index + 1).padStart(2, '0') + ':00')
         : Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0') + ':00');
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        period, generated_at: new Date().toISOString(), labels,
+        period, generated_at: stamp.toISOString(), labels,
         total: 9876543210,
         summary: { requests: 123456, tokens: 9876543210, latency_ms: 12340, success_rate: null, deltas: { requests: 2.5, tokens: 4.1 } },
         series: [

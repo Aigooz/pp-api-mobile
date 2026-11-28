@@ -6,7 +6,7 @@ const server = createPreviewServer();
 await listenPreview(server);
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, timezoneId: 'Asia/Shanghai' });
 const page = await context.newPage();
 const errors = [];
 const requests = [];
@@ -17,14 +17,14 @@ page.on('pageerror', error => errors.push(error.message));
 const ok = data => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ code: 0, data }) });
 
 function dataFor(period, step) {
-  if (empty) return { period, step: period === 'rt' ? step : null, generated_at: '2026-11-28T12:00:00+08:00', labels: [],
+  if (empty) return { period, step: period === 'rt' ? step : null, generated_at: '2026-11-28T04:00:00Z', labels: [],
     total: 0, summary: { requests: 0, tokens: 0, latency_ms: null, deltas: {} }, series: [], models: [], vendors: [],
     requests_series: [], latency: {}, stream: { stream: 0, plain: 0 }, users: { top1: 0, total: 0 } };
   const labels = period === 'week' ? ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
     : period === 'rt' ? Array.from({ length: 30 }, (_, index) => '01:' + String(index).padStart(2, '0'))
     : Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0') + ':00');
   return {
-    period, step: period === 'rt' ? step : null, generated_at: '2026-11-28T12:00:00+08:00', labels,
+    period, step: period === 'rt' ? step : null, generated_at: '2026-11-28T04:00:00Z', labels,
     total: 9876543210,
     summary: { requests: 123456, tokens: 9876543210, latency_ms: 12340, success_rate: null, deltas: { requests: 2.5, tokens: 3.1 } },
     series: [
@@ -91,6 +91,7 @@ try {
   assert.match(await page.locator('.rankings-vendor-panel').innerText(), /厂商排行[\s\S]*Alpha/);
   assert.equal(await page.locator('.rankings-donut-segment').count(), 2);
   assert.equal(await page.locator('.rankings-trend-line').count(), 1);
+  assert.match(await page.locator('.rankings-state').innerText(), /更新于 11月28日 12:00/);
   assert.equal(await page.locator('.rankings-steps').count(), 0);
   assert.equal(await page.locator('.rankings-refresh-select, select').count(), 0);
   assert.match(await page.locator('.rankings-quality-panel').innerText(), /P90[\s\S]*P99[\s\S]*最快[\s\S]*最慢/);
@@ -101,13 +102,15 @@ try {
   await page.getByRole('button', { name: '本月', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('.rankings-chart-sub').textContent.includes('过去 30 天'));
   await page.getByRole('button', { name: '本周', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.rankings-chart-sub').textContent.includes('过去 7 天'));
+  await page.waitForFunction(() => location.hash === '#/rankings' &&
+    document.querySelector('.rankings-chart-sub').textContent.includes('过去 7 天'));
   delay = 0;
   assert.equal(requests.at(-1).period, 'week');
   assert.equal(requests.at(-1).step, '');
 
   await page.getByRole('button', { name: '实时', exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.rankings-trend-point').length > 0);
+  await page.waitForFunction(() => location.hash === '#/rankings' &&
+    document.querySelector('.rankings-chart-sub').textContent.includes('最近 30 分钟'));
   assert.equal(requests.at(-1).period, 'rt');
   assert.equal(requests.at(-1).step, '1m');
   assert.match(await page.locator('.rankings-chart-sub').innerText(), /最近 30 分钟 · 每分钟/);
@@ -152,6 +155,18 @@ try {
   assert.equal(requests.length, afterLeave, 'inactive cached rankings must not poll');
   await page.getByRole('button', { name: '平台数据', exact: true }).click();
   await page.locator('.rankings-page').waitFor();
+
+  fail = true;
+  await page.evaluate(() => App.go('#/home', true));
+  await page.evaluate(() => App.go('#/rankings', true));
+  await page.locator('.rankings-page').waitFor();
+  await page.getByText('平台数据加载失败').waitFor();
+  const failedRequests = requests.length;
+  await page.waitForTimeout(1500);
+  assert.ok(requests.length - failedRequests <= 1, 'first-load failures must not create a request loop');
+  fail = false;
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByText('请求数', { exact: true }).waitFor();
 
   fail = true;
   await page.getByRole('button', { name: '刷新平台数据' }).click();

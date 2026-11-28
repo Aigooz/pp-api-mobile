@@ -67,10 +67,10 @@
 
   function timestamp(value) {
     if (!value) return '—';
-    var string = String(value);
-    var match = string.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-    if (!match) return U.datetime(value);
-    return (+match[2]) + '月' + (+match[3]) + '日 ' + match[4] + ':' + match[5];
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return U.datetime(value);
+    return (date.getMonth() + 1) + '月' + date.getDate() + '日 ' +
+      String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
   }
 
   function periodMeta(period) {
@@ -82,14 +82,13 @@
     var length = Math.min((data.labels || []).length, values.length);
     if (!length) return 0;
     if (period === 'rt') return length;
-    var match = String(data.generated_at || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})/);
     var visible = length;
-    if (match) {
-      var date = new Date(+match[1], +match[2] - 1, +match[3], +match[4]);
-      if (period === 'today') visible = Math.min(length, +match[4] + 1);
-      else if (period === 'week') visible = Math.min(length, ((date.getDay() + 6) % 7) + 1);
-      else if (period === 'month') visible = Math.min(length, +match[3]);
-      else visible = Math.min(length, +match[2]);
+    var generated = new Date(data.generated_at);
+    if (!isNaN(generated.getTime())) {
+      if (period === 'today') visible = Math.min(length, generated.getHours() + 1);
+      else if (period === 'week') visible = Math.min(length, ((generated.getDay() + 6) % 7) + 1);
+      else if (period === 'month') visible = Math.min(length, generated.getDate());
+      else visible = Math.min(length, generated.getMonth() + 1);
     }
     for (var i = length - 1; i >= visible; i--) {
       if (number(values[i]) > 0) return i + 1;
@@ -355,7 +354,7 @@
     var period = PERIODS.some(function (item) { return item.key === storedPeriod; }) ? storedPeriod : 'today';
     var refreshMs = REFRESHES.some(function (item) { return item.value === storedRefresh; }) ? storedRefresh : 60000;
     var view = storedView === 'tokens' ? 'tokens' : 'requests';
-    var data = null, pending = false, queued = false, timer = null, updatedAt = 0, requestToken = 0;
+    var data = null, pending = false, queued = false, timer = null, updatedAt = 0, failedAt = 0, failureCount = 0, requestToken = 0;
     var host = h('div', { class: 'page rankings-page' }, C.modelTabs('rankings'));
     var state = h('div', { class: 'rankings-state', 'aria-live': 'polite' }, '正在加载平台数据…');
     var periodGroup = h('div', { class: 'rankings-periods', role: 'group', 'aria-label': '统计周期' });
@@ -575,6 +574,14 @@
       timer = setTimeout(function () { timer = null; load(false); }, wait);
     }
 
+    function scheduleFailure() {
+      clearTimeout(timer);
+      if (!isPageActive()) return;
+      var wait = Math.min(300000, refreshMs * Math.pow(2, Math.min(5, failureCount - 1)));
+      var remaining = Math.max(0, wait - (Date.now() - failedAt));
+      timer = setTimeout(function () { timer = null; load(false); }, remaining);
+    }
+
     function load(manual) {
       clearTimeout(timer);
       timer = null;
@@ -599,6 +606,8 @@
         }
         data = result;
         updatedAt = Date.now();
+        failedAt = 0;
+        failureCount = 0;
         paint();
       }).catch(function () {
         if (sequence !== requestToken || !App.isPageRetained(host)) return;
@@ -606,6 +615,8 @@
           queued = true;
           return;
         }
+        failedAt = Date.now();
+        failureCount++;
         state.textContent = data ? '更新失败，显示上次数据' : '平台数据加载失败';
         if (!data) {
           showInitial('error');
@@ -614,11 +625,16 @@
         pending = false; reload.disabled = false;
         if (!App.isPageRetained(host)) return;
         if (queued) load(false);
+        else if (failureCount) scheduleFailure();
         else schedule();
       });
     }
 
-    host.addEventListener('pp:page-activate', function () { if (!updatedAt || Date.now() - updatedAt >= refreshMs) load(false); else schedule(); });
+    host.addEventListener('pp:page-activate', function () {
+      if (failureCount) load(false);
+      else if (!updatedAt || Date.now() - updatedAt >= refreshMs) load(false);
+      else schedule();
+    });
     host.addEventListener('pp:page-deactivate', function () { clearTimeout(timer); });
     host.addEventListener('pp:page-refresh', function () { load(true); });
     host.addEventListener('pp:page-dispose', function () { clearTimeout(timer); requestToken++; });
