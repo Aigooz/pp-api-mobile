@@ -3457,6 +3457,7 @@ button.dashboard-quality-item:active {
 .usage-trend-hit {
   fill: transparent;
   cursor: crosshair;
+  touch-action: pan-y;
 }
 .usage-chart-axis {
   display: flex;

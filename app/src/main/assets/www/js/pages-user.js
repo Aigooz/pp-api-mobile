@@ -430,9 +430,12 @@
     path.setAttribute('d', rows.map(function (row, index) { return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2); }).join(' '));
     path.setAttribute('class', 'usage-trend-line');
     svg.appendChild(path);
-    var guide = document.createElementNS(NS, 'line');
-    guide.setAttribute('class', 'usage-trend-guide'); guide.style.display = 'none';
-    svg.appendChild(guide);
+    var guideX = document.createElementNS(NS, 'line');
+    guideX.setAttribute('class', 'usage-trend-guide usage-trend-guide-x'); guideX.style.display = 'none';
+    svg.appendChild(guideX);
+    var guideY = document.createElementNS(NS, 'line');
+    guideY.setAttribute('class', 'usage-trend-guide usage-trend-guide-y'); guideY.style.display = 'none';
+    svg.appendChild(guideY);
     var active = document.createElementNS(NS, 'circle');
     active.setAttribute('r', '4.5'); active.setAttribute('class', 'usage-trend-active'); active.style.display = 'none';
     svg.appendChild(active);
@@ -453,12 +456,15 @@
       var chartX = (pointer.clientX - rect.left) * width / rect.width;
       var index = rows.length === 1 ? 0 : Math.round((chartX - left) / plotWidth * (rows.length - 1));
       index = Math.max(0, Math.min(rows.length - 1, index));
-      if (index === lastIndex && guide.style.display !== 'none') return;
+      if (index === lastIndex && guideX.style.display !== 'none') return;
       lastIndex = index;
       var row = rows[index], x = xAt(index), y = yAt(row);
-      guide.style.display = '';
-      guide.setAttribute('x1', String(x)); guide.setAttribute('x2', String(x));
-      guide.setAttribute('y1', String(top)); guide.setAttribute('y2', String(baseline));
+      guideX.style.display = '';
+      guideX.setAttribute('x1', String(x)); guideX.setAttribute('x2', String(x));
+      guideX.setAttribute('y1', String(top)); guideX.setAttribute('y2', String(baseline));
+      guideY.style.display = '';
+      guideY.setAttribute('x1', String(left)); guideY.setAttribute('x2', String(left + plotWidth));
+      guideY.setAttribute('y1', String(y)); guideY.setAttribute('y2', String(y));
       active.style.display = '';
       active.setAttribute('cx', String(x)); active.setAttribute('cy', String(y));
       var boxWidth = Math.min(148, Math.max(94, row.date.length * 6 + 18));
@@ -473,27 +479,37 @@
       svg.setAttribute('aria-label', row.date + ' 消耗 ' + usageCurrency(row.value));
     }
     function hide() {
-      lastIndex = -1; guide.style.display = 'none'; active.style.display = 'none'; tip.style.display = 'none';
+      lastIndex = -1; guideX.style.display = 'none'; guideY.style.display = 'none';
+      active.style.display = 'none'; tip.style.display = 'none';
       svg.setAttribute('aria-label', '所选时段消耗趋势');
     }
-    svg.addEventListener('pointermove', activate);
-    svg.addEventListener('pointerdown', activate);
-    svg.addEventListener('pointerup', hide);
-    svg.addEventListener('pointercancel', hide);
-    svg.addEventListener('pointerleave', hide);
+    var touching = false;
+    var hit = document.createElementNS(NS, 'rect');
+    hit.setAttribute('x', String(left)); hit.setAttribute('y', String(top));
+    hit.setAttribute('width', String(plotWidth)); hit.setAttribute('height', String(plotHeight));
+    hit.setAttribute('class', 'usage-trend-hit');
+    hit.addEventListener('pointerdown', function (event) {
+      touching = true;
+      activate(event);
+      if (hit.setPointerCapture) {
+        try { hit.setPointerCapture(event.pointerId); } catch (error) {}
+      }
+    });
+    hit.addEventListener('pointermove', function (event) {
+      if (event.pointerType === 'touch' && !touching) return;
+      activate(event);
+    });
+    hit.addEventListener('pointerup', function () { touching = false; });
+    hit.addEventListener('pointercancel', function () { touching = false; });
+    hit.addEventListener('pointerleave', function (event) {
+      if (event.pointerType === 'mouse') hide();
+    });
+    svg.appendChild(hit);
     rows.forEach(function (row, index) {
-      var focus = document.createElementNS(NS, 'circle');
-      focus.setAttribute('cx', String(xAt(index))); focus.setAttribute('cy', String(yAt(row)));
-      focus.setAttribute('r', '9'); focus.setAttribute('class', 'usage-trend-hit');
       var dot = document.createElementNS(NS, 'circle');
       dot.setAttribute('cx', String(xAt(index))); dot.setAttribute('cy', String(yAt(row)));
       dot.setAttribute('r', '2.6'); dot.setAttribute('class', 'usage-trend-dot');
       svg.appendChild(dot);
-      focus.addEventListener('pointerenter', function () {
-        var rect = svg.getBoundingClientRect();
-        activate({ clientX: xAt(index) / width * rect.width + rect.left });
-      });
-      svg.appendChild(focus);
     });
     svg.setAttribute('data-points', linePoints.join(' '));
     return svg;
@@ -565,9 +581,12 @@
     path.setAttribute('d', rows.map(function (row, index) { return (index ? 'L' : 'M') + xAt(index).toFixed(2) + ' ' + yAt(row).toFixed(2); }).join(' '));
     path.setAttribute('class', 'usage-token-area-line');
     svg.appendChild(path);
-    var guide = document.createElementNS(NS, 'line');
-    guide.setAttribute('class', 'usage-trend-guide usage-token-area-guide'); guide.style.display = 'none';
-    svg.appendChild(guide);
+    var guideX = document.createElementNS(NS, 'line');
+    guideX.setAttribute('class', 'usage-trend-guide usage-token-area-guide usage-trend-guide-x'); guideX.style.display = 'none';
+    svg.appendChild(guideX);
+    var guideY = document.createElementNS(NS, 'line');
+    guideY.setAttribute('class', 'usage-trend-guide usage-token-area-guide usage-trend-guide-y'); guideY.style.display = 'none';
+    svg.appendChild(guideY);
     var active = document.createElementNS(NS, 'circle');
     active.setAttribute('r', '4.5'); active.setAttribute('class', 'usage-token-area-active'); active.style.display = 'none';
     svg.appendChild(active);
@@ -588,12 +607,15 @@
       var chartX = (pointer.clientX - rect.left) * width / rect.width;
       var index = rows.length === 1 ? 0 : Math.round((chartX - left) / plotWidth * (rows.length - 1));
       index = Math.max(0, Math.min(rows.length - 1, index));
-      if (index === lastIndex && guide.style.display !== 'none') return;
+      if (index === lastIndex && guideX.style.display !== 'none') return;
       lastIndex = index;
       var row = rows[index], x = xAt(index), y = yAt(row);
-      guide.style.display = '';
-      guide.setAttribute('x1', String(x)); guide.setAttribute('x2', String(x));
-      guide.setAttribute('y1', String(top)); guide.setAttribute('y2', String(baseline));
+      guideX.style.display = '';
+      guideX.setAttribute('x1', String(x)); guideX.setAttribute('x2', String(x));
+      guideX.setAttribute('y1', String(top)); guideX.setAttribute('y2', String(baseline));
+      guideY.style.display = '';
+      guideY.setAttribute('x1', String(left)); guideY.setAttribute('x2', String(left + plotWidth));
+      guideY.setAttribute('y1', String(y)); guideY.setAttribute('y2', String(y));
       active.style.display = '';
       active.setAttribute('cx', String(x)); active.setAttribute('cy', String(y));
       var boxWidth = Math.min(148, Math.max(94, row.date.length * 6 + 18));
@@ -608,27 +630,37 @@
       svg.setAttribute('aria-label', row.date + ' Token 消耗 ' + U.tokens(row.value));
     }
     function hide() {
-      lastIndex = -1; guide.style.display = 'none'; active.style.display = 'none'; tip.style.display = 'none';
+      lastIndex = -1; guideX.style.display = 'none'; guideY.style.display = 'none';
+      active.style.display = 'none'; tip.style.display = 'none';
       svg.setAttribute('aria-label', '所选时段 Token 消耗面积趋势');
     }
-    svg.addEventListener('pointermove', activate);
-    svg.addEventListener('pointerdown', activate);
-    svg.addEventListener('pointerup', hide);
-    svg.addEventListener('pointercancel', hide);
-    svg.addEventListener('pointerleave', hide);
+    var touching = false;
+    var hit = document.createElementNS(NS, 'rect');
+    hit.setAttribute('x', String(left)); hit.setAttribute('y', String(top));
+    hit.setAttribute('width', String(plotWidth)); hit.setAttribute('height', String(plotHeight));
+    hit.setAttribute('class', 'usage-trend-hit');
+    hit.addEventListener('pointerdown', function (event) {
+      touching = true;
+      activate(event);
+      if (hit.setPointerCapture) {
+        try { hit.setPointerCapture(event.pointerId); } catch (error) {}
+      }
+    });
+    hit.addEventListener('pointermove', function (event) {
+      if (event.pointerType === 'touch' && !touching) return;
+      activate(event);
+    });
+    hit.addEventListener('pointerup', function () { touching = false; });
+    hit.addEventListener('pointercancel', function () { touching = false; });
+    hit.addEventListener('pointerleave', function (event) {
+      if (event.pointerType === 'mouse') hide();
+    });
+    svg.appendChild(hit);
     rows.forEach(function (row, index) {
-      var focus = document.createElementNS(NS, 'circle');
-      focus.setAttribute('cx', String(xAt(index))); focus.setAttribute('cy', String(yAt(row)));
-      focus.setAttribute('r', '9'); focus.setAttribute('class', 'usage-trend-hit');
       var dot = document.createElementNS(NS, 'circle');
       dot.setAttribute('cx', String(xAt(index))); dot.setAttribute('cy', String(yAt(row)));
       dot.setAttribute('r', '2.6'); dot.setAttribute('class', 'usage-token-area-dot');
       svg.appendChild(dot);
-      focus.addEventListener('pointerenter', function () {
-        var rect = svg.getBoundingClientRect();
-        activate({ clientX: xAt(index) / width * rect.width + rect.left });
-      });
-      svg.appendChild(focus);
     });
     svg.setAttribute('data-points', linePoints.join(' '));
     return svg;

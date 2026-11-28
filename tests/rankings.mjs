@@ -66,6 +66,13 @@ await page.route('**/__proxy/**', async route => {
 
 try {
   await page.goto(base + '/#/plaza');
+  await page.evaluate(() => {
+    localStorage.removeItem('rankings_refresh_ms');
+    localStorage.removeItem('rankings_period');
+    localStorage.removeItem('rankings_view');
+  });
+  await page.evaluate(() => App.go('#/rankings', true));
+  await page.locator('.rankings-page').waitFor();
   await page.getByRole('button', { name: '平台数据', exact: true }).click();
   await page.locator('.rankings-page').waitFor();
   await page.getByText('请求数', { exact: true }).waitFor();
@@ -112,16 +119,13 @@ try {
   assert.match(await page.locator('.rankings-panel').first().innerText(), /请求量/);
 
   const chart = page.locator('.rankings-trend-svg');
-  await chart.scrollIntoViewIfNeeded();
-  await page.locator('.rankings-trend-hit').evaluate(hit => {
-    const rect = hit.ownerSVGElement.getBoundingClientRect();
-    hit.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      pointerType: 'touch',
-      clientX: rect.left + rect.width * .58,
-      clientY: rect.top + rect.height * .46
-    }));
-  });
+  await chart.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  await page.waitForTimeout(100);
+  const chartBox = await chart.boundingBox();
+  const viewportWidth = await page.evaluate(() => innerWidth);
+  const visibleLeft = Math.max(0, chartBox.x), visibleRight = Math.min(viewportWidth, chartBox.x + chartBox.width);
+  const tapX = visibleLeft + (visibleRight - visibleLeft) * .58, tapY = chartBox.y + chartBox.height * .46;
+  await page.touchscreen.tap(tapX, tapY);
   await page.locator('.rankings-chart-readout').waitFor();
   const readout = await page.locator('.rankings-chart-readout').textContent();
   assert.match(readout, /\d{2}:\d{2}/);

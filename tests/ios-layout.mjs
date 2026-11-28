@@ -78,10 +78,25 @@ async function inspect(page, name) {
     if (title.width < 60 || title.right > firstAction.left) clipping.push({ label: 'appbar title', reason: 'title crowded by actions' });
     const left = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-left')) || 0;
     const right = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-right')) || 0;
+    const bottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')) || 0;
     for (const node of document.querySelectorAll('.tabbar,.composer,.appbar-leading,.appbar-actions,.sheet,.picker-panel')) {
-      if (!visible(node) || node.matches('.sheet')) continue;
+      if (!visible(node)) continue;
       const box = rect(node);
-      if (box.left < left - 1 || box.right > innerWidth - right + 1) clipping.push({ label: label(node), reason: 'control outside horizontal safe area' });
+      if (node.matches('.sheet')) {
+        const content = node.querySelector('.sheet-handle');
+        const contentBox = content ? rect(content) : box;
+        if (contentBox.left < left - 1 || contentBox.right > innerWidth - right + 1) {
+          clipping.push({ label: label(node), reason: 'sheet content outside horizontal safe area' });
+        }
+      } else if (box.left < left - 1 || box.right > innerWidth - right + 1) {
+        clipping.push({ label: label(node), reason: 'control outside horizontal safe area' });
+      }
+      if (node.matches('.tabbar') && box.bottom > innerHeight - bottom - 9) {
+        clipping.push({ label: label(node), reason: 'tabbar intrudes into home indicator safe area', bottom: box.bottom, limit: innerHeight - bottom - 10 });
+      }
+      if (node.matches('.sheet,.picker-panel') && box.top < -1) {
+        clipping.push({ label: label(node), reason: 'overlay exceeds top safe area', top: box.top });
+      }
     }
     if (header.bottom > innerHeight - 100) clipping.push({ label: 'appbar', reason: 'header exceeds available height' });
     if (location.hash === '#/home') {
@@ -182,6 +197,21 @@ try {
         }
         if (['home', 'plaza', 'rankings', 'channel-status', 'usage', 'purchase', 'profile', 'me', 'redeem'].includes(route)) {
           await page.locator('main').evaluate(node => { node.scrollTop = node.scrollHeight; });
+          await page.waitForTimeout(100);
+          const endClearance = await page.evaluate(() => {
+            const view = document.querySelector('main');
+            const slots = [...document.querySelectorAll('.route-slot .page > *:last-child, .route-slot .page:last-child > *:last-child')];
+            const last = slots.filter(node => {
+              const box = node.getBoundingClientRect();
+              return box.width > 0 && box.height > 0 && box.bottom <= innerHeight + 1;
+            }).sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+            const bar = document.querySelector('.tabbar').getBoundingClientRect();
+            return { scrollTop: view.scrollTop, scrollHeight: view.scrollHeight, clientHeight: view.clientHeight,
+              tabTop: bar.top, bottom: last ? last.getBoundingClientRect().bottom : 0, tag: last ? last.className : '' };
+          });
+          if (endClearance.scrollTop + endClearance.clientHeight >= endClearance.scrollHeight - 2 && endClearance.bottom > endClearance.tabTop + 1) {
+            issues.push({ name: `${id}-${route}-bottom`, bottom: endClearance });
+          }
           await inspect(page, `${id}-${route}-bottom`);
         }
       }
@@ -250,19 +280,29 @@ try {
       const charts = page.locator('.usage-trend-svg');
       await charts.nth(1).waitFor();
       for (const chart of await charts.all()) {
-        await chart.evaluate(node => {
-          const box = node.getBoundingClientRect();
-          node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: box.left + box.width * .6, clientY: box.top + box.height * .45, pointerType: 'touch' }));
-        });
-        const tooltip = await chart.locator('.usage-trend-tip:visible').evaluate(node => {
+        await chart.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
+        await page.waitForTimeout(100);
+        const hit = chart.locator('.usage-trend-hit');
+        const hitBox = await hit.boundingBox();
+        const tapX = hitBox.x + hitBox.width * .6, tapY = hitBox.y + hitBox.height * .45;
+        await page.touchscreen.tap(tapX, tapY);
+        await page.waitForTimeout(100);
+        const tooltip = await chart.locator('.usage-trend-tip').filter({ visible: true }).evaluate(node => {
           const rect = node.querySelector('rect');
-          const text = node.querySelector('text');
-          return { x: Number(rect.getAttribute('x')), width: Number(rect.getAttribute('width')), fill: getComputedStyle(rect).fill, textFill: getComputedStyle(text).fill, text: node.textContent };
+          const texts = [...node.querySelectorAll('text')];
+          return { x: Number(rect.getAttribute('x')), width: Number(rect.getAttribute('width')), fill: getComputedStyle(rect).fill,
+            textFill: texts.map(text => getComputedStyle(text).fill), text: node.textContent,
+            guides: [...node.ownerSVGElement.querySelectorAll('.usage-trend-guide')].map(guide => ({
+              display: getComputedStyle(guide).display,
+              x: Number(guide.getAttribute('x1')),
+              y: Number(guide.getAttribute('y1'))
+            })) };
         });
         assert.ok(tooltip.x >= 44 && tooltip.x + tooltip.width <= 311, `${id} chart tooltip escapes plot bounds: ${JSON.stringify(tooltip)}`);
-        assert.notEqual(tooltip.fill, tooltip.textFill, `${id} chart tooltip text contrast is missing`);
+        assert.ok(tooltip.textFill.every(fill => fill !== tooltip.fill), `${id} chart tooltip text contrast is missing`);
         assert.ok(tooltip.text.trim(), `${id} chart tooltip has no data`);
-        await chart.evaluate(node => node.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'touch' })));
+        assert.ok(tooltip.guides.length >= 2, `${id} chart must render horizontal and vertical guides: ${JSON.stringify(tooltip.guides)}`);
+        assert.ok(tooltip.guides.every(guide => guide.display !== 'none'), `${id} chart guides disappear after a touch tap: ${JSON.stringify(tooltip.guides)}`);
       }
       await activate(page.getByRole('button', { name: '自定义时间', exact: true }));
       await inspect(page, `${id}-date-fields`);

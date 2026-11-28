@@ -151,8 +151,8 @@ try {
   assert.equal(yAxisLabels[4], '$0');
   assert.equal(yAxisLabels.at(-1), '0');
   const chart = page.locator('.usage-trend-svg:not(.usage-token-area-svg)');
-  await chart.evaluate((node) => {
-    const box = node.getBoundingClientRect();
+  await chart.locator('.usage-trend-hit').evaluate((node) => {
+    const box = node.ownerSVGElement.getBoundingClientRect();
     node.dispatchEvent(new PointerEvent('pointermove', {
       bubbles: true, pointerType: 'mouse',
       clientX: box.left + box.width * .52,
@@ -165,8 +165,8 @@ try {
   assert.equal(await page.getByText('Token 消耗面积', { exact: true }).count(), 1);
   assert.match(await page.locator('.usage-chart-card').innerText(), /峰值 [\d.]+[kM]?/);
   assert.equal(await page.locator('.usage-token-area-line').count(), 1);
-  await page.locator('.usage-token-area-svg').evaluate((node) => {
-    const box = node.getBoundingClientRect();
+  await page.locator('.usage-token-area-svg .usage-trend-hit').evaluate((node) => {
+    const box = node.ownerSVGElement.getBoundingClientRect();
     node.dispatchEvent(new PointerEvent('pointermove', {
       bubbles: true, pointerType: 'mouse',
       clientX: box.left + box.width * .52,
