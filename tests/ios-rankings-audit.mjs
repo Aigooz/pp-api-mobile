@@ -91,9 +91,9 @@ try {
       assert.match(readout.text, /\d{2}:\d{2}/);
       assert.match(readout.text, /次请求/);
       assert.match(readout.text, /Token/);
-      assert.match(readout.text, /\d+(?:\.\d+)?[BMK] Token/);
+      assert.match(readout.text, /\d+(?:\.\d+)?(?:[亿万])? Token/);
       assert.equal(await page.locator('.rankings-summary').innerText().then(text =>
-        /均 800K \/ 次/.test(text)), true, `${id} token average must be scaled once`);
+        /均 80,001 \/ 次/.test(text)), true, `${id} token average must use source units`);
       const readoutFill = await chart.locator('.rankings-chart-readout rect').evaluate(node => getComputedStyle(node).fill);
       const [readoutR, readoutG, readoutB] = readoutFill.match(/\d+/g).map(Number);
       const luminance = channel => {
@@ -112,7 +112,8 @@ try {
         display: getComputedStyle(node).display, x1: node.getAttribute('x1'), y1: node.getAttribute('y1')
       })));
       assert.ok(readout.x >= 5 && readout.x + readout.width <= chartWidth, `${id} chart readout escapes plot`);
-      assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
+      assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true,
+        `${id} chart guides hidden: ${JSON.stringify(guideState)}`);
       await page.locator('main').evaluate(node => { node.scrollTop = 0; });
     }
   }

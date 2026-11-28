@@ -11,9 +11,6 @@
     { key: 'year', label: '今年' },
     { key: 'rt', label: '实时' }
   ];
-  // The public endpoint reports Token counters at one tenth of the actual
-  // quantity. Normalize once, then format without re-scaling any derived value.
-  var TOKEN_SCALE = 10;
   var REFRESH_MS = 5000;
   var COLORS = ['#0873ca', '#0b8f7a', '#d98819', '#c84b76', '#7357d6', '#2bb6c9', '#8fbf3f'];
   var PERIOD_META = {
@@ -38,25 +35,25 @@
 
   function short(value) {
     var n = number(value);
-    if (n >= 1e9) return { value: (n / 1e9).toFixed(2), unit: 'B' };
-    if (n >= 1e6) return { value: (n / 1e6).toFixed(2), unit: 'M' };
-    if (n >= 1e3) return { value: (n / 1e3).toFixed(1), unit: 'K' };
-    return { value: U.num(n), unit: '' };
+    if (n >= 1e8) return { value: (n / 1e8).toFixed(2), unit: '亿' };
+    if (n >= 1e6) return { value: U.num(Math.round(n / 1e4)), unit: '万' };
+    return { value: U.num(Math.round(n)), unit: '' };
   }
 
-  function canonicalTokens(raw) {
-    return number(raw) * TOKEN_SCALE;
+  function formatTokens(value) {
+    var item = short(value);
+    return item.value + item.unit;
   }
 
-  function formatTokens(canonical) {
-    return U.tokens(number(canonical));
-  }
-
-  function percent(value, digits) {
+  function percentText(value) {
     var n = Number(value);
     if (!isFinite(n)) return '—';
-    if (n > 0 && n <= 1) n *= 100;
-    return n.toFixed(digits === undefined ? 1 : digits) + '%';
+    if (n === 0) return '0%';
+    if (n >= 99.999) return '100%';
+    if (n >= 99.9) return n.toFixed(2) + '%';
+    if (n >= 10) return n.toFixed(1) + '%';
+    if (n >= .01) return n.toFixed(2) + '%';
+    return n.toFixed(3) + '%';
   }
 
   function share(value, total) {
@@ -64,13 +61,14 @@
     return all ? n / all * 100 : 0;
   }
 
-  function compactAxis(value) {
-    var n = number(value);
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e4) return (n / 1e4).toFixed(n >= 1e6 ? 0 : 1) + '万';
-    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K';
-    return U.num(n);
+  function axisFormat(max) {
+    var top = number(max);
+    return function (value) {
+      var n = number(value);
+      if (top >= 1e8) return (n / 1e8).toFixed(2) + '亿';
+      if (top >= 1e6) return U.num(Math.round(n / 1e4)) + '万';
+      return U.num(Math.round(n));
+    };
   }
 
   function svg(tag, attrs) {
@@ -118,7 +116,7 @@
     (data.series || []).forEach(function (item) {
       (item.values || []).slice(0, length).forEach(function (value, index) { values[index] += number(value); });
     });
-    return values.map(canonicalTokens);
+    return values;
   }
 
   function trendChart(requestValues, tokenValues, labels) {
@@ -142,6 +140,8 @@
 
     var requestMax = scale(requestValues);
     var tokenMax = scale(tokenValues);
+    var requestAxis = axisFormat(requestMax);
+    var tokenAxis = axisFormat(tokenMax);
     var x = function (index) { return left + (count === 1 ? plotWidth / 2 : index * plotWidth / (count - 1)); };
     var requestY = function (value) { return top + plotHeight - number(value) / requestMax * plotHeight; };
     var tokenY = function (value) { return top + plotHeight - number(value) / tokenMax * plotHeight; };
@@ -167,10 +167,10 @@
       var yy = top + plotHeight - plotHeight * part;
       chart.appendChild(svg('line', { x1: left, x2: left + plotWidth, y1: yy, y2: yy, class: 'rankings-grid-line' }));
       var requestTick = svg('text', { x: left - 5, y: yy + 3, 'text-anchor': 'end', class: 'rankings-axis-text' });
-      requestTick.textContent = compactAxis(requestMax * part);
+      requestTick.textContent = requestAxis(requestMax * part);
       chart.appendChild(requestTick);
       var tokenTick = svg('text', { x: left + plotWidth + 5, y: yy + 3, class: 'rankings-axis-text' });
-      tokenTick.textContent = compactAxis(tokenMax * part);
+      tokenTick.textContent = tokenAxis(tokenMax * part);
       chart.appendChild(tokenTick);
     });
 
@@ -367,8 +367,8 @@
         h('span', { class: 'rankings-rank-name' },
           h('strong', { title: name }, name),
           vendor && vendor !== name ? h('small', null, vendor) : null),
-        h('span', { class: 'rankings-rank-value' }, h('b', null, formatTokens(canonicalTokens(item.total))),
-          h('small', null, percent(ratio))),
+        h('span', { class: 'rankings-rank-value' }, h('b', null, formatTokens(item.total)),
+          h('small', null, percentText(ratio))),
         h('span', { class: 'rankings-rank-bar', 'aria-hidden': 'true' },
           h('i', { style: { width: Math.min(100, ratio).toFixed(2) + '%' } })));
     }));
@@ -402,8 +402,8 @@
     }));
     return h('div', { class: 'rankings-shape' },
       h('div', { class: 'rankings-shape-stream' },
-        h('div', { class: 'rankings-shape-head' }, h('strong', null, '调用形态'), h('span', null, '流式 ' + percent(streamShare))),
-        h('div', { class: 'rankings-stream-bar', role: 'img', 'aria-label': '流式 ' + percent(streamShare) + '，同步 ' + percent(100 - streamShare) },
+        h('div', { class: 'rankings-shape-head' }, h('strong', null, '调用形态'), h('span', null, '流式 ' + percentText(streamShare))),
+        h('div', { class: 'rankings-stream-bar', role: 'img', 'aria-label': '流式 ' + percentText(streamShare) + '，同步 ' + percentText(100 - streamShare) },
           h('i', { class: 'stream', style: { width: Math.max(0, streamShare).toFixed(2) + '%' } }),
           h('i', { class: 'plain', style: { width: Math.max(0, 100 - streamShare).toFixed(2) + '%' } })),
         h('div', { class: 'rankings-shape-values' },
@@ -411,7 +411,7 @@
           h('span', null, h('i', { class: 'plain' }), '同步 ', h('b', null, U.num(plain))))),
       h('div', { class: 'rankings-shape-users' },
         h('div', { class: 'rankings-concentration-wrap' }, ring,
-          h('b', null, percent(concentration, 1))),
+          h('b', null, percentText(concentration))),
         h('div', null, h('strong', null, '用户集中度'),
           h('small', null, '头部 ' + U.num(top) + ' 次 · 共 ' + U.num(userCount) + ' 位调用方'))));
   }
@@ -542,14 +542,14 @@
       if (!data) return;
       clearInitialContent();
       var summary = data.summary || {}, latency = data.latency || {}, stream = data.stream || {};
-      var requests = number(summary.requests), tokens = canonicalTokens(summary.tokens || data.total);
+      var requests = number(summary.requests), tokens = number(summary.tokens || data.total);
       var requestsSeries = data.requests_series || [], labels = data.labels || [];
       var peak = Math.max.apply(null, requestsSeries.length ? requestsSeries.map(number) : [0]);
       var peakIndex = requestsSeries.map(number).indexOf(peak);
       var streamTotal = number(stream.stream) + number(stream.plain);
       sourceWarning.hidden = !sourceTokenMismatch();
       sourceWarning.textContent = sourceWarning.hidden ? '' :
-        '平台原始统计口径异常：汇总与模型明细不一致。当前展示按接口原始计数 ×10 规范化，请结合“平台原始值”核对。';
+        '平台汇总与模型明细暂不一致。总消耗按接口汇总口径展示，模型排行与趋势按接口明细展示。';
       summaryHost.innerHTML = '';
       summaryHost.appendChild(metric('请求数', U.num(requests),
         peak > 0 && labels[peakIndex] ? '峰值 ' + labels[peakIndex] + ' · ' + U.num(peak) + ' 次' : '暂无峰值', 'activity'));
@@ -559,7 +559,7 @@
           U.num(number(summary.tokens || data.total)), 'bolt'));
       summaryHost.appendChild(metric('平均响应', duration(latency.avg),
         latency.p50 != null ? 'P50 ' + duration(latency.p50) + ' · P99 ' + duration(latency.p99) : '—', 'clock'));
-      summaryHost.appendChild(metric('流式占比', streamTotal ? percent(number(stream.stream) / streamTotal * 100) : '—',
+      summaryHost.appendChild(metric('流式占比', streamTotal ? percentText(number(stream.stream) / streamTotal * 100) : '—',
         streamTotal ? U.num(stream.plain) + ' 次同步调用' : '暂无调用', 'branch'));
       paintChart();
       var models = (Array.isArray(data.models) ? data.models : []).slice().sort(function (a, b) { return number(b.total) - number(a.total); });
@@ -577,7 +577,7 @@
             return h('div', { class: 'rankings-share-row' },
               h('i', { style: { background: COLORS[index % COLORS.length] } }),
               h('span', { title: item.name }, item.name || '未命名'),
-              h('b', null, percent(share(item.total, modelTotals))));
+              h('b', null, percentText(share(item.total, modelTotals))));
           }))));
       }
       var vendorList = vendorPanel.querySelector('.rankings-vendor-list');

@@ -28,8 +28,8 @@ function dataFor(period, step) {
     total: 9876543210,
     summary: { requests: 123456, tokens: 9876543210, latency_ms: 12340, success_rate: null, deltas: { requests: 2.5, tokens: 3.1 } },
     series: [
-      { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 700000000, values: labels.map((_, index) => (index + 1) * 100000) },
-      { name: 'beta-model', vendor: 'Beta', total: 287654321, values: labels.map((_, index) => (index + 1) * 50000) }
+      { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 7000000000, values: labels.map((_, index) => (index + 1) * 1000000) },
+      { name: 'beta-model', vendor: 'Beta', total: 2876543210, values: labels.map((_, index) => (index + 1) * 500000) }
     ],
     models: [
       { name: 'alpha-model-with-a-name-that-is-deliberately-long', vendor: 'Alpha', total: 7000000000 },
@@ -47,7 +47,6 @@ function dataFor(period, step) {
 }
 
 let currentVisibleTokenTotal = 0;
-let seriesScale = 1;
 await page.route('**/__proxy/**', async route => {
   const url = new URL(route.request().url());
   const path = url.pathname.replace(/^\/__proxy\/(site|model)/, '');
@@ -68,11 +67,8 @@ await page.route('**/__proxy/**', async route => {
     const weightTotal = count * (count + 1) / 2;
     result.series.forEach((item, modelIndex) => {
       const modelShare = modelIndex === 0 ? .71 : .29;
-      item.values = result.labels.map((_, index) => 9876543210 * modelShare * (index + 1) / weightTotal * seriesScale);
+      item.values = result.labels.map((_, index) => 9876543210 * modelShare * (index + 1) / weightTotal);
     });
-    if (!seriesScale) {
-      result.series.forEach(item => { item.values = []; });
-    }
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
   }
   return route.fulfill(ok({ items: [], total: 0 }));
@@ -97,12 +93,12 @@ try {
   assert.equal(await page.locator('.rankings-metric').count(), 4);
   assert.match(await page.locator('.rankings-summary').innerText(), /123,456/);
   assert.match(await page.locator('.rankings-summary').innerText(), /12\.3 s/);
-  assert.match(await page.locator('.rankings-summary').innerText(), /98\.77B/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /98\.77亿/);
   assert.match(await page.locator('.rankings-summary').innerText(), /平台原始值 9,876,543,210/);
-  assert.match(await page.locator('.rankings-summary').innerText(), /均 800K \/ 次/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /均 80,001 \/ 次/);
   assert.equal(await page.locator('.rankings-rank-row').count(), 4);
   assert.match(await page.locator('.rankings-ranks-panel').innerText(), /模型排行[\s\S]*alpha-model/);
-  assert.match(await page.locator('.rankings-ranks-panel').innerText(), /70\.00B/);
+  assert.match(await page.locator('.rankings-ranks-panel').innerText(), /70\.00亿/);
   assert.match(await page.locator('.rankings-vendor-panel').innerText(), /厂商排行[\s\S]*Alpha/);
   assert.equal(await page.locator('.rankings-donut-segment').count(), 2);
   assert.equal(await page.locator('.rankings-trend-line').count(), 2);
@@ -136,9 +132,10 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Token', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '请求', exact: true }).count(), 0);
 
-  const chart = page.locator('.rankings-trend-svg');
+  const chart = page.locator('.rankings-trend-svg:visible').first();
+  await chart.waitFor();
   await chart.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(150);
   const chartBox = await chart.boundingBox();
   const viewportWidth = await page.evaluate(() => innerWidth);
   const visibleLeft = Math.max(0, chartBox.x), visibleRight = Math.min(viewportWidth, chartBox.x + chartBox.width);
@@ -149,9 +146,9 @@ try {
   assert.match(readout, /\d{2}:\d{2}/);
   assert.match(readout, /次请求/);
   assert.match(readout, /Token/);
-  const tokenReadout = Number((readout.match(/(\d+(?:\.\d+)?)([BMK]?) Token/) || [])[1]) *
-    ({ '': 1, K: 1e3, M: 1e6, B: 1e9 })[(readout.match(/(\d+(?:\.\d+)?)([BMK]?) Token/) || [])[2]];
-  assert.ok(tokenReadout >= 1e8 && tokenReadout <= 2e9, 'chart must show canonical tokens only once: ' + readout);
+  const tokenReadout = Number((readout.match(/(\d+(?:\.\d+)?)([亿万]?) Token/) || [])[1]) *
+    ({ '': 1, 万: 1e4, 亿: 1e8 })[(readout.match(/(\d+(?:\.\d+)?)([亿万]?) Token/) || [])[2]];
+  assert.ok(tokenReadout >= 1e8 && tokenReadout <= 2e10, 'chart must show source tokens only once: ' + readout);
   assert.equal(await page.locator('.rankings-trend-guide').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
   assert.equal(await page.locator('.rankings-trend-active').evaluateAll(nodes => nodes.every(node => getComputedStyle(node).display !== 'none')), true);
   assert.match(await page.locator('.rankings-refresh-value').innerText(), /5 秒/);
@@ -188,17 +185,15 @@ try {
   fail = false;
 
   currentVisibleTokenTotal = 296216240;
-  seriesScale = 1.2;
   await page.locator('.rankings-page').evaluate(node => node.dispatchEvent(new CustomEvent('pp:page-refresh', { bubbles: true })));
   await page.locator('.rankings-source-warning').waitFor();
   await page.locator('.rankings-summary').waitFor();
-  assert.match(await page.locator('.rankings-summary').innerText(), /2\.96B/);
+  assert.match(await page.locator('.rankings-summary').innerText(), /2\.96亿/);
   assert.equal(await page.locator('.rankings-source-warning').isVisible(), true);
-  assert.match(await page.locator('.rankings-source-warning').innerText(), /平台原始统计口径异常/);
-  seriesScale = 1;
+  assert.match(await page.locator('.rankings-source-warning').innerText(), /平台汇总与模型明细暂不一致/);
   currentVisibleTokenTotal = 0;
   await page.locator('.rankings-page').evaluate(node => node.dispatchEvent(new CustomEvent('pp:page-refresh', { bubbles: true })));
-  await page.waitForFunction(() => document.querySelector('.rankings-summary').textContent.includes('98.77B'));
+  await page.waitForFunction(() => document.querySelector('.rankings-summary').textContent.includes('98.77亿'));
   await page.locator('.rankings-source-warning').waitFor({ state: 'hidden' });
 
   for (const width of [320, 390, 768]) {
